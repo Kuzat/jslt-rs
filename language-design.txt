@@ -1,0 +1,331 @@
+REF: Language design taken from JSLT repo: https://github.com/schibsted/jslt/blob/master/language-design.txt
+---------------------------------------------------------------------------
+OPEN QUESTIONS
+
+.key into a literal or array -> what should result be?
+  jq       = error
+  jsonpath = error
+  jsonata  = nothing
+  jstl now = null
+
+---------------------------------------------------------------------------
+LANGUAGE DESIGN
+
+.       -> input
+.foo    -> key in object
+.[2]    -> index in array
+.[1:2]  -> array slicing (just copy from Python)
+
+==, !=, ... -> comparison
+
+and, or, not(...)
+
++ * % / -   -> numeric operators
+  string + string -> concat
+  string * number -> repeat
+
+$foo       -> variable reference
+foo( ... ) -> function call
+
+if (condition) <expr> else <expr>
+let ...
+  ISSUE: must be terminated somehow because with chainable expressions,
+  how do you make clear that in
+    let foo = $foo.bar
+    .baz
+  .baz is the actual expression and not part of the let?
+  (this is an issue inside if and at toplevel, will also be inside functions)
+
+  possible solutions:
+    let var = ( expr )
+    let var = expr;
+    expr as $var <-- how is this now recognizable as let rather than expr?
+
+  could require per let, or just at the end of the let block
+
+for (<expr>) <expr>
+
+[...]      -> array literal
+{...}      -> object literal
+"..."      -> string literal
+34834      -> number literal
+true|false -> boolean literal
+null       -> what it says
+
+*          -> matcher
+
+----- PROBABLY NECESSARY
+
+..foo      -> recursive descent matching all keys named 'foo'
+              result is an array of all matches
+
+leads to need for filtering predicate support
+
+
+also, filtering in for loops will become necessary quite soon
+  FOR (...) ... IF (...) ?
+  FOR (...) ... WHERE ... ?
+  implicit not(is-value()) removal ?
+
+----- ADD LATER, if at foo
+
+.all [ condition ] -> FIXME: multiple results? how to deal with?
+  inside condition we change the context node
+
+  .foo .[*] .bar -> traverse array? how to deal with this?
+
+can we do this by supporting
+  for (<expr>) <expr> if <expr> ?
+
+alternative:
+  .[*] returns entire array
+  .foo on array of objects = for (...) .foo
+
+FOR (...)
+  ...
+  IF (...)  <-- filter the array
+
+----- OPEN QUESTIONS
+
+termination of expression in LET: how?
+  let foo = (...)     <- ugly to require the parens?
+  let foo = ... ;
+  let ... as $foo
+  set ... as $foo
+
+details of matcher semantics
+
+what happens if you declare same variable twice in same block?
+
+how strict should we be on type errors?
+  anything + null -> null
+  "foo" + 5       -> "foo5"
+  "foo" + true    -> "footrue"
+  "foo" + [1,2,3] -> ???
+  5 + [1,2,3]     -> error
+  5 + false       -> error
+  [1,2,3] + {...} -> error
+
+how to support?
+  .object."spt:custom" | with_entries(.key |= "spt:custom_" + .)
+
+  {for (.object."spt:custom")
+    "spt:custom_" + .key : .value
+   if ()}
+
+for loops: when iteration produces null, should it be added to the
+  array?
+
+how do {} and [] convert to strings?
+
+more detail on implicit type conversion rules
+
+allow .foo on array by applying to each element in array?
+  -> raises need for [ ...boolean expr... ]
+  -> if we want this extension . inside [] has to refer to the node
+
+support ..foo operator?
+  -> also raises need for [ filters ]
+
+contains() vs 'in'?
+
+----- FUNCTION LIBRARY
+
+NECESSARY CHANGE:
+  type conversion functions: extra, optional default fallback value
+    if fallback: return that
+    if no fallback: error
+
+  parse-json( ... ): same solution: fallback object to which function adds
+    error information. allows client to recognize failed parses without
+    building error handling into the language
+
+  don't actually need parse-json handling for CSP, since filtering failed
+    events is sufficient
+
+OK  is-array()
+OK  is-object()
+
+OK  string(.)
+OK  is-string()
+
+OK  number(.)
+OK  is-number()
+OK  round()
+OK  floor()
+OK  ceiling()
+OK  random()             <- random number 0.0 - 1.0
+
+OK  boolean(.)
+OK  is-boolean()
+OK  not(.)
+
+OK  test(., regexp)
+OK  capture(., regexp)
+OK  split(., splitter)
+OK  join(., joiner)
+OK  starts-with()
+OK  ends-with()
+OK  lowercase()
+OK  uppercase()
+
+OK  fallback(...)
+OK  size(.)              <- string, object, array
+    parse-json(.)        <- parses json argument
+    to-json(.)           <- serialize to json
+
+=== POTENTIALS
+
+is-value             <- same as boolean except for 0 and 0.0
+filter(seq, func)    <- macro to filter a sequence
+array(.)             <- turn {} into [{"key":, "value":}] ?
+object(.)            <- reverse: turn [{"key":, "value":}] into {...}
+match(., regexp)
+normalize-whitespace
+format("...${ jstl expr }...")
+run-template()
+
+=== AREAS NOT DESIGNED YET
+
+datetime parsing
+
+---------------------------------------------------------------------------
+NAME
+
+jstl         Oracle JavaServer Pages Standard Tag Library
+jslt         XSLT in JSON alternative, now dead
+jsonator     ditto
+j2j          already exists, but marginal
+argonator    kind of weird
+jsonify      not really what it does
+jtransform   an FFT thing, might work
+jquery       taken by the frontend thing
+colchis      cryptic
+boreas       cryptic
+
+-------------------------------------------------------------------------------
+USE CASES
+
+--- #1: TRUE/FALSE if .object.items contains {} with @Type==Jobs
+
+{"object":{"items":[
+  {"@Type" : "George"},
+  {"@Type" : "Jobs"},
+  {"@Type" : "Fnupp"}
+]}}
+
+solutions:
+
+WORKS NOW    contains("Jobs", for (.object.items) ."@Type")
+
+MIGHT DO     contains("Jobs", .object.items."@Type")
+  requires .foo on arrays: apply to each object in array
+
+MIGHT DO     "Jobs" in (for (.object.items) ."@Type")
+  turn 'contains' function into 'in' operator
+
+---------------------------------------------------------------------------
+THE LET ISSUE
+
+===== #1 PARENS
+
+{
+  "actor" : {
+    // first find the user ID value
+    let userid = (if ( test(.actor."@id", "^(sd|u)rn:[^:]+:(user|person):.*") )
+      .actor."@id"
+    else
+      .actor."spt:userId")
+
+    let good_user_id = (
+      if ( test($userid, "^(u|sd)rn:[^:]+:user:null") )
+        null // user modeling complains about these fake IDs
+      else if ( test($userid, "(u|sd)rn:[^:]+:(person|user|account):.*") )
+        // :person: -> :user: (and urn: -> sdrn:)
+        let parts = (capture($userid, "(u|sd)rn:(?<site>[^:]+):(person|user|account):(?<id>.*)"))
+        let site = (if ($parts.site == "spid.se") "schibsted.com" else $parts.site)
+
+        if ( $parts.id )
+            // If we have an id, split the ID by : and pick the last element
+            ("sdrn:" + $site + ":user:" + split($parts.id, ":")[-1])
+    )
+
+    "@id" : $good_user_id,
+    "spt:userId" : $good_user_id,
+    * - "@type", "spt:acceptLanguage", "spt:screenSize", "spt:environmentId",
+        "spt:userAgent", "spt:viewportSize", "spt:userId" : .
+  },
+
+
+===== #2 ;
+
+  "actor" : {
+    // first find the user ID value
+    let userid = if ( test(.actor."@id", "^(sd|u)rn:[^:]+:(user|person):.*") )
+      .actor."@id"
+    else
+      .actor."spt:userId";
+
+    let good_user_id =
+      if ( test($userid, "^(u|sd)rn:[^:]+:user:null") )
+        null // user modeling complains about these fake IDs
+      else if ( test($userid, "(u|sd)rn:[^:]+:(person|user|account):.*") )
+        // :person: -> :user: (and urn: -> sdrn:)
+        let parts = capture($userid, "(u|sd)rn:(?<site>[^:]+):(person|user|account):(?<id>.*)");
+        let site = if ($parts.site == "spid.se") "schibsted.com" else $parts.site;
+
+        if ( $parts.id )
+            // If we have an id, split the ID by : and pick the last element
+            ("sdrn:" + $site + ":user:" + split($parts.id, ":")[-1])
+    ;
+
+    "@id" : $good_user_id,
+    "spt:userId" : $good_user_id,
+    * - "@type", "spt:acceptLanguage", "spt:screenSize", "spt:environmentId",
+        "spt:userAgent", "spt:viewportSize", "spt:userId" : .
+  },
+
+===== #3 LET AS
+
+  "actor" : {
+    // first find the user ID value
+    let if ( test(.actor."@id", "^(sd|u)rn:[^:]+:(user|person):.*") )
+      .actor."@id"
+    else
+      .actor."spt:userId" as $userid
+
+    let
+      if ( test($userid, "^(u|sd)rn:[^:]+:user:null") )
+        null // user modeling complains about these fake IDs
+      else if ( test($userid, "(u|sd)rn:[^:]+:(person|user|account):.*") )
+        // :person: -> :user: (and urn: -> sdrn:)
+        let capture($userid, "(u|sd)rn:(?<site>[^:]+):(person|user|account):(?<id>.*)") as $parts
+        let if ($parts.site == "spid.se") "schibsted.com" else $parts.site as $site
+
+        if ( $parts.id )
+            // If we have an id, split the ID by : and pick the last element
+            ("sdrn:" + $site + ":user:" + split($parts.id, ":")[-1])
+    as $good_user_id
+
+    "@id" : $good_user_id,
+    "spt:userId" : $good_user_id,
+    * - "@type", "spt:acceptLanguage", "spt:screenSize", "spt:environmentId",
+        "spt:userAgent", "spt:viewportSize", "spt:userId" : .
+  },
+
+---------------------------------------------------------------------------
+BUILD ERROR HANDLING INTO LANGUAGE?
+
+try ( <expr> ) else <expr>
+try <expr> else <expr>
+
+try string(.location.accuracy) else null
+try
+  parse-json( .Report )
+else
+  ... how about access to error information here?
+      privileged variable $error?
+      get into exception matching?
+
+only allow function calls inside try/else?
+  how complex can the expression inside try/else be?

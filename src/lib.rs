@@ -1,4 +1,6 @@
-use ast::{Expression, LiteralNode};
+use std::collections::HashMap;
+
+use ast::{Expression, LiteralNode, ObjectNode};
 use interpreter::Interpreter;
 use lexer::Lexer;
 use parser::Parser;
@@ -39,8 +41,16 @@ impl Jslt {
 
     pub fn apply(&mut self, _json_input: &str) -> Result<String, JsltError> {
         // Convert the json_input into a Expression
-        let json_input = Expression::StringLiteral(LiteralNode {
-            value: "test".to_string(),
+        let mut properties = HashMap::new();
+        properties.insert(
+            "name".to_string(),
+            Box::new(Expression::StringLiteral(LiteralNode {
+                value: "John".to_string(),
+            })),
+        );
+
+        let json_input = Expression::Object(ObjectNode {
+            properties: properties,
         });
         // Call the interpreter with the expression and input
         let output = self

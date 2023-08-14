@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{ArrayNode, Expression, IdentifierNode, LiteralNode, ObjectNode},
+    ast::{
+        ArrayNode, Expression, IdentifierNode, LiteralNode, ObjectNode, ObjectPropertyAccessNode,
+    },
     lexer::Token,
 };
 
@@ -22,7 +24,18 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Box<Expression>, ParseError> {
-        self.expression()
+        // Should return the last expression in the program
+        let mut last_expression = self.expression()?;
+
+        while self.current < self.tokens.len() - 1 {
+            self.advance();
+            match &self.tokens[self.current] {
+                Token::EndOfInput => break,
+                _ => last_expression = self.expression()?,
+            }
+        }
+
+        Ok(last_expression)
     }
 
     fn advance(&mut self) {
@@ -33,6 +46,7 @@ impl Parser {
         match &self.tokens[self.current] {
             Token::LeftBrace => self.object(),
             Token::LeftBracket => self.array(),
+            Token::Dot => self.object_property_access(),
             Token::Identifier(value) => self.identifier(value.to_string()),
             Token::StringLiteral(value) => self.string_literal(value.to_string()),
             Token::NumberLiteral(value) => self.number_literal(value.to_owned()),
@@ -118,7 +132,7 @@ impl Parser {
         // Handle the first element.
         // This is a special case because we don't have a comma token to match on first element.
         elements.push(self.expression()?);
-        
+
         loop {
             self.advance();
             match &self.tokens[self.current] {
@@ -159,6 +173,24 @@ impl Parser {
 
     fn null_literal(&self) -> Result<Box<Expression>, ParseError> {
         Ok(Box::new(Expression::NullLiteral))
+    }
+
+    fn object_property_access(&mut self) -> Result<Box<Expression>, ParseError> {
+        // Should be followed by an expression
+        self.advance();
+        let property = match &self.tokens[self.current] {
+            Token::Identifier(value) => value.to_string(),
+            Token::StringLiteral(value) => value.to_string(),
+            _ => {
+                return Err(ParseError::UnexpectedToken(
+                    self.tokens[self.current].clone(),
+                ))
+            }
+        };
+
+        Ok(Box::new(Expression::ObjectPropertyAccess(
+            ObjectPropertyAccessNode { property },
+        )))
     }
 }
 
@@ -312,6 +344,94 @@ mod tests {
                     })),
                     Box::new(Expression::BooleanLiteral(LiteralNode { value: true })),
                 ]
+            })
+        );
+    }
+
+    #[test]
+    fn test_object_property_access() {
+        let mut parser = Parser::new(vec![Token::Dot, Token::Identifier("foo".to_string())]);
+        let result = parser.object_property_access();
+        let expression = result.unwrap();
+        assert_eq!(
+            *expression,
+            Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                property: "foo".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_multiple_object_property_access() {
+        let mut parser = Parser::new(vec![
+            Token::Dot,
+            Token::Identifier("foo".to_string()),
+            Token::Dot,
+            Token::Identifier("bar".to_string()),
+        ]);
+        let result = parser.object_property_access();
+        let expression = result.unwrap();
+        assert_eq!(
+            *expression,
+            Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                property: "foo".to_string()
+            })
+        );
+
+        parser.advance();
+        let result = parser.object_property_access();
+        let expression = result.unwrap();
+        assert_eq!(
+            *expression,
+            Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                property: "bar".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_object_property_access_with_string_literal() {
+        let mut parser = Parser::new(vec![Token::Dot, Token::StringLiteral("foo".to_string())]);
+        let result = parser.object_property_access();
+        let expression = result.unwrap();
+        assert_eq!(
+            *expression,
+            Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                property: "foo".to_string()
+            })
+        );
+    }
+
+    // TODO: Need to revaluate how parse works. It should return a single expression last expression.
+    #[test]
+    fn test_parse_should_return_last_expression() {
+        let mut parser = Parser::new(vec![
+            Token::LeftBracket,
+            Token::NumberLiteral(1),
+            Token::Comma,
+            Token::NumberLiteral(2),
+            Token::Comma,
+            Token::NumberLiteral(3),
+            Token::RightBracket,
+            Token::LeftBrace,
+            Token::StringLiteral("foo".to_string()),
+            Token::Colon,
+            Token::NumberLiteral(1),
+            Token::RightBrace,
+        ]);
+        let result = parser.parse();
+        let expression = result.unwrap();
+        assert_eq!(
+            *expression,
+            Expression::Object(ObjectNode {
+                properties: {
+                    let mut properties: HashMap<String, Box<Expression>> = HashMap::new();
+                    properties.insert(
+                        "foo".to_string(),
+                        Box::new(Expression::NumberLiteral(LiteralNode { value: 1 })),
+                    );
+                    properties
+                }
             })
         );
     }

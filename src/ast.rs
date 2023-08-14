@@ -18,6 +18,7 @@ pub enum Expression {
     Object(ObjectNode),
     Array(ArrayNode),
     Function(FunctionNode),
+    ObjectPropertyAccess(ObjectPropertyAccessNode),
     // Operator(OperatorNode),
 }
 
@@ -36,6 +37,7 @@ impl Serialize for Expression {
                 Expression::Object(node) => node.properties.serialize(serializer),
                 Expression::Array(node) => node.elements.serialize(serializer),
                 Expression::Function(node) => node.arguments.serialize(serializer),
+                Expression::ObjectPropertyAccess(node) => node.property.serialize(serializer),
             }
     }
 }
@@ -64,6 +66,12 @@ pub struct ArrayNode {
 pub struct FunctionNode {
     pub arguments: Vec<Box<Expression>>,
     pub body: Box<Expression>
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ObjectPropertyAccessNode {
+    // pub object: Box<Expression>,
+    pub property: String,
 }
 
 // pub struct OperatorNode {

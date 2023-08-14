@@ -27,6 +27,7 @@ pub enum Token {
     LeftBracket,  // [
     Colon,        // :
     Comma,        // ,
+    Dot,          // .
     EndOfInput,
 }
 
@@ -92,6 +93,10 @@ impl<'a> Lexer<'a> {
                 ',' => {
                     self.input.next();
                     Ok(Token::Comma)
+                }
+                '.' => {
+                    self.input.next();
+                    Ok(Token::Dot)
                 }
                 '"' => {
                     self.input.next();
@@ -236,5 +241,11 @@ mod tests {
         assert_eq!(lexer.next_token().unwrap(), Token::Colon);
         assert_eq!(lexer.next_token().unwrap(), Token::NumberLiteral(1));
         assert_eq!(lexer.next_token().unwrap(), Token::RightBrace);
+    }
+
+    #[test]
+    fn test_next_token_dot() {
+        let mut lexer = Lexer::new(".");
+        assert_eq!(lexer.next_token().unwrap(), Token::Dot);
     }
 }

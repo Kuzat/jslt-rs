@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use crate::ast::ObjectNode;
 use crate::runtime::Runtime;
 use crate::{ast::Expression, lexer::LexerError, parser::ParseError};
 
@@ -40,6 +43,11 @@ impl Interpreter {
         // Sets the json_input as the root variable
         self.runtime.set_variable("root", Box::new(json_input));
 
+        // Evaluate the input
+        self.evaluate(input)
+    }
+
+    fn evaluate(&mut self, input: Expression) -> Result<Expression, InterpreterError> {
         match input {
             Expression::StringLiteral(node) => Ok(Expression::StringLiteral(node)),
             Expression::NumberLiteral(node) => Ok(Expression::NumberLiteral(node)),
@@ -52,10 +60,34 @@ impl Interpreter {
                     None => Err(InterpreterError::UndefinedVariable(node.name)),
                 }
             }
-            Expression::Object(node) => Ok(Expression::Object(node)),
+            Expression::Object(node) => {
+                // interpret all the properties
+                let mut properties = HashMap::new();
+                for (key, value) in node.properties {
+                    let interpreted_value = self.evaluate(*value)?;
+                    properties.insert(key, Box::new(interpreted_value));
+                }
+
+                Ok(Expression::Object(ObjectNode {
+                    properties: properties,
+                }))
+            }
             Expression::Array(node) => Ok(Expression::Array(node)),
-            // Should be evaluated in a new environment with the arguments set as variables
+            // TODO: Should be evaluated in a new environment with the arguments set as variables
             Expression::Function(node) => Ok(Expression::Function(node)),
+            // TODO: Should be evaluated to the value of the property
+            Expression::ObjectPropertyAccess(node) => {
+                // TODO: Should also check if we are accessing a object or the root object
+                // For now we assume we are accessing the root object
+                let object = self.runtime.get_variable("root").unwrap();
+                let property_value = self.runtime.get_object_property(object, &node.property);
+                property_value.map(|value| *value.clone()).ok_or_else(|| {
+                    InterpreterError::RuntimeError(format!(
+                        "Property {} does not exist on object",
+                        node.property
+                    ))
+                })
+            }
         }
     }
 }

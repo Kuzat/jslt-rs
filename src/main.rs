@@ -10,7 +10,8 @@ fn main() {
         "corge": [1, 2, 3],
         "grault": {
             "garply": "waldo"
-        }
+        },
+        "user": .name
     }
     "#;
 

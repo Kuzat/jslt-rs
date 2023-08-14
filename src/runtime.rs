@@ -36,6 +36,19 @@ impl Runtime {
         environment.variables.insert(name.to_string(), value);
     }
 
+    pub fn get_object_property<'a>(&'a self, object: &'a Expression, property: &'a str) -> Option<&Box<Expression>> {
+        match object {
+            Expression::Object(node) => {
+                let value = node.properties.get(property);
+                match value {
+                    Some(value) => return Some(value),
+                    None => return None,
+                }
+            }
+            _ => return None,
+        }
+    }
+
     pub fn push_environment(&mut self) {
         self.environments.push(Variables { variables: HashMap::new() });
     }

@@ -38,10 +38,10 @@ impl Interpreter {
     pub fn interpret(
         &mut self,
         input: Expression,
-        json_input: Expression,
+        json_input: Box<Expression>,
     ) -> Result<Expression, InterpreterError> {
         // Sets the json_input as the root variable
-        self.runtime.set_variable("root", Box::new(json_input));
+        self.runtime.set_variable("root", json_input);
 
         // Evaluate the input
         self.evaluate(input)
@@ -52,6 +52,10 @@ impl Interpreter {
             Expression::StringLiteral(node) => Ok(Expression::StringLiteral(node)),
             Expression::NumberLiteral(node) => Ok(Expression::NumberLiteral(node)),
             Expression::BooleanLiteral(node) => Ok(Expression::BooleanLiteral(node)),
+            Expression::RootObject => {
+                let root = self.runtime.get_variable("root").unwrap();
+                Ok(*root.clone())
+            }
             Expression::NullLiteral => Ok(Expression::NullLiteral),
             Expression::Identifier(node) => {
                 let value = self.runtime.get_variable(&node.name);
@@ -76,15 +80,12 @@ impl Interpreter {
             // TODO: Should be evaluated in a new environment with the arguments set as variables
             Expression::Function(node) => Ok(Expression::Function(node)),
             // TODO: Should be evaluated to the value of the property
-            Expression::ObjectPropertyAccess(node) => {
-                // TODO: Should also check if we are accessing a object or the root object
-                // For now we assume we are accessing the root object
-                let object = self.runtime.get_variable("root").unwrap();
-                let property_value = self.runtime.get_object_property(object, &node.property);
+            Expression::ObjectPropertyAccess(node) => {                
+                let property_value = self.runtime.get_object_property(&node.object, &node.property);
                 property_value.map(|value| *value.clone()).ok_or_else(|| {
                     InterpreterError::RuntimeError(format!(
-                        "Property {} does not exist on object",
-                        node.property
+                        "Property {} does not exist on object {:?}",
+                        node.property, node.object
                     ))
                 })
             }

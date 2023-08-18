@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use crate::ast::Expression;
 
-
-
 pub struct Variables {
     pub variables: HashMap<String, Box<Expression>>,
 }
@@ -15,7 +13,9 @@ pub struct Runtime {
 impl Runtime {
     pub fn new() -> Runtime {
         Runtime {
-            environments: vec![Variables { variables: HashMap::new() }],
+            environments: vec![Variables {
+                variables: HashMap::new(),
+            }],
         }
     }
 
@@ -36,21 +36,32 @@ impl Runtime {
         environment.variables.insert(name.to_string(), value);
     }
 
-    pub fn get_object_property<'a>(&'a self, object: &'a Expression, property: &'a str) -> Option<&Box<Expression>> {
+    pub fn get_object_property<'a>(
+        &'a self,
+        object: &'a Expression,
+        property: &'a str,
+    ) -> Option<&Box<Expression>> {
         match object {
-            Expression::Object(node) => {
-                let value = node.properties.get(property);
-                match value {
-                    Some(value) => return Some(value),
-                    None => return None,
+            Expression::Object(node) => node.properties.get(property),
+            Expression::ObjectPropertyAccess(node) => {
+                let object = self.get_object_property(&node.object, &node.property);
+                match object {
+                    Some(object) => self.get_object_property(object, property),
+                    None => None,
                 }
+            }
+            Expression::RootObject => {
+                let root = self.get_variable("root").unwrap();
+                self.get_object_property(root, property)
             }
             _ => return None,
         }
     }
 
     pub fn push_environment(&mut self) {
-        self.environments.push(Variables { variables: HashMap::new() });
+        self.environments.push(Variables {
+            variables: HashMap::new(),
+        });
     }
 
     pub fn pop_environment(&mut self) {

@@ -13,6 +13,7 @@ pub enum Expression {
     StringLiteral(LiteralNode<String>),
     NumberLiteral(LiteralNode<i64>),
     BooleanLiteral(LiteralNode<bool>),
+    RootObject,
     NullLiteral,
     Identifier(IdentifierNode),
     Object(ObjectNode),
@@ -32,6 +33,7 @@ impl Serialize for Expression {
                 Expression::StringLiteral(node) => node.value.serialize(serializer),
                 Expression::NumberLiteral(node) => node.value.serialize(serializer),
                 Expression::BooleanLiteral(node) => node.value.serialize(serializer),
+                Expression::RootObject => serializer.serialize_str("root"),
                 Expression::NullLiteral => serializer.serialize_none(),
                 Expression::Identifier(node) => node.name.serialize(serializer),
                 Expression::Object(node) => node.properties.serialize(serializer),
@@ -70,7 +72,7 @@ pub struct FunctionNode {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ObjectPropertyAccessNode {
-    // pub object: Box<Expression>,
+    pub object: Box<Expression>,
     pub property: String,
 }
 

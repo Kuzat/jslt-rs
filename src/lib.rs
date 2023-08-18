@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use ast::{Expression, LiteralNode, ObjectNode};
+use ast::Expression;
 use interpreter::Interpreter;
 use lexer::Lexer;
 use parser::Parser;
@@ -42,11 +40,11 @@ impl Jslt {
     pub fn apply(&mut self, json_input: &str) -> Result<String, JsltError> {
         // Convert the json_input into a Expression
         let json_input = Parser::single_expression(json_input.to_string()).unwrap();
-        
+
         // Call the interpreter with the expression and input
         let output = self
             .interpreter
-            .interpret(*self.program.to_owned(), *json_input)
+            .interpret(*self.program.to_owned(), json_input)
             .unwrap();
 
         // Convert the output into a json string

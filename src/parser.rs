@@ -4,7 +4,7 @@ use crate::{
     ast::{
         ArrayNode, Expression, IdentifierNode, LiteralNode, ObjectNode, ObjectPropertyAccessNode,
     },
-    lexer::{Token, Lexer},
+    lexer::{Lexer, Token},
 };
 
 #[derive(Debug, PartialEq)]
@@ -50,11 +50,18 @@ impl Parser {
         self.current += 1;
     }
 
+    fn peek(&self, n: usize) -> &Token {
+        if self.current + n >= self.tokens.len() {
+            return &Token::EndOfInput;
+        }
+        &self.tokens[self.current + n]
+    }
+
     fn expression(&mut self) -> Result<Box<Expression>, ParseError> {
         match &self.tokens[self.current] {
             Token::LeftBrace => self.object(),
             Token::LeftBracket => self.array(),
-            Token::Dot => self.object_property_access(),
+            Token::Dot => self.object_property_access(Box::new(Expression::RootObject)),
             Token::Identifier(value) => self.identifier(value.to_string()),
             Token::StringLiteral(value) => self.string_literal(value.to_string()),
             Token::NumberLiteral(value) => self.number_literal(value.to_owned()),
@@ -161,7 +168,14 @@ impl Parser {
         Ok(Box::new(Expression::Array(ArrayNode { elements })))
     }
 
-    fn identifier(&self, value: String) -> Result<Box<Expression>, ParseError> {
+    fn identifier(&mut self, value: String) -> Result<Box<Expression>, ParseError> {
+        // if followed by a dot then it is an object property access
+        if self.peek(1) == &Token::Dot {
+            return self.object_property_access(Box::new(Expression::Identifier(IdentifierNode {
+                name: value,
+            })));
+        }
+
         Ok(Box::new(Expression::Identifier(IdentifierNode {
             name: value,
         })))
@@ -183,8 +197,10 @@ impl Parser {
         Ok(Box::new(Expression::NullLiteral))
     }
 
-    fn object_property_access(&mut self) -> Result<Box<Expression>, ParseError> {
-        // Should be followed by an expression
+    fn object_property_access(
+        &mut self,
+        object: Box<Expression>,
+    ) -> Result<Box<Expression>, ParseError> {
         self.advance();
         let property = match &self.tokens[self.current] {
             Token::Identifier(value) => value.to_string(),
@@ -196,9 +212,19 @@ impl Parser {
             }
         };
 
-        Ok(Box::new(Expression::ObjectPropertyAccess(
-            ObjectPropertyAccessNode { property },
-        )))
+        let property_access =
+            Box::new(Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                object,
+                property,
+            }));
+
+        // check if there are further property accesses
+        if self.peek(1) == &Token::Dot {
+            self.advance();
+            self.object_property_access(property_access)
+        } else {
+            Ok(property_access)
+        }
     }
 }
 
@@ -262,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_identifier() {
-        let parser = empty_parser();
+        let mut parser = empty_parser();
         let result = parser.identifier("foo".to_string());
         assert!(result.is_ok());
         let expression = result.unwrap();
@@ -359,11 +385,12 @@ mod tests {
     #[test]
     fn test_object_property_access() {
         let mut parser = Parser::new(vec![Token::Dot, Token::Identifier("foo".to_string())]);
-        let result = parser.object_property_access();
+        let result = parser.object_property_access(Box::new(Expression::RootObject));
         let expression = result.unwrap();
         assert_eq!(
             *expression,
             Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                object: Box::new(Expression::RootObject),
                 property: "foo".to_string()
             })
         );
@@ -377,21 +404,15 @@ mod tests {
             Token::Dot,
             Token::Identifier("bar".to_string()),
         ]);
-        let result = parser.object_property_access();
+        let result = parser.object_property_access(Box::new(Expression::RootObject));
         let expression = result.unwrap();
         assert_eq!(
             *expression,
             Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
-                property: "foo".to_string()
-            })
-        );
-
-        parser.advance();
-        let result = parser.object_property_access();
-        let expression = result.unwrap();
-        assert_eq!(
-            *expression,
-            Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                object: Box::new(Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                    object: Box::new(Expression::RootObject),
+                    property: "foo".to_string()
+                })),
                 property: "bar".to_string()
             })
         );
@@ -400,11 +421,12 @@ mod tests {
     #[test]
     fn test_object_property_access_with_string_literal() {
         let mut parser = Parser::new(vec![Token::Dot, Token::StringLiteral("foo".to_string())]);
-        let result = parser.object_property_access();
+        let result = parser.object_property_access(Box::new(Expression::RootObject));
         let expression = result.unwrap();
         assert_eq!(
             *expression,
             Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
+                object: Box::new(Expression::RootObject),
                 property: "foo".to_string()
             })
         );

@@ -11,7 +11,7 @@ fn main() {
         "grault": {
             "garply": "waldo"
         },
-        "user": .name
+        "user": .user
     }
     "#;
 

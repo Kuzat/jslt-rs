@@ -4,7 +4,7 @@ use crate::{
     ast::{
         ArrayNode, Expression, IdentifierNode, LiteralNode, ObjectNode, ObjectPropertyAccessNode,
     },
-    lexer::Token,
+    lexer::{Token, Lexer},
 };
 
 #[derive(Debug, PartialEq)]
@@ -21,6 +21,14 @@ pub struct Parser {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Parser {
         Parser { tokens, current: 0 }
+    }
+
+    pub fn single_expression(source: String) -> Result<Box<Expression>, ParseError> {
+        let mut lexer = Lexer::new(&source);
+        let tokens = lexer.lex().map_err(|_| ParseError::UnexpectedEndOfInput)?;
+        let mut parser = Parser::new(tokens);
+
+        parser.expression()
     }
 
     pub fn parse(&mut self) -> Result<Box<Expression>, ParseError> {

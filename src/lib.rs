@@ -39,23 +39,14 @@ impl Jslt {
         }
     }
 
-    pub fn apply(&mut self, _json_input: &str) -> Result<String, JsltError> {
+    pub fn apply(&mut self, json_input: &str) -> Result<String, JsltError> {
         // Convert the json_input into a Expression
-        let mut properties = HashMap::new();
-        properties.insert(
-            "name".to_string(),
-            Box::new(Expression::StringLiteral(LiteralNode {
-                value: "John".to_string(),
-            })),
-        );
-
-        let json_input = Expression::Object(ObjectNode {
-            properties: properties,
-        });
+        let json_input = Parser::single_expression(json_input.to_string()).unwrap();
+        
         // Call the interpreter with the expression and input
         let output = self
             .interpreter
-            .interpret(*self.program.to_owned(), json_input)
+            .interpret(*self.program.to_owned(), *json_input)
             .unwrap();
 
         // Convert the output into a json string

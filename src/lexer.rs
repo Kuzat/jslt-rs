@@ -28,6 +28,9 @@ pub enum Token {
     Colon,        // :
     Comma,        // ,
     Dot,          // .
+    Equal,        // =
+    Let,          // let
+    Dollar,       // $
     EndOfInput,
 }
 
@@ -55,7 +58,10 @@ impl<'a> Lexer<'a> {
             match self.next_token() {
                 Ok(Token::EndOfInput) => break,
                 Ok(token) => tokens.push(token),
-                Err(error) => return Err(error),
+                Err(error) => {
+                    dbg!(tokens);
+                    return Err(error)
+                },
             }
         }
 
@@ -85,6 +91,14 @@ impl<'a> Lexer<'a> {
                 ']' => {
                     self.input.next();
                     Ok(Token::RightBracket)
+                }
+                '=' => {
+                    self.input.next();
+                    Ok(Token::Equal)
+                }
+                '$' => {
+                    self.input.next();
+                    Ok(Token::Dollar)
                 }
                 ':' => {
                     self.input.next();
@@ -126,6 +140,7 @@ impl<'a> Lexer<'a> {
             "true" => Ok(Token::BooleanLiteral(true)),
             "false" => Ok(Token::BooleanLiteral(false)),
             "null" => Ok(Token::NullLiteral),
+            "let" => Ok(Token::Let),
             _ => Ok(Token::Identifier(identifier)),
         }
     }

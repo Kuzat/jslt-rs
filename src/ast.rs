@@ -20,7 +20,14 @@ pub enum Expression {
     Array(ArrayNode),
     Function(FunctionNode),
     ObjectPropertyAccess(ObjectPropertyAccessNode),
+    VariableAccess(IdentifierNode),
     // Operator(OperatorNode),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Statement {
+    Expression(Expression),
+    VariableAssignment(IdentifierNode, Box<Expression>),
 }
 
 impl Serialize for Expression {
@@ -28,7 +35,7 @@ impl Serialize for Expression {
     where
         S: Serializer,
     {
-            
+            dbg!("Serializing expression: {:?}", self);
             match self {
                 Expression::StringLiteral(node) => node.value.serialize(serializer),
                 Expression::NumberLiteral(node) => node.value.serialize(serializer),

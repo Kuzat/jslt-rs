@@ -47,6 +47,12 @@ impl Jslt {
             .interpret(*self.program.to_owned(), json_input)
             .unwrap();
 
+        // Convert the Expression to a object
+        let output = match output {
+            Expression::Object(node) => node,
+            _ => panic!("Output is not an object"),
+        };
+
         // Convert the output into a json string
         serde_json::to_string(&output).map_err(|e| {
             JsltError::InterpreterError(interpreter::InterpreterError::RuntimeError(e.to_string()))

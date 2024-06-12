@@ -2,19 +2,12 @@ use jslt_rs::Jslt;
 
 fn main() {
     let test_jslt = r#"
+    let hello = "world"
+
     {
-        "foo": "bar",
-        "baz": 1,
-        "qux": true,
-        "quux": null,
-        "corge": [1, 2, 3],
-        "grault": {
-            "garply": "waldo"
-        },
-        "name": .user.name,
-        "age": .age,
-        "newPhonePrice": .device.new.price,
-        "oldPhonePrice": .device.old.price
+        "rooot": .,
+        "user": .user,
+        "hello": $hello
     }
     "#;
 

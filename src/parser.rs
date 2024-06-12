@@ -61,6 +61,8 @@ impl Parser {
         match &self.tokens[self.current] {
             Token::LeftBrace => self.object(),
             Token::LeftBracket => self.array(),
+            Token::Dollar => self.variable_access(),
+            Token::Let => self.variable_assignment(),
             Token::Dot => self.object_property_access(Box::new(Expression::RootObject)),
             Token::Identifier(value) => self.identifier(value.to_string()),
             Token::StringLiteral(value) => self.string_literal(value.to_string()),
@@ -79,7 +81,7 @@ impl Parser {
             _ => {
                 return Err(ParseError::UnexpectedToken(
                     self.tokens[self.current].clone(),
-                ))
+                ));
             }
         };
 
@@ -125,7 +127,7 @@ impl Parser {
                 _ => {
                     return Err(ParseError::UnexpectedToken(
                         self.tokens[self.current].clone(),
-                    ))
+                    ));
                 }
             }
         }
@@ -160,7 +162,7 @@ impl Parser {
                 _ => {
                     return Err(ParseError::UnexpectedToken(
                         self.tokens[self.current].clone(),
-                    ))
+                    ));
                 }
             }
         }
@@ -201,16 +203,18 @@ impl Parser {
         &mut self,
         object: Box<Expression>,
     ) -> Result<Box<Expression>, ParseError> {
-        self.advance();
-        let property = match &self.tokens[self.current] {
+        let property = match self.peek(1) {
             Token::Identifier(value) => value.to_string(),
             Token::StringLiteral(value) => value.to_string(),
+            // If it just a single dot then it is the root object, so if the next token is a comma or closing brace then it is the end of the object
+            Token::RightBrace | Token::Comma => return Ok(object),
             _ => {
                 return Err(ParseError::UnexpectedToken(
                     self.tokens[self.current].clone(),
-                ))
+                ));
             }
         };
+        self.advance();
 
         let property_access =
             Box::new(Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
@@ -225,6 +229,38 @@ impl Parser {
         } else {
             Ok(property_access)
         }
+    }
+    fn variable_access(&self) -> Result<Box<Expression>, ParseError> {
+        todo!()
+    }
+    fn variable_assignment(&mut self) -> Result<Box<Expression>, ParseError> {
+        // Let <identifier> = <expression>
+        self.advance();
+        let identifier = match &self.tokens[self.current] {
+            Token::Identifier(value) => value.to_string(),
+            _ => {
+                return Err(ParseError::UnexpectedToken(
+                    self.tokens[self.current].clone(),
+                ));
+            }
+        };
+
+        self.advance();
+        match &self.tokens[self.current] {
+            Token::Equal => self.advance(),
+            _ => {
+                return Err(ParseError::UnexpectedToken(
+                    self.tokens[self.current].clone(),
+                ));
+            }
+        }
+
+        let expression = self.expression()?;
+
+        Ok(Box::new(Expression::VariableAssignment(
+            IdentifierNode { name: identifier },
+            expression,
+        )))
     }
 }
 
@@ -391,7 +427,7 @@ mod tests {
             *expression,
             Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
                 object: Box::new(Expression::RootObject),
-                property: "foo".to_string()
+                property: "foo".to_string(),
             })
         );
     }
@@ -411,9 +447,9 @@ mod tests {
             Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
                 object: Box::new(Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
                     object: Box::new(Expression::RootObject),
-                    property: "foo".to_string()
+                    property: "foo".to_string(),
                 })),
-                property: "bar".to_string()
+                property: "bar".to_string(),
             })
         );
     }
@@ -427,7 +463,7 @@ mod tests {
             *expression,
             Expression::ObjectPropertyAccess(ObjectPropertyAccessNode {
                 object: Box::new(Expression::RootObject),
-                property: "foo".to_string()
+                property: "foo".to_string(),
             })
         );
     }

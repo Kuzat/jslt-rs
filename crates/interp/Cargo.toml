@@ -1,0 +1,12 @@
+[package]
+name = "interp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = { workspace = true }
+ast = { path = "../ast" }
+value = { path = "../value" }
+
+[lints]
+workspace = true

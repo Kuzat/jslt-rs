@@ -1,0 +1,12 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "jslt"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+engine = { path = "../engine" }

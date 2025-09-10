@@ -1,0 +1,18 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+regex = ["dep:regex"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true, optional = true }
+ast = { path = "../ast" }
+parser = { path = "../parser" }
+value = { path = "../value" }
+interp = { path = "../interp" }

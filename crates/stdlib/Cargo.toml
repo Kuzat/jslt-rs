@@ -1,0 +1,16 @@
+[package]
+name = "stdlib"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+regex = ["dep:regex"]
+
+[dependencies]
+thiserror = { workspace = true }
+regex = { workspace = true, optional = true }
+value = { path = "../value" }
+
+[lints]
+workspace = true

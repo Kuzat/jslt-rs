@@ -1,0 +1,3 @@
+# Clippy configuration
+# Note: pedantic is off by default as mentioned in TODO.md
+# deny unwrap in lib code is handled by workspace lints

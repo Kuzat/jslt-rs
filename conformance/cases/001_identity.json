@@ -1,0 +1,15 @@
+{
+  "name": "identity_transform",
+  "description": "Identity transformation should return the input unchanged",
+  "program": ".",
+  "input": {
+    "name": "John",
+    "age": 30,
+    "city": "Oslo"
+  },
+  "expected": {
+    "name": "John",
+    "age": 30,
+    "city": "Oslo"
+  }
+}

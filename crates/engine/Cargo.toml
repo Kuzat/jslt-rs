@@ -16,3 +16,6 @@ ast = { path = "../ast" }
 parser = { path = "../parser" }
 value = { path = "../value" }
 interp = { path = "../interp" }
+
+[dev-dependencies]
+tempfile = "3.8"

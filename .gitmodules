@@ -1,0 +1,3 @@
+[submodule "conformance/java-jslt"]
+	path = conformance/java-jslt
+	url = https://github.com/schibsted/jslt.git

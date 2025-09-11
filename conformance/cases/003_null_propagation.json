@@ -1,0 +1,10 @@
+{
+  "name": "null_propagation",
+  "description": "Null propagation for missing member access",
+  "program": ".missing",
+  "input": {
+    "name": "John",
+    "age": 30
+  },
+  "expected": null
+}

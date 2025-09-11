@@ -1,0 +1,10 @@
+{
+  "name": "string_function",
+  "description": "Convert value to string using string() function",
+  "program": "string(.age)",
+  "input": {
+    "name": "John",
+    "age": 30
+  },
+  "expected": "30"
+}

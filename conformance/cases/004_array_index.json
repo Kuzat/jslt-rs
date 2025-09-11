@@ -1,0 +1,11 @@
+{
+  "name": "array_indexing",
+  "description": "Array indexing with positive index",
+  "program": ".[1]",
+  "input": [
+    "first",
+    "second",
+    "third"
+  ],
+  "expected": "second"
+}

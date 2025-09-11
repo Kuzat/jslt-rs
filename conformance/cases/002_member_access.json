@@ -1,0 +1,11 @@
+{
+  "name": "basic_member_access",
+  "description": "Basic member access with dot notation",
+  "program": ".name",
+  "input": {
+    "name": "John",
+    "age": 30,
+    "city": "Oslo"
+  },
+  "expected": "John"
+}

@@ -16,9 +16,17 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
+    
+    - name: Set up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
     
     - name: Cache Cargo registry
       uses: actions/cache@v3
@@ -29,6 +37,37 @@ jobs:
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
+    - name: Cache Java JSLT build
+      uses: actions/cache@v3
+      with:
+        path: conformance/java-jslt/core/build
+        key: ${{ runner.os }}-java-jslt-${{ hashFiles('conformance/java-jslt/**/*.gradle*', 'conformance/java-jslt/**/gradle-wrapper.properties') }}
+    
+    - name: Install jq (for test fixture validation)
+      run: |
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          sudo apt-get update && sudo apt-get install -y jq
+        elif [ "$RUNNER_OS" == "macOS" ]; then
+          brew install jq
+        elif [ "$RUNNER_OS" == "Windows" ]; then
+          choco install jq
+        fi
+      shell: bash
+    
+    - name: Build Java JSLT
+      run: |
+        cd conformance/java-jslt
+        ./gradlew :core:shadowJar --no-daemon
+      shell: bash
+    
+    - name: Validate test fixtures
+      run: ./conformance/scripts/validate_fixtures.sh
+      shell: bash
+    
+    - name: Test Java JSLT setup
+      run: ./conformance/scripts/test_java_jslt.sh
+      shell: bash
+    
     - name: Check formatting
       run: cargo fmt --all -- --check
     
@@ -37,3 +76,7 @@ jobs:
     
     - name: Run tests
       run: cargo test --workspace
+    
+    - name: Run differential tests (when Rust implementation is ready)
+      run: cargo test -p engine --test conformance_tests -- --ignored
+      continue-on-error: true  # Allow this to fail until Rust implementation is complete

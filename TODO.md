@@ -96,13 +96,12 @@ unsafe_code = "forbid"
 
 ## 1) Tokens & Lexer (no deps)
 
-* [ ] Define token enum (keywords, identifiers, numbers, strings, punctuators).
-* [ ] Implement scanner with:
+* [x] Define token enum (keywords, identifiers, numbers, strings, punctuators).
+* [x] Implement scanner with:
 
-  * `.` vs `.5` disambiguation
   * JSON escapes `\n`, `\uXXXX` (reject invalid)
   * comments `// ...`
-* [ ] Emit spans for every token.
+* [x] Emit spans for every token.
 
   * **Accept:** golden tests in `crates/lexer/tests/` for tricky lexemes (`.`, `.5`, quoted member keys).
 

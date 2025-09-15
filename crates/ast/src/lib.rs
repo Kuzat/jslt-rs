@@ -314,7 +314,7 @@ impl<'a, 'b> Pretty<'a, 'b> {
             Number { lexeme, .. } => write!(self.f, "{}", lexeme),
             String { value, .. } => self.string(value),
             This(_s) => write!(self.f, "."),
-            Variable { name } => write!(self.f, "${}", name),
+            Variable { name } => write!(self.f, "${}", name.name),
 
             Group { expr, .. } => {
                 write!(self.f, "(")?;
@@ -525,6 +525,184 @@ impl<'a, 'b> Pretty<'a, 'b> {
 mod tests {
     use super::*;
 
+    fn sp() -> Span {
+        Span { start: 0, end: 0, line: 1, column: 1 }
+    }
+
+    fn id(name: &str) -> Ident {
+        Ident { name: name.to_string(), span: sp() }
+    }
+
+    fn num(n: &str) -> Expr {
+        Expr::Number { lexeme: n.to_string(), span: sp() }
+    }
+
+    fn str_(s: &str) -> Expr {
+        Expr::String { value: s.to_string(), span: sp() }
+    }
+
+    fn bool_(b: bool) -> Expr {
+        Expr::Bool { value: b, span: sp() }
+    }
+
+    fn var(name: &str) -> Expr {
+        Expr::Variable { name: id(name) }
+    }
+
+    fn this() -> Expr {
+        Expr::This(sp())
+    }
+
+    fn unary_not(e: Expr) -> Expr {
+        Expr::Unary { op: UnaryOp::Not, expr: Box::new(e), span: sp() }
+    }
+
+    fn unary_neg(e: Expr) -> Expr {
+        Expr::Unary { op: UnaryOp::Neg, expr: Box::new(e), span: sp() }
+    }
+
+    fn bin(op: BinaryOp, l: Expr, r: Expr) -> Expr {
+        Expr::Binary { op, left: Box::new(l), right: Box::new(r), span: sp() }
+    }
+
+    fn member_ident(target: Expr, key: &str) -> Expr {
+        Expr::Member { target: Box::new(target), key: MemberKey::Ident(id(key)), span: sp() }
+    }
+
+    fn member_str(target: Expr, key: &str) -> Expr {
+        Expr::Member { target: Box::new(target), key: MemberKey::Str { value: key.to_string(), span: sp() }, span: sp() }
+    }
+
+    fn index(target: Expr, i: Expr) -> Expr {
+        Expr::Index { target: Box::new(target), index: Box::new(i), span: sp() }
+    }
+
+    fn slice(target: Expr, start: Option<Expr>, end: Option<Expr>) -> Expr {
+        Expr::Slice { target: Box::new(target), start: start.map(Box::new), end: end.map(Box::new), span: sp() }
+    }
+
+    fn call(callee: Expr, args: Vec<Expr>) -> Expr {
+        Expr::Call { callee: Box::new(callee), args, span: sp() }
+    }
+
+    fn group(e: Expr) -> Expr {
+        Expr::Group { expr: Box::new(e), span: sp() }
+    }
+
     #[test]
-    fn it_works() {}
+    fn print_literals_and_variables() {
+        assert_eq!(format!("{}", Expr::Null(sp())), "null");
+        assert_eq!(format!("{}", bool_(true)), "true");
+        assert_eq!(format!("{}", bool_(false)), "false");
+        assert_eq!(format!("{}", num("0")), "0");
+        assert_eq!(format!("{}", num("123.45")), "123.45");
+        assert_eq!(format!("{}", str_("a\\b\"c\n")), "\"a\\\\b\\\"c\\n\"");
+        assert_eq!(format!("{}", this()), ".");
+        assert_eq!(format!("{}", var("foo")), "$foo");
+    }
+
+    #[test]
+    fn parentheses_and_precedence() {
+        // 1 + 2 * 3 -> 1 + 2 * 3
+        let e = bin(BinaryOp::Add, num("1"), bin(BinaryOp::Mul, num("2"), num("3")));
+        assert_eq!(format!("{}", e), "1 + 2 * 3");
+
+        // (1 + 2) * 3
+        let e = bin(BinaryOp::Mul, group(bin(BinaryOp::Add, num("1"), num("2"))), num("3"));
+        assert_eq!(format!("{}", e), "(1 + 2) * 3");
+
+        // -(1 + 2)
+        let e = unary_neg(group(bin(BinaryOp::Add, num("1"), num("2"))));
+        assert_eq!(format!("{}", e), "-(1 + 2)");
+
+        // not a and (b or c)
+        let e = bin(
+            BinaryOp::And,
+            unary_not(var("a")),
+            bin(BinaryOp::Or, var("b"), var("c")),
+        );
+        assert_eq!(format!("{}", e), "not $a and ($b or $c)");
+
+        // Comparison precedence wrt add
+        let e = bin(BinaryOp::Lt, bin(BinaryOp::Add, num("1"), num("2")), num("3"));
+        assert_eq!(format!("{}", e), "1 + 2 < 3");
+
+        // If expression associates low and gets parens when nested
+        let e = Expr::If {
+            cond: Box::new(bool_(true)),
+            then_br: Box::new(num("1")),
+            else_br: Box::new(num("2")),
+            span: sp(),
+        };
+        let wrapped = bin(BinaryOp::Add, e.clone(), num("1"));
+        assert_eq!(format!("{}", wrapped), "(if (true) 1 else 2) + 1");
+    }
+
+    #[test]
+    fn members_calls_indexing_and_slicing() {
+        // Member by ident and quoted string
+        assert_eq!(format!("{}", member_ident(var("a"), "b")), "$a.b");
+        assert_eq!(format!("{}", member_str(var("a"), "x y")), "$a.\"x y\"");
+        assert_eq!(format!("{}", member_str(var("a"), "quote:\"")), "$a.\"quote:\\\"\"");
+
+        // Calls
+        let call_expr = call(member_ident(var("f"), "g"), vec![num("1"), str_("s"), var("x")]);
+        assert_eq!(format!("{}", call_expr), "$f.g(1, \"s\", $x)");
+
+        // Indexing
+        assert_eq!(format!("{}", index(var("a"), num("0"))), "$a[0]");
+
+        // Slicing variants
+        assert_eq!(format!("{}", slice(var("a"), Some(num("1")), Some(num("2")))), "$a[1:2]");
+        assert_eq!(format!("{}", slice(var("a"), None, Some(num("2")))), "$a[:2]");
+        assert_eq!(format!("{}", slice(var("a"), Some(num("1")), None)), "$a[1:]");
+        assert_eq!(format!("{}", slice(var("a"), None, None)), "$a[:]");
+    }
+
+    #[test]
+    fn arrays_and_objects_with_quoted_keys_and_spread() {
+        // Array literal
+        let arr = Expr::ArrayLiteral { elements: vec![num("1"), str_("two"), bool_(false)], span: sp() };
+        assert_eq!(format!("{}", arr), "[1, \"two\", false]");
+
+        // Object literal with ident key, quoted key, and spread
+        let obj = Expr::ObjectLiteral {
+            entries: vec![
+                ObjectEntry::Pair { key: ObjectKey::Ident(id("a")), value: num("1"), span: sp() },
+                ObjectEntry::Pair { key: ObjectKey::Str { value: "x y".to_string(), span: sp() }, value: str_("v"), span: sp() },
+                ObjectEntry::Spread { value: member_ident(var("$"), "rest"), span: sp() },
+            ],
+            span: sp(),
+        };
+        assert_eq!(format!("{}", obj), "{a: 1, \"x y\": \"v\", *: $$.rest}");
+    }
+
+    #[test]
+    fn for_comprehensions_arrays_and_objects() {
+        // [for (seq) body]
+        let arr_for_simple = Expr::ArrayFor { seq: Box::new(var("seq")), body: Box::new(var("x")), filter: None, span: sp() };
+        assert_eq!(format!("{}", arr_for_simple), "[for ($seq) $x]");
+
+        // [for (seq) body if cond]
+        let arr_for_filter = Expr::ArrayFor { seq: Box::new(var("seq")), body: Box::new(num("1")), filter: Some(Box::new(bool_(true))), span: sp() };
+        assert_eq!(format!("{}", arr_for_filter), "[for ($seq) 1 if true]");
+
+        // {for (seq) key: value}
+        let obj_for_simple = Expr::ObjectFor { seq: Box::new(var("seq")), key: Box::new(str_("k")), value: Box::new(var("v")), filter: None, span: sp() };
+        assert_eq!(format!("{}", obj_for_simple), "{for ($seq) \"k\": $v}");
+
+        // {for (seq) key: value if cond}
+        let obj_for_filter = Expr::ObjectFor { seq: Box::new(var("seq")), key: Box::new(member_ident(var("a"), "b")), value: Box::new(num("2")), filter: Some(Box::new(bin(BinaryOp::Eq, var("x"), num("3")))), span: sp() };
+        assert_eq!(format!("{}", obj_for_filter), "{for ($seq) $a.b: 2 if $x == 3}" );
+    }
+
+    #[test]
+    fn program_with_defs_lets_and_body() {
+        let def = Def { name: id("f"), params: vec![id("x"), id("y")], body: bin(BinaryOp::Add, var("x"), var("y")), span: sp() };
+        let let_stmt = Let { bindings: vec![Binding { name: id("a"), value: num("1"), span: sp() }, Binding { name: id("b"), value: str_("s"), span: sp() }], span: sp() };
+        let prog = Program { defs: vec![def], lets: vec![let_stmt], body: bin(BinaryOp::Mul, var("a"), num("10")), span: sp() };
+        let rendered = format!("{}", prog);
+        let expected = "def f(x, y) $x + $y\nlet a = 1, b = \"s\";\n$a * 10";
+        assert_eq!(rendered, expected);
+    }
 }

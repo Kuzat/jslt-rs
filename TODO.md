@@ -107,8 +107,8 @@ unsafe_code = "forbid"
 
 ## 2) AST
 
-* [ ] Define AST per spec (Expr variants; `Let`, `Def`, `If`, comprehensions, calls, member, index/slice).
-* [ ] Add `Span` to each node; implement `fmt::Display` for pretty-print.
+* [x] Define AST per spec (Expr variants; `Let`, `Def`, `If`, comprehensions, calls, member, index/slice).
+* [x] Add `Span` to each node; implement `fmt::Display` for pretty-print.
 
   * **Accept:** round-trip pretty-print → parse → pretty-print is stable (ignoring whitespace).
 

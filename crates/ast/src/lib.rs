@@ -1,23 +1,49 @@
 use std::fmt;
 use std::fmt::Formatter;
 
-// Basic span info needed by parser and diagnostics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: usize, // byte offset (inclusive)
     pub end: usize,   // byte offset (exclusive)
+
     pub line: u32,    // (1-based)
     pub column: u32,  // (1-based)
 }
 
 impl Span {
+    pub fn new(start: usize, end: usize, line: u32, column: u32) -> Span {
+        Span { start, end, line, column }
+    }
+
+    // A zero-length span at a point (useful for EOF or missing tokens)
+    pub fn single_point(at: usize, line: u32, column: u32) -> Span {
+        Span { start: at, end: at, line, column }
+    }
+
     pub fn join(a: Span, b: Span) -> Span {
-        Span {
-            start: a.start.min(b.start),
-            end: a.end.max(b.end),
-            line: a.line, // best-effort; for code frames we'll use start/end offsets anyway
-            column: a.column,
+        if a.start <= b.start {
+            Span {
+                start: a.start,
+                end: a.end.max(b.end),
+                line: a.line,
+                column: a.column,
+            }
+        } else {
+            Span {
+                start: b.start,
+                end: a.end.max(b.end),
+                line: b.line,
+                column: b.column,
+            }
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+
+    pub fn len_bytes(&self) -> usize {
+        self.end.saturating_sub(self.start)
     }
 }
 

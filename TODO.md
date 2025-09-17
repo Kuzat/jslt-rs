@@ -114,14 +114,14 @@ unsafe_code = "forbid"
 
 ## 3) Parser (Pratt)
 
-* [ ] Implement precedence table from spec.
-* [ ] Grammar features:
+* [x] Implement precedence table from spec.
+* [x] Grammar features:
 
   * members with quoted keys, calls, index/slice
   * `if (...) a else b` expression
   * `let` with **semicolon** separators
   * comprehensions `[for (seq) expr [if cond]]` and `{for (...) key : value [if cond]}`
-* [ ] Good error messages: unexpected token, unterminated string, etc.
+* [x] Good error messages: unexpected token, unterminated string, etc.
 
   * **Accept:** parse a corpus in `conformance/cases` without panics, with useful errors on broken inputs.
 

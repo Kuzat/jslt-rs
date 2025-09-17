@@ -6,8 +6,8 @@ pub struct Span {
     pub start: usize, // byte offset (inclusive)
     pub end: usize,   // byte offset (exclusive)
 
-    pub line: u32,    // (1-based)
-    pub column: u32,  // (1-based)
+    pub line: u32,   // (1-based)
+    pub column: u32, // (1-based)
 }
 
 impl Span {
@@ -22,19 +22,9 @@ impl Span {
 
     pub fn join(a: Span, b: Span) -> Span {
         if a.start <= b.start {
-            Span {
-                start: a.start,
-                end: a.end.max(b.end),
-                line: a.line,
-                column: a.column,
-            }
+            Span { start: a.start, end: a.end.max(b.end), line: a.line, column: a.column }
         } else {
-            Span {
-                start: b.start,
-                end: a.end.max(b.end),
-                line: b.line,
-                column: b.column,
-            }
+            Span { start: b.start, end: a.end.max(b.end), line: b.line, column: b.column }
         }
     }
 
@@ -180,6 +170,12 @@ pub enum Expr {
         expr: Box<Expr>,
         span: Span,
     },
+
+    // Function reference: bare identifiers (e.g. foo) - resolved in binder
+    FunctionRef {
+        name: String,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -247,6 +243,7 @@ impl Expr {
             ObjectLiteral { span, .. } => *span,
             ObjectFor { span, .. } => *span,
             Group { span, .. } => *span,
+            FunctionRef { span, .. } => *span,
         }
     }
 }
@@ -288,7 +285,7 @@ impl fmt::Display for Let {
             }
             write!(f, "{b}")?;
         }
-        write!(f, ";")
+        Ok(())
     }
 }
 
@@ -416,8 +413,13 @@ impl<'a, 'b> Pretty<'a, 'b> {
             }
 
             Member { target, key, .. } => {
-                self.expr(target, Prec::Postfix)?;
-                write!(self.f, ".")?;
+                // Special case: member access on this
+                if let This(_) = target.as_ref() {
+                    write!(self.f, ".")?;
+                } else {
+                    self.expr(target, Prec::Postfix)?;
+                    write!(self.f, ".")?;
+                }
                 match key {
                     MemberKey::Ident(id) => write!(self.f, "{id}"),
                     MemberKey::Str { value, .. } => self.string(value),
@@ -514,6 +516,10 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 }
                 write!(self.f, "}}")
             }
+
+            FunctionRef { name, .. } => {
+                write!(self.f, "{}", name)
+            }
         }
     }
 
@@ -596,7 +602,11 @@ mod tests {
     }
 
     fn member_str(target: Expr, key: &str) -> Expr {
-        Expr::Member { target: Box::new(target), key: MemberKey::Str { value: key.to_string(), span: sp() }, span: sp() }
+        Expr::Member {
+            target: Box::new(target),
+            key: MemberKey::Str { value: key.to_string(), span: sp() },
+            span: sp(),
+        }
     }
 
     fn index(target: Expr, i: Expr) -> Expr {
@@ -604,7 +614,12 @@ mod tests {
     }
 
     fn slice(target: Expr, start: Option<Expr>, end: Option<Expr>) -> Expr {
-        Expr::Slice { target: Box::new(target), start: start.map(Box::new), end: end.map(Box::new), span: sp() }
+        Expr::Slice {
+            target: Box::new(target),
+            start: start.map(Box::new),
+            end: end.map(Box::new),
+            span: sp(),
+        }
     }
 
     fn call(callee: Expr, args: Vec<Expr>) -> Expr {
@@ -642,11 +657,7 @@ mod tests {
         assert_eq!(format!("{}", e), "-(1 + 2)");
 
         // not a and (b or c)
-        let e = bin(
-            BinaryOp::And,
-            unary_not(var("a")),
-            bin(BinaryOp::Or, var("b"), var("c")),
-        );
+        let e = bin(BinaryOp::And, unary_not(var("a")), bin(BinaryOp::Or, var("b"), var("c")));
         assert_eq!(format!("{}", e), "not $a and ($b or $c)");
 
         // Comparison precedence wrt add
@@ -688,14 +699,19 @@ mod tests {
     #[test]
     fn arrays_and_objects_with_quoted_keys_and_spread() {
         // Array literal
-        let arr = Expr::ArrayLiteral { elements: vec![num("1"), str_("two"), bool_(false)], span: sp() };
+        let arr =
+            Expr::ArrayLiteral { elements: vec![num("1"), str_("two"), bool_(false)], span: sp() };
         assert_eq!(format!("{}", arr), "[1, \"two\", false]");
 
         // Object literal with ident key, quoted key, and spread
         let obj = Expr::ObjectLiteral {
             entries: vec![
                 ObjectEntry::Pair { key: ObjectKey::Ident(id("a")), value: num("1"), span: sp() },
-                ObjectEntry::Pair { key: ObjectKey::Str { value: "x y".to_string(), span: sp() }, value: str_("v"), span: sp() },
+                ObjectEntry::Pair {
+                    key: ObjectKey::Str { value: "x y".to_string(), span: sp() },
+                    value: str_("v"),
+                    span: sp(),
+                },
                 ObjectEntry::Spread { value: member_ident(var("$"), "rest"), span: sp() },
             ],
             span: sp(),
@@ -706,29 +722,67 @@ mod tests {
     #[test]
     fn for_comprehensions_arrays_and_objects() {
         // [for (seq) body]
-        let arr_for_simple = Expr::ArrayFor { seq: Box::new(var("seq")), body: Box::new(var("x")), filter: None, span: sp() };
+        let arr_for_simple = Expr::ArrayFor {
+            seq: Box::new(var("seq")),
+            body: Box::new(var("x")),
+            filter: None,
+            span: sp(),
+        };
         assert_eq!(format!("{}", arr_for_simple), "[for ($seq) $x]");
 
         // [for (seq) body if cond]
-        let arr_for_filter = Expr::ArrayFor { seq: Box::new(var("seq")), body: Box::new(num("1")), filter: Some(Box::new(bool_(true))), span: sp() };
+        let arr_for_filter = Expr::ArrayFor {
+            seq: Box::new(var("seq")),
+            body: Box::new(num("1")),
+            filter: Some(Box::new(bool_(true))),
+            span: sp(),
+        };
         assert_eq!(format!("{}", arr_for_filter), "[for ($seq) 1 if true]");
 
         // {for (seq) key: value}
-        let obj_for_simple = Expr::ObjectFor { seq: Box::new(var("seq")), key: Box::new(str_("k")), value: Box::new(var("v")), filter: None, span: sp() };
+        let obj_for_simple = Expr::ObjectFor {
+            seq: Box::new(var("seq")),
+            key: Box::new(str_("k")),
+            value: Box::new(var("v")),
+            filter: None,
+            span: sp(),
+        };
         assert_eq!(format!("{}", obj_for_simple), "{for ($seq) \"k\": $v}");
 
         // {for (seq) key: value if cond}
-        let obj_for_filter = Expr::ObjectFor { seq: Box::new(var("seq")), key: Box::new(member_ident(var("a"), "b")), value: Box::new(num("2")), filter: Some(Box::new(bin(BinaryOp::Eq, var("x"), num("3")))), span: sp() };
-        assert_eq!(format!("{}", obj_for_filter), "{for ($seq) $a.b: 2 if $x == 3}" );
+        let obj_for_filter = Expr::ObjectFor {
+            seq: Box::new(var("seq")),
+            key: Box::new(member_ident(var("a"), "b")),
+            value: Box::new(num("2")),
+            filter: Some(Box::new(bin(BinaryOp::Eq, var("x"), num("3")))),
+            span: sp(),
+        };
+        assert_eq!(format!("{}", obj_for_filter), "{for ($seq) $a.b: 2 if $x == 3}");
     }
 
     #[test]
     fn program_with_defs_lets_and_body() {
-        let def = Def { name: id("f"), params: vec![id("x"), id("y")], body: bin(BinaryOp::Add, var("x"), var("y")), span: sp() };
-        let let_stmt = Let { bindings: vec![Binding { name: id("a"), value: num("1"), span: sp() }, Binding { name: id("b"), value: str_("s"), span: sp() }], span: sp() };
-        let prog = Program { defs: vec![def], lets: vec![let_stmt], body: bin(BinaryOp::Mul, var("a"), num("10")), span: sp() };
+        let def = Def {
+            name: id("f"),
+            params: vec![id("x"), id("y")],
+            body: bin(BinaryOp::Add, var("x"), var("y")),
+            span: sp(),
+        };
+        let let_stmt = Let {
+            bindings: vec![
+                Binding { name: id("a"), value: num("1"), span: sp() },
+                Binding { name: id("b"), value: str_("s"), span: sp() },
+            ],
+            span: sp(),
+        };
+        let prog = Program {
+            defs: vec![def],
+            lets: vec![let_stmt],
+            body: bin(BinaryOp::Mul, var("a"), num("10")),
+            span: sp(),
+        };
         let rendered = format!("{}", prog);
-        let expected = "def f(x, y) $x + $y\nlet a = 1, b = \"s\";\n$a * 10";
+        let expected = "def f(x, y) $x + $y\nlet a = 1, b = \"s\"\n$a * 10";
         assert_eq!(rendered, expected);
     }
 }

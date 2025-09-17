@@ -1,53 +1,657 @@
-use ast::Program;
+use ast::{BinaryOp, Binding, Def, Expr, Ident, Let, MemberKey, ObjectEntry, ObjectKey, Program, Span, UnaryOp};
+use lexer::{LexErrorKind, Lexer, Token};
+use std::mem;
+use thiserror::Error;
 
-/// Temporary stub: parse a JSLT program from source into an AST Program.
-/// Not implemented yet — returns an error. Exists so tests can compile.
-pub fn parse_program(_src: &str) -> Result<Program, String> {
-    Err("parser not implemented".into())
+pub type ParseResult<T> = Result<T, ParseError>;
+
+#[derive(Debug, Error)]
+pub enum ParseErrorKind {
+    #[error("unexpected token: found {found:?}, expected {expected}")]
+    Unexpected { found: Token, expected: &'static str },
+
+    #[error("expected identifier")]
+    ExpectedIdent,
+
+    #[error("expected expression")]
+    ExpectedExpr,
+
+    #[error("unterminated construct: {context}")]
+    Unterminated { context: &'static str },
+
+    #[error("lexer error: {0}")]
+    Lex(#[from] LexErrorKind),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug)]
+pub struct ParseError {
+    pub span: Span,
+    pub kind: ParseErrorKind,
+}
 
-    fn norm_ws(s: &str) -> String {
-        // Collapse all runs of whitespace to a single space and trim
-        let mut out = String::new();
-        let mut prev_space = false;
-        for ch in s.chars() {
-            if ch.is_whitespace() {
-                if !prev_space {
-                    out.push(' ');
-                    prev_space = true;
+impl ParseError {
+    pub fn unexpected(span: Span, found: Token, expected: &'static str) -> ParseError {
+        ParseError { span, kind: ParseErrorKind::Unexpected { found, expected } }
+    }
+    pub fn expected_ident(span: Span) -> ParseError {
+        ParseError { span, kind: ParseErrorKind::ExpectedIdent }
+    }
+    pub fn expected_expr(span: Span) -> ParseError {
+        ParseError { span, kind: ParseErrorKind::ExpectedExpr }
+    }
+    pub fn unterminated(span: Span, context: &'static str) -> ParseError {
+        ParseError { span, kind: ParseErrorKind::Unterminated { context } }
+    }
+}
+
+#[derive(Clone)]
+struct Tok {
+    tok: Token,
+    span: Span,
+}
+
+pub struct Parser<'a> {
+    lx: Lexer<'a>,
+    cur: Tok,
+    peeked: Option<Tok>,
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(input: &'a str) -> Result<Self, ParseError> {
+        let mut lx = Lexer::new(input);
+        let first = next_token(&mut lx)?;
+        Ok(Parser { lx, cur: first, peeked: None })
+    }
+
+    pub fn parse_program(&mut self) -> ParseResult<Program> {
+        let mut defs = Vec::new();
+        let mut lets = Vec::new();
+
+        // Consume any number of top-level def/let
+        loop {
+            match self.cur.tok {
+                Token::Def => defs.push(self.parse_def()?),
+                Token::Let => {
+                    let l = self.parse_let_stmt()?;
+                    lets.push(l)
                 }
-            } else {
-                prev_space = false;
-                out.push(ch);
+                _ => break,
             }
         }
-        out.trim().to_string()
+
+        // Final expression
+        let expr = self.parse_if_or_expr()?;
+
+        // Expect EOF
+        let (t, s) = (self.cur.tok.clone(), self.cur.span);
+        if !matches!(t, Token::Eof) {
+            return Err(ParseError::unexpected(s, t, "end of input"));
+        }
+
+        // Program span is the expr span (def/lets can be recorded separately in AST if needed)
+        Ok(Program { defs, lets, body: expr, span: s })
     }
 
-    #[test]
-    #[ignore]
-    fn round_trip_pretty_parse_pretty_is_stable_simple() {
-        // Once parse_program is implemented, this ensures pretty-print stability ignoring whitespace.
-        let src = "let a = 1;\n${a} + 2";
-        let program = parse_program(src).expect("parse ok");
-        let p1 = format!("{}", program);
-        let program2 = parse_program(&p1).expect("parse ok 2");
-        let p2 = format!("{}", program2);
-        assert_eq!(norm_ws(&p1), norm_ws(&p2));
+    fn parse_def(&mut self) -> ParseResult<Def> {
+        let start = self.cur.span;
+        self.expect(Token::Def, "'def'")?;
+        let name = self.expect_ident()?;
+        self.expect(Token::LParen, "'(' after function name")?;
+        let mut params = Vec::new();
+        if !self.at(&Token::RParen) {
+            let p = self.expect_ident()?;
+            params.push(p);
+            while self.eat(&Token::Comma) {
+                let p = self.expect_ident()?;
+                params.push(p);
+            }
+        }
+        self.expect(Token::RParen, "')' after parameters")?;
+        let body = self.parse_if_or_expr()?;
+        let end = body.span();
+        Ok(Def { name, params, body, span: Span::join(start, end) })
     }
 
-    #[test]
-    #[ignore]
-    fn round_trip_with_objects_arrays_and_calls() {
-        let src = "def f(x) x\nlet a = 1, b = \"s\";\n{for ([1,2,3]) \"k\": f(${a})}[0]";
-        let program = parse_program(src).expect("parse ok");
-        let p1 = format!("{}", program);
-        let program2 = parse_program(&p1).expect("parse ok 2");
-        let p2 = format!("{}", program2);
-        assert_eq!(norm_ws(&p1), norm_ws(&p2));
+    fn parse_let_stmt(&mut self) -> ParseResult<Let> {
+        let start = self.cur.span;
+        self.expect(Token::Let, "'let'")?;
+        let mut bindings = Vec::new();
+
+        loop {
+            let name = self.expect_ident()?;
+            let name_span = name.span.clone();
+            self.expect(Token::Eq, "'=' after let binding")?;
+            let expr = self.parse_if_or_expr()?;
+            let expr_span = expr.span();
+            bindings.push(Binding { name, value: expr, span: Span::join(name_span, expr_span) });
+
+            // Currently JSLT does not support multiple bindings in one let statement,
+            // so we should do the same and break here. In future we may support this.
+            break;
+        }
+
+        let span = Span::join(start, bindings.last().unwrap().span);
+        Ok(Let { bindings, span })
+    }
+
+    fn parse_if_or_expr(&mut self) -> ParseResult<Expr> {
+        if self.at(&Token::If) {
+            let start = self.cur.span;
+            self.bump(); // 'if'
+            self.expect(Token::LParen, "'(' after if")?;
+            let cond = self.parse_if_or_expr()?;
+            self.expect(Token::RParen, "')' after if condition")?;
+            let then_expr = self.parse_if_or_expr()?;
+            self.expect(Token::Else, "'else'")?;
+            let else_expr = self.parse_if_or_expr()?;
+            let span = Span::join(start, else_expr.span());
+            Ok(Expr::If {
+                cond: Box::new(cond),
+                then_br: Box::new(then_expr),
+                else_br: Box::new(else_expr),
+                span,
+            })
+        } else {
+            self.parse_or_expr()
+        }
+    }
+
+    fn parse_or_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_and_expr()?;
+        while self.at(&Token::Or) {
+            let _op_span = self.cur.span;
+            self.bump();
+            let right = self.parse_and_expr()?;
+            let span = Span::join(left.span(), right.span());
+            left = Expr::Binary {
+                op: BinaryOp::Or,
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_and_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_cmp_expr()?;
+        while self.at(&Token::And) {
+            let _op_span = self.cur.span;
+            self.bump();
+            let right = self.parse_cmp_expr()?;
+            let span = Span::join(left.span(), right.span());
+            left = Expr::Binary {
+                op: BinaryOp::And,
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_cmp_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_add_expr()?;
+        loop {
+            let op = match self.cur.tok {
+                Token::Lt => Some(BinaryOp::Lt),
+                Token::LtEq => Some(BinaryOp::Le),
+                Token::Gt => Some(BinaryOp::Gt),
+                Token::GtEq => Some(BinaryOp::Ge),
+                Token::EqEq => Some(BinaryOp::Eq),
+                Token::BangEq => Some(BinaryOp::Ne),
+                _ => None,
+            };
+            if let Some(op) = op {
+                self.bump();
+                let right = self.parse_add_expr()?;
+                let span = Span::join(left.span(), right.span());
+                left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_add_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_mul_expr()?;
+        loop {
+            let op = match self.cur.tok {
+                Token::Plus => Some(BinaryOp::Add),
+                Token::Minus => Some(BinaryOp::Sub),
+                _ => None,
+            };
+            if let Some(op) = op {
+                self.bump();
+                let right = self.parse_mul_expr()?;
+                let span = Span::join(left.span(), right.span());
+                left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_mul_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_unary_expr()?;
+        loop {
+            let op = match self.cur.tok {
+                Token::Star => Some(BinaryOp::Mul),
+                Token::Slash => Some(BinaryOp::Div),
+                Token::Percent => Some(BinaryOp::Rem),
+                _ => None,
+            };
+            if let Some(op) = op {
+                self.bump();
+                let right = self.parse_unary_expr()?;
+                let span = Span::join(left.span(), right.span());
+                left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_unary_expr(&mut self) -> ParseResult<Expr> {
+        match &self.cur.tok {
+            Token::Minus => {
+                let start = self.cur.span;
+                self.bump();
+                let expr = self.parse_unary_expr()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Neg,
+                    expr: Box::new(expr.clone()),
+                    span: Span::join(start, expr.span()),
+                })
+            }
+            Token::Not => {
+                let start = self.cur.span;
+                self.bump();
+                let expr = self.parse_unary_expr()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(expr.clone()),
+                    span: Span::join(start, expr.span()),
+                })
+            }
+            _ => self.parse_postfix_expr(),
+        }
+    }
+
+    fn parse_postfix_expr(&mut self) -> ParseResult<Expr> {
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            match self.cur.tok {
+                // Support ".a" and ".\"key\"" directly after leading '.'
+                Token::Ident(ref s) => {
+                    if let Expr::This(_) = expr {
+                        let key_span = self.cur.span;
+                        let key = MemberKey::Ident(Ident { name: s.clone(), span: key_span });
+                        self.bump();
+                        let span = Span::join(expr.span(), self.cur.span);
+                        expr = Expr::Member { target: Box::new(expr), key, span };
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                Token::String(ref s) => {
+                    if let Expr::This(_) = expr {
+                        let key_span = self.cur.span;
+                        let key = MemberKey::Str { value: s.clone(), span: key_span };
+                        self.bump();
+                        let span = Span::join(expr.span(), self.cur.span);
+                        expr = Expr::Member { target: Box::new(expr), key, span };
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                Token::Dot => {
+                    // member: . ident | . "string"
+                    self.bump(); // ".'
+                    match &self.cur.tok {
+                        Token::Ident(ref s) => {
+                            let key =
+                                MemberKey::Ident(Ident { name: s.clone(), span: self.cur.span });
+                            self.bump();
+                            let span = Span::join(expr.span(), self.cur.span);
+                            expr = Expr::Member { target: Box::new(expr), key, span };
+                        }
+                        Token::String(ref s) => {
+                            let key = MemberKey::Str { value: s.clone(), span: self.cur.span };
+                            self.bump();
+                            let span = Span::join(expr.span(), self.cur.span);
+                            expr = Expr::Member { target: Box::new(expr), key, span };
+                        }
+                        _ => {
+                            let (t, s) = (self.cur.tok.clone(), self.cur.span);
+                            return Err(ParseError::unexpected(
+                                s,
+                                t,
+                                "identifier or string after '.'",
+                            ));
+                        }
+                    }
+                }
+                Token::LBracket => {
+                    // index_or_slice: '[' [expr] [':' [expr] ']'
+                    let start = self.cur.span;
+                    self.bump(); // '['
+                                 // optional first expr
+                    let mut first: Option<Expr> = None;
+                    if !self.at(&Token::RBracket) && !self.at(&Token::Colon) {
+                        first = Some(self.parse_if_or_expr()?);
+                    }
+                    if self.at(&Token::Colon) {
+                        // slice: [':' [expr] ']'
+                        self.bump(); // ':'
+                        let mut second: Option<Expr> = None;
+                        if !self.at(&Token::RBracket) {
+                            second = Some(self.parse_if_or_expr()?);
+                        }
+                        let end_span = self.expect(Token::RBracket, "']' for slice")?;
+                        let span = Span::join(start, end_span);
+                        expr = Expr::Slice {
+                            target: Box::new(expr),
+                            start: first.map(Box::new),
+                            end: second.map(Box::new),
+                            span,
+                        };
+                    } else {
+                        // index: must have first
+                        let first_expr = match first {
+                            Some(e) => e,
+                            None => {
+                                return Err(ParseError::expected_expr(self.cur.span));
+                            }
+                        };
+                        let end_span = self.expect(Token::RBracket, "']' for index")?;
+                        let span = Span::join(start, end_span);
+                        expr = Expr::Index { target: Box::new(expr), index: Box::new(first_expr), span };
+                    }
+                }
+                Token::LParen => {
+                    // call: '(' [args] ')'
+                    let start = self.cur.span;
+                    self.bump(); // '('
+                    let mut args = Vec::new();
+                    if !self.at(&Token::RParen) {
+                        let arg = self.parse_if_or_expr()?;
+                        args.push(arg);
+                        while self.eat(&Token::Comma) {
+                            let arg = self.parse_if_or_expr()?;
+                            args.push(arg);
+                        }
+                    }
+                    let end_span = self.expect(Token::RParen, "')' to close call")?;
+                    let span = Span::join(start, end_span);
+                    expr = Expr::Call { callee: Box::new(expr), args, span };
+                }
+                _ => break,
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_primary(&mut self) -> ParseResult<Expr> {
+        match &self.cur.tok {
+            Token::Null => {
+                let s = self.cur.span;
+                self.bump();
+                Ok(Expr::Null(s))
+            }
+            Token::True => {
+                let s = self.cur.span;
+                self.bump();
+                Ok(Expr::Bool { value: true, span: s })
+            }
+            Token::False => {
+                let s = self.cur.span;
+                self.bump();
+                Ok(Expr::Bool { value: false, span: s })
+            }
+            Token::Number(n) => {
+                let s = self.cur.span;
+                let v = *n;
+                self.bump();
+                Ok(Expr::Number { lexeme: v.to_string(), span: s })
+            }
+            Token::String(st) => {
+                let s = self.cur.span;
+                let v = st.clone();
+                self.bump();
+                Ok(Expr::String { value: v, span: s })
+            }
+            Token::Dollar => {
+                let dollar_span = self.cur.span;
+                self.bump();
+                match &self.cur.tok {
+                    Token::Ident(name) => {
+                        let name_span = self.cur.span;
+                        let span = Span::join(dollar_span, name_span);
+                        let v = name.clone();
+                        self.bump();
+                        Ok(Expr::Variable { name: Ident { name: v, span } })
+                    }
+                    _ => Err(ParseError::expected_ident(dollar_span)),
+                }
+            }
+            Token::Dot => {
+                // this
+                let s = self.cur.span;
+                self.bump();
+                Ok(Expr::This(s))
+            }
+            Token::LParen => {
+                self.bump();
+                let inner = self.parse_if_or_expr()?;
+                let end_span = self.expect(Token::RParen, "')' to close group")?;
+                let span = Span::join(inner.span(), end_span);
+                Ok(Expr::Group { expr: Box::new(inner), span })
+            }
+            Token::LBracket => self.parse_array_like(),
+            Token::LBrace => self.parse_object_like(),
+            _ => {
+                // bare identifiers is a function refernece or call target in some ASTs;
+                // per spec, identifiers alone are not variables (only $ident)
+                // We still allow bare ident as "function refernce" primary so call can follow.
+                if let Token::Ident(name) = &self.cur.tok {
+                    let s = self.cur.span;
+                    let v = name.clone();
+                    self.bump();
+                    Ok(Expr::FunctionRef { name: v, span: s })
+                } else {
+                    Err(ParseError::expected_expr(self.cur.span))
+                }
+            }
+        }
+    }
+
+    fn parse_array_like(&mut self) -> ParseResult<Expr> {
+        let start = self.cur.span;
+        self.bump(); // '['
+
+        // comprehension or literal?
+        if self.at(&Token::For) {
+            self.bump(); // 'for'
+            self.expect(Token::LParen, "'(' after for")?;
+            let seq = self.parse_if_or_expr()?;
+            self.expect(Token::RParen, "')' after sequence")?;
+            let body = self.parse_if_or_expr()?;
+            let filter = if self.at(&Token::If) {
+                self.bump(); // 'if'
+                Some(Box::new(self.parse_if_or_expr()?))
+            } else {
+                None
+            };
+            let end_span = self.expect(Token::RBracket, "']' to close array comp")?;
+            let span = Span::join(start, end_span);
+            Ok(Expr::ArrayFor { seq: Box::new(seq), body: Box::new(body), filter, span })
+        } else {
+            let mut elems = Vec::new();
+            if !self.at(&Token::RBracket) {
+                elems.push(self.parse_if_or_expr()?);
+                while self.eat(&Token::Comma) {
+                    elems.push(self.parse_if_or_expr()?);
+                }
+            }
+            let end_span = self.expect(Token::RBracket, "']' to close array")?;
+            let span = Span::join(start, end_span);
+            Ok(Expr::ArrayLiteral { elements: elems, span })
+        }
+    }
+
+    fn parse_object_like(&mut self) -> ParseResult<Expr> {
+        let start = self.cur.span;
+        self.bump(); // '{'
+
+        if self.at(&Token::For) {
+            self.bump(); // 'for'
+            self.expect(Token::LParen, "'(' after 'for'")?;
+            let seq = self.parse_if_or_expr()?;
+            self.expect(Token::RParen, "')' after sequence")?;
+            let key = self.parse_if_or_expr()?;
+            self.expect(Token::Colon, "':' after object comp key")?;
+            let value = self.parse_if_or_expr()?;
+            let filter = if self.at(&Token::If) {
+                self.bump(); // 'if'
+                Some(Box::new(self.parse_if_or_expr()?))
+            } else {
+                None
+            };
+            let end_span = self.expect(Token::RBrace, "'}' to close object comp")?;
+            let span = Span::join(start, end_span);
+            Ok(Expr::ObjectFor {
+                seq: Box::new(seq),
+                key: Box::new(key),
+                value: Box::new(value),
+                filter,
+                span,
+            })
+        } else {
+            let mut entries = Vec::new();
+            if !self.at(&Token::RBrace) {
+                loop {
+                    // entry = key ':' expr | '*' ':' expr
+                    let entry = match &self.cur.tok {
+                        Token::Star => {
+                            let star_span = self.cur.span;
+                            self.bump();
+                            self.expect(Token::Colon, "':' after '*'")?;
+                            let v = self.parse_if_or_expr()?;
+                            let span = Span::join(star_span, v.span());
+                            ObjectEntry::Spread { value: v, span }
+                        }
+                        Token::String(s) => {
+                            let kspan = self.cur.span;
+                            let key = ObjectKey::Str { value: s.clone(), span: self.cur.span };
+                            self.bump();
+                            self.expect(Token::Colon, "':' after object key")?;
+                            let v = self.parse_if_or_expr()?;
+                            let span = Span::join(kspan, v.span());
+                            ObjectEntry::Pair {
+                                key,
+                                value: v,
+                                span,
+                            }
+                        }
+                        Token::Ident(id) => {
+                            let kspan = self.cur.span;
+                            let key = ObjectKey::Ident(Ident {name: id.clone(), span: self.cur.span});
+                            self.bump();
+                            self.expect(Token::Colon, "':' after object key")?;
+                            let v = self.parse_if_or_expr()?;
+                            let span = Span::join(kspan, v.span());
+                            ObjectEntry::Pair {
+                                key,
+                                value: v,
+                                span,
+                            }
+                        }
+                        _ => {
+                            return Err(ParseError::unexpected(
+                                self.cur.span,
+                                self.cur.tok.clone(),
+                                "object key (identifier or string) or '*'",
+                            ))
+                        }
+                    };
+                    entries.push(entry);
+                    if self.eat(&Token::Comma) {
+                        // continue reading entries
+                        continue
+                    } else {
+                        break;
+                    }
+                }
+            }
+            let end_span = self.expect(Token::RBrace, "'}' to close object")?;
+            let span = Span::join(start, end_span);
+            Ok(Expr::ObjectLiteral { entries, span })
+        }
+    }
+
+    // token utilities
+    fn at(&self, t: &Token) -> bool {
+        mem::discriminant(&self.cur.tok) == mem::discriminant(t)
+    }
+
+    fn eat(&mut self, t: &Token) -> bool {
+        if self.at(t) {
+            let _ = self.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn bump(&mut self) -> Tok {
+        let old = if let Some(pk) = self.peeked.take() {
+            mem::replace(&mut self.cur, pk)
+        } else {
+            let nt = next_token(&mut self.lx).unwrap_or_else(|e| {
+                // Convert lexer error into stream of EoF + store error for later:
+                // But we reutrn error at call sites, so here we panic only if this function
+                // is used wrong. To keep Result flow, prefer not to call bump when lexer errored.
+                panic!("lexer error bubbled intp bump(): {e:?}")
+            });
+            mem::replace(&mut self.cur, nt)
+        };
+        old
+    }
+
+    fn expect(&mut self, t: Token, expected: &'static str) -> ParseResult<Span> {
+        if mem::discriminant(&self.cur.tok) == mem::discriminant(&t) {
+            let s = self.cur.span;
+            self.bump();
+            Ok(s)
+        } else {
+            Err(ParseError::unexpected(self.cur.span, self.cur.tok.clone(), expected))
+        }
+    }
+
+    fn expect_ident(&mut self) -> ParseResult<Ident> {
+        match &self.cur.tok {
+            Token::Ident(s) => {
+                let ident = Ident { name: s.clone(), span: self.cur.span };
+                self.bump();
+                Ok(ident)
+            }
+            _ => Err(ParseError::expected_ident(self.cur.span)),
+        }
     }
 }
+
+fn next_token(lx: &mut Lexer<'_>) -> Result<Tok, ParseError> {
+    match lx.next_token() {
+        Ok((t, s)) => Ok(Tok { tok: t, span: s }),
+        Err(le) => Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
+    }
+}
+

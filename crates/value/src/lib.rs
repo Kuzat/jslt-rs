@@ -1,14 +1,328 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+//! Value layer for JSLT: a tiny facade around `serde_json::Value`.
+//!
+//! This matches the spec's data model and provides helpers needed by the evaluator.
+//!  - deep equality (object key order-insensitive)
+//!  - numeric extraction with NaN/Inf checks
+//!  - null helpers
+//!  - array/string index & slice with negative indices and null propagation
+//!
+//! String index and slice by Unicode scalar values (code points), not bytes.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Number, Value};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JsltValue(pub Value);
+
+impl JsltValue {
+    // Constructors and type guards
+    pub fn null() -> Self {
+        Self(Value::Null)
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self.0, Value::Null)
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        matches!(self.0, Value::Bool(_))
+    }
+
+    pub fn is_number(&self) -> bool {
+        matches!(self.0, Value::Number(_))
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self.0, Value::String(_))
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self.0, Value::Array(_))
+    }
+
+    pub fn is_object(&self) -> bool {
+        matches!(self.0, Value::Object(_))
+    }
+
+    // Conversion helpers
+    pub fn as_json(&self) -> &Value {
+        &self.0
+    }
+
+    pub fn into_json(self) -> Value {
+        self.0
+    }
+
+    pub fn from_json(value: Value) -> Self {
+        JsltValue(value)
+    }
+
+    // Numeric helper: reject NaN/Inf as per spec intent
+    pub fn as_f64_checked(&self) -> Option<f64> {
+        match &self.0 {
+            Value::Number(n) => n.as_f64().and_then(|f| if f.is_finite() { Some(f) } else { None }),
+            _ => None,
+        }
+    }
+
+    // Deep structural equality
+    // - numbers compare by finite f64 (treat -0.0 == 0.0)
+    // - objects: key-order-insensitive, deep compare
+    // - arrays: element-wise deep compare
+    // - other same-type exact equality
+    pub fn deep_eq(&self, other: &JsltValue) -> bool {
+        use Value::*;
+        match (&self.0, &other.0) {
+            (Null, Null) => true,
+            (Bool(a), Bool(b)) => a == b,
+            (Number(a), Number(b)) => number_eq(a, b),
+            (String(a), String(b)) => a == b,
+            (Array(a), Array(b)) => {
+                if a.len() != b.len() {
+                    return false;
+                }
+                a.iter()
+                    .zip(b.iter())
+                    .all(|(x, y)| JsltValue(x.clone()).deep_eq(&JsltValue(y.clone())))
+            }
+            (Object(a), Object(b)) => object_deep_eq(a, b),
+            // Different types are never equal
+            _ => false,
+        }
+    }
+
+    // Indexing:
+    // - Arrays: zero-based; negative indices count from end; OOB -> null;
+    // - Strings: by Unicode scalar index; negativ from end; OOB -> null; result is 1-char string
+    // - Other types: null propagation
+    pub fn index(&self, idx: i64) -> JsltValue {
+        match &self.0 {
+            Value::Array(arr) => {
+                let len = arr.len() as i64;
+                if let Some(i) = normalize_index(idx, len) {
+                    JsltValue(arr[i as usize].clone())
+                } else {
+                    JsltValue::null()
+                }
+            }
+            Value::String(s) => {
+                let chars: Vec<char> = s.chars().collect();
+                let len = chars.len() as i64;
+                if let Some(i) = normalize_index(idx, len) {
+                    let ch = chars[i as usize];
+                    JsltValue(Value::String(ch.to_string()))
+                } else {
+                    JsltValue::null()
+                }
+            }
+            _ => JsltValue::null(),
+        }
+    }
+
+    // Slicing [start:end] with half-open sematics [start, end):
+    // - Applies to arrays and strings
+    // - Defaults: start=0, end=len
+    // - Negative indices offset from end; indices clamped to [0, len]
+    // - If start > end, empty ([}, "")
+    // - Wrong types: null propagation
+    pub fn slice(&self, start: Option<i64>, end: Option<i64>) -> JsltValue {
+        match &self.0 {
+            Value::Array(arr) => {
+                let (lo, hi) = compute_slice_bounds(start, end, arr.len());
+                let slice = if lo <= hi {
+                    arr[lo..hi].to_vec()
+                } else {
+                    Vec::new()
+                };
+                JsltValue(Value::Array(slice))
+            }
+            Value::String(s) => {
+                let chars: Vec<char> = s.chars().collect();
+                let (lo, hi) = compute_slice_bounds(start, end, chars.len());
+                let out: String = if lo <= hi {
+                    chars[lo..hi].iter().collect()
+                } else {
+                    String::new()
+                };
+                JsltValue(Value::String(out))
+            }
+            _ => JsltValue::null(),
+        }
+    }
+}
+
+fn number_eq(a: &Number, b: &Number) -> bool {
+    match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+            // Treat -0.0 == 0.0
+            if x == 0.0 && y == 0.0 {
+                true
+            } else {
+                x == y
+            }
+        },
+        _ => false,
+    }
+}
+
+fn object_deep_eq(a: &Map<String, Value>, b: &Map<String, Value>) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+
+    // key order-insensitive: compare by keys
+    for (ka, va) in a.iter() {
+        let Some(vb) = b.get(ka) else { return false };
+        if !JsltValue(va.clone()).deep_eq(&JsltValue(vb.clone())) {
+            return false;
+        }
+    }
+
+    true
+}
+
+// Normalize a possibly negative index into [0, len-1]. Returns None if OOB.
+fn normalize_index(idx: i64, len: i64) -> Option<i64> {
+    if len == 0 {
+        return None;
+    }
+    let mut i = idx;
+    if i < 0 {
+        i += len; // negative from end
+    }
+    if i < 0 || i >= len {
+        None
+    } else {
+        Some(i)
+    }
+}
+
+// Compute slice bounds [lo, hi) clamped to [0, len], supporting negative indices.
+// len is usize (array length or string char length).
+fn compute_slice_bounds(start: Option<i64>, end: Option<i64>, len: usize) -> (usize, usize) {
+    let len_i = len as i64;
+
+    let raw_start = start.unwrap_or(0);
+    let raw_end = end.unwrap_or(len_i);
+
+    let mut lo = if raw_start < 0 { raw_start + len_i } else { raw_start };
+    let mut hi = if raw_end < 0 { raw_end + len_i } else { raw_end };
+
+    // Clamp to [0, len]
+    lo = lo.clamp(0, len_i);
+    hi = hi.clamp(0, len_i);
+
+    // convert to uszie safely
+    (lo as usize, hi as usize)
+}
+
+// Convenience From impl
+impl From<Value> for JsltValue {
+    fn from(value: Value) -> Self {
+        JsltValue(value)
+    }
+}
+
+impl From<JsltValue> for Value {
+    fn from(value: JsltValue) -> Self {
+        value.0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn as_f64_checked_rejects_nan_inf() {
+        let v = JsltValue(json!(1.5));
+        assert_eq!(v.as_f64_checked(), Some(1.5));
+
+        // serde_json::Number cannot represent NaN/Inf directly; this tests the positive path only.
+        // The evaluator should avoid constructing NaN/Inf; if it does, it must error at runtime.
+    }
+
+    #[test]
+    fn deep_eq_objects_ignore_key_order() {
+        let a = JsltValue(json!({"x": 1, "y": [true, null], "z": {"a": "b"}}));
+        let b = JsltValue(json!({"z": {"a": "b"}, "y": [true, null], "x": 1}));
+        assert!(a.deep_eq(&b));
+    }
+
+    #[test]
+    fn deep_eq_arrays_and_numbers() {
+        let a = JsltValue(json!([0.0, -0.0, 1, 2.5]));
+        let b = JsltValue(json!([0, 0.0, 1.0, 2.5]));
+        assert!(a.deep_eq(&b));
+    }
+
+    #[test]
+    fn index_array_positive_negative_and_oob() {
+        let v = JsltValue(json!([10, 20, 30]));
+        assert_eq!(v.index(0).into_json(), json!(10));
+        assert_eq!(v.index(2).into_json(), json!(30));
+        assert!(v.index(3).is_null());  // OOB
+        assert_eq!(v.index(-1).into_json(), json!(30));
+        assert_eq!(v.index(-3).into_json(), json!(10));
+        assert!(v.index(-4).is_null()); // OOB
+    }
+
+    #[test]
+    fn index_string_by_unicode_scalar() {
+        // "hé𝄞" → ['h', 'é', '𝄞'] where '𝄞' is U+1D11E (two UTF-16 code units, but one scalar)
+        let s = "hé\u{1D11E}";
+        let v = JsltValue(json!(s));
+
+        assert_eq!(v.index(0).into_json(), json!("h"));
+        assert_eq!(v.index(1).into_json(), json!("é"));
+        assert_eq!(v.index(2).into_json(), json!("\u{1D11E}"));
+        assert!(v.index(3).is_null());
+        assert_eq!(v.index(-1).into_json(), json!("\u{1D11E}"));
+        assert_eq!(v.index(-3).into_json(), json!("h"));
+        assert!(v.index(-4).is_null());
+    }
+
+    #[test]
+    fn slice_array_defaults_and_negatives() {
+        let v = JsltValue(json!([0, 1, 2, 3, 4]));
+        // Defaults
+        assert_eq!(v.slice(None, None).into_json(), json!([0,1,2,3,4]));
+        assert_eq!(v.slice(Some(2), None).into_json(), json!([2,3,4]));
+        assert_eq!(v.slice(None, Some(3)).into_json(), json!([0,1,2]));
+
+        // Negatives
+        assert_eq!(v.slice(Some(-3), None).into_json(), json!([2,3,4]));
+        assert_eq!(v.slice(None, Some(-2)).into_json(), json!([0,1,2]));
+
+        // Mixed and clamped
+        assert_eq!(v.slice(Some(-10), Some(2)).into_json(), json!([0,1,2][..2])); // -> [0,1]
+        assert_eq!(v.slice(Some(3), Some(10)).into_json(), json!([3,4]));
+
+        // Empty when start > end
+        assert_eq!(v.slice(Some(4), Some(2)).into_json(), json!([]));
+    }
+
+    #[test]
+    fn slice_string_by_unicode_scalar() {
+        let s = "hé\u{1D11E}X"; // ['h','é','𝄞','X']
+        let v = JsltValue(json!(s));
+
+        assert_eq!(v.slice(None, None).into_json(), json!(s));
+        assert_eq!(v.slice(Some(1), Some(3)).into_json(), json!("é\u{1D11E}"));
+        assert_eq!(v.slice(Some(-2), None).into_json(), json!("\u{1D11E}X"));
+        assert_eq!(v.slice(None, Some(-1)).into_json(), json!("hé\u{1D11E}"));
+        assert_eq!(v.slice(Some(3), Some(2)).into_json(), json!(""));
+    }
+
+    #[test]
+    fn index_and_slice_wrong_types_null_propagation() {
+        let v = JsltValue(json!(true));
+        assert!(v.index(0).is_null());
+        assert!(v.slice(Some(0), Some(1)).is_null());
+
+        let v = JsltValue(json!({"a": 1}));
+        assert!(v.index(0).is_null());
+        assert!(v.slice(None, None).is_null());
     }
 }

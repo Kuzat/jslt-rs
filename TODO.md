@@ -134,7 +134,7 @@ unsafe_code = "forbid"
 
 ## 5) Value model
 
-* [ ] `JsltValue(serde_json::Value)` facade with helpers:
+* [x] `JsltValue(serde_json::Value)` facade with helpers:
 
   * numeric ops (`as_f64_checked`), deep equality, object key order-insensitive eq.
   * null helpers, array/string index & slice with negative indices and bounds → `null`.

@@ -1,6 +1,6 @@
-use interp::bind;
-use interp::binder::{BoundExpr, BoundProgram, CaptureSpec, FunctionId, ResolvedVar};
 use ast::{Binding, Def, Expr, Ident, Let, Program, Span};
+use interp::bind;
+use interp::binder::{BoundExpr, CaptureSpec, FunctionId, ResolvedVar};
 
 fn s() -> Span {
     Span { start: 0, end: 0, line: 1, column: 1 }
@@ -44,13 +44,13 @@ fn let_binding_and_variable_resolution() {
     // there should be one let tuple ("x", Number(1.0))
     assert_eq!(bound.lets.len(), 1);
     match &bound.lets[0].1 {
-        BoundExpr::Number(v) => assert_eq!(*v, 1.0),
+        BoundExpr::Number(v, _s) => assert_eq!(*v, 1.0),
         _ => panic!("expected bound number for let x"),
     }
 
     // body should resolve to local slot 0 (global frame)
     match &bound.body {
-        BoundExpr::Var(ResolvedVar::Local(slot)) => assert_eq!(*slot, 0),
+        BoundExpr::Var(ResolvedVar::Local(slot), _s) => assert_eq!(*slot, 0),
         other => panic!("expected local var, got {:?}", other),
     }
 }
@@ -70,12 +70,8 @@ fn function_definition_and_call() {
         span: s(),
     };
 
-    let program = Program {
-        defs: vec![def],
-        lets: vec![],
-        body: call("inc", vec![num("41")]),
-        span: s(),
-    };
+    let program =
+        Program { defs: vec![def], lets: vec![], body: call("inc", vec![num("41")]), span: s() };
 
     let bound = bind(&program).expect("bind ok");
 
@@ -89,11 +85,11 @@ fn function_definition_and_call() {
 
     // Body is a call to FunctionId(0) with one number arg
     match &bound.body {
-        BoundExpr::Call(FunctionId(fid), args) => {
+        BoundExpr::Call { id: FunctionId(fid), args, .. } => {
             assert_eq!(*fid, 0);
             assert_eq!(args.len(), 1);
             match &args[0] {
-                BoundExpr::Number(n) => assert_eq!(*n, 41.0),
+                BoundExpr::Number(n, _s) => assert_eq!(*n, 41.0),
                 _ => panic!("expected numeric argument"),
             }
         }
@@ -102,13 +98,13 @@ fn function_definition_and_call() {
 
     // Ensure the function body uses a local var for param `x`
     match &bound.functions[0].body {
-        BoundExpr::Add(left, right) => {
+        BoundExpr::Add(left, right, _s) => {
             match left.as_ref() {
-                BoundExpr::Var(ResolvedVar::Local(slot)) => assert_eq!(*slot, 0),
+                BoundExpr::Var(ResolvedVar::Local(slot), _s) => assert_eq!(*slot, 0),
                 _ => panic!("expected local var for param x"),
             }
             match right.as_ref() {
-                BoundExpr::Number(n) => assert_eq!(*n, 1.0),
+                BoundExpr::Number(n, _s) => assert_eq!(*n, 1.0),
                 _ => panic!("expected numeric literal 1"),
             }
         }
@@ -144,7 +140,7 @@ fn closure_captures_outer_let() {
 
     // Inside the body, the reference should appear as Captured { depth: 1, slot: 0 }
     match &g.body {
-        BoundExpr::Var(ResolvedVar::Captured { depth, slot }) => {
+        BoundExpr::Var(ResolvedVar::Captured { depth, slot }, _s) => {
             assert_eq!((*depth, *slot), (1, 0));
         }
         other => panic!("expected captured var in g body, got {:?}", other),
@@ -152,7 +148,7 @@ fn closure_captures_outer_let() {
 
     // Sanity: body calls g (id 0)
     match &bound.body {
-        BoundExpr::Call(FunctionId(fid), args) => {
+        BoundExpr::Call{ id: FunctionId(fid), args, ..} => {
             assert_eq!(*fid, 0);
             assert!(args.is_empty());
         }
@@ -164,12 +160,7 @@ fn closure_captures_outer_let() {
 fn param_shadows_outer_let() {
     // let x = 1; def id(x) $x; id(2)
     let program = Program {
-        defs: vec![Def {
-            name: ident("id"),
-            params: vec![ident("x")],
-            body: var("x"),
-            span: s(),
-        }],
+        defs: vec![Def { name: ident("id"), params: vec![ident("x")], body: var("x"), span: s() }],
         lets: vec![Let {
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
@@ -185,7 +176,7 @@ fn param_shadows_outer_let() {
     assert!(idf.captures.is_empty());
 
     match &idf.body {
-        BoundExpr::Var(ResolvedVar::Local(slot)) => assert_eq!(*slot, 0), // param slot 0
+        BoundExpr::Var(ResolvedVar::Local(slot), _s) => assert_eq!(*slot, 0), // param slot 0
         other => panic!("expected local var for param x, got {:?}", other),
     }
 }
@@ -204,12 +195,7 @@ fn unknown_variable_yields_error_with_span() {
 fn unknown_function_yields_error_with_suggestions() {
     // nope()
     let program = Program {
-        defs: vec![Def {
-            name: ident("near"),
-            params: vec![],
-            body: Expr::Null(s()),
-            span: s(),
-        }],
+        defs: vec![Def { name: ident("near"), params: vec![], body: Expr::Null(s()), span: s() }],
         lets: vec![],
         body: call("nope", vec![]),
         span: s(),
@@ -228,11 +214,7 @@ fn non_function_callee_is_rejected() {
     let program = Program {
         defs: vec![],
         lets: vec![],
-        body: Expr::Call {
-            callee: Box::new(Expr::This(s())),
-            args: vec![num("1")],
-            span: s(),
-        },
+        body: Expr::Call { callee: Box::new(Expr::This(s())), args: vec![num("1")], span: s() },
         span: s(),
     };
     let err = bind(&program).unwrap_err();

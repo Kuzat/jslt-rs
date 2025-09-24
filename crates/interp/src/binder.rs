@@ -1,4 +1,4 @@
-use ast::{Program, Span};
+use ast::Span;
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,55 +44,61 @@ pub struct CaptureSpec {
 
 #[derive(Debug, Clone)]
 pub enum BoundExpr {
-    Null,
-    Bool(bool),
-    Number(f64),
-    String(String),
+    Null(Span),
+    Bool(bool, Span),
+    Number(f64, Span),
+    String(String, Span),
 
     // Context '.'
-    This,
+    This(Span),
 
     // Variables '$name'
-    Var(ResolvedVar),
+    Var(ResolvedVar, Span),
 
     // Function calls 'f(a, b)'
-    Call(FunctionId, Vec<BoundExpr>),
+    Call {
+        id: FunctionId,
+        args: Vec<BoundExpr>,
+        span: Span,
+    },
 
     // Unary
-    Not(Box<BoundExpr>),
-    Neg(Box<BoundExpr>),
+    Not(Box<BoundExpr>, Span),
+    Neg(Box<BoundExpr>, Span),
 
     // Binary ops
-    Add(Box<BoundExpr>, Box<BoundExpr>),
-    Sub(Box<BoundExpr>, Box<BoundExpr>),
-    Mul(Box<BoundExpr>, Box<BoundExpr>),
-    Div(Box<BoundExpr>, Box<BoundExpr>),
-    Mod(Box<BoundExpr>, Box<BoundExpr>),
-    Eq(Box<BoundExpr>, Box<BoundExpr>),
-    Ne(Box<BoundExpr>, Box<BoundExpr>),
-    Lt(Box<BoundExpr>, Box<BoundExpr>),
-    Le(Box<BoundExpr>, Box<BoundExpr>),
-    Gt(Box<BoundExpr>, Box<BoundExpr>),
-    Ge(Box<BoundExpr>, Box<BoundExpr>),
-    And(Box<BoundExpr>, Box<BoundExpr>),
-    Or(Box<BoundExpr>, Box<BoundExpr>),
+    Add(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Sub(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Mul(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Div(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Mod(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Eq(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Ne(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Lt(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Le(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Gt(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Ge(Box<BoundExpr>, Box<BoundExpr>, Span),
+    And(Box<BoundExpr>, Box<BoundExpr>, Span),
+    Or(Box<BoundExpr>, Box<BoundExpr>, Span),
 
     // Conditional
     If {
         cond: Box<BoundExpr>,
         then_br: Box<BoundExpr>,
         else_br: Box<BoundExpr>,
+        span: Span,
     },
 
     // postfix: member, index/slice,  comprehensions
-    ArrayLiteral(Vec<BoundExpr>),
-    ObjectLiteral(Vec<(BoundExpr, BoundExpr)>, Option<Box<BoundExpr>> /* spread */),
+    ArrayLiteral(Vec<BoundExpr>, Span),
+    ObjectLiteral(Vec<(BoundExpr, BoundExpr)>, Option<Box<BoundExpr>> /* spread */, Span),
 
     // Array comprehensions
     ArrayFor {
         seq: Box<BoundExpr>,
         elem: Box<BoundExpr>,
         filter: Option<Box<BoundExpr>>,
+        span: Span,
     },
 
     ObjectFor {
@@ -100,24 +106,64 @@ pub enum BoundExpr {
         key: Box<BoundExpr>,
         value: Box<BoundExpr>,
         filter: Option<Box<BoundExpr>>,
+        span: Span,
     },
 
     // member access: .k or ."quoted"
-    Member(Box<BoundExpr>, ObjectKey),
+    Member(Box<BoundExpr>, ObjectKey, Span),
 
     // Indexing [i] and slicing [start:end] - we keep both; evaluator will implement semantics
-    Index(Box<BoundExpr>, Box<BoundExpr>),
+    Index(Box<BoundExpr>, Box<BoundExpr>, Span),
     Slice {
         target: Box<BoundExpr>,
         start: Option<Box<BoundExpr>>,
         end: Option<Box<BoundExpr>>,
+        span: Span,
     },
+}
+
+impl BoundExpr {
+    pub fn span(&self) -> Span {
+        use BoundExpr::*;
+        match self {
+            Null(s) => *s,
+            Bool(_, s) => *s,
+            Number(_, s) => *s,
+            String(_, s) => *s,
+            This(s) => *s,
+            Var(_, s) => *s,
+            Call { span, .. } => *span,
+            Not(_, s) => *s,
+            Neg(_, s) => *s,
+            Add(_, _, s)
+            | Sub(_, _, s)
+            | Mul(_, _, s)
+            | Div(_, _, s)
+            | Mod(_, _, s)
+            | Eq(_, _, s)
+            | Ne(_, _, s)
+            | Lt(_, _, s)
+            | Le(_, _, s)
+            | Gt(_, _, s)
+            | Ge(_, _, s)
+            | And(_, _, s)
+            | Or(_, _, s) => *s,
+            If { span, .. } => *span,
+            ArrayLiteral(_, s) => *s,
+            ObjectLiteral(_, _, s) => *s,
+            ArrayFor { span, .. } => *span,
+            ObjectFor { span, .. } => *span,
+            Member(_, _, s) => *s,
+            Index(_, _, s) => *s,
+            Slice { span, .. } => *span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum ObjectKey {
-    Ident(String),
-    String(String),
+    Ident(String, Span),
+    String(String, Span),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -378,13 +424,13 @@ impl Binder {
     fn bind_expr(&mut self, e: &ast::Expr) -> Result<BoundExpr, BindError> {
         use ast::Expr;
         match e {
-            Expr::Null(_s) => Ok(BoundExpr::Null),
-            Expr::Bool { value, .. } => Ok(BoundExpr::Bool(*value)),
+            Expr::Null(s) => Ok(BoundExpr::Null(*s)),
+            Expr::Bool { value, span } => Ok(BoundExpr::Bool(*value, *span)),
             Expr::Number { lexeme, span } => {
                 // Parse once here; numbers are runetime f64 in the interpreter
                 match lexeme.parse::<f64>() {
-                    Ok(v) => Ok(BoundExpr::Number(v)),
-                    Err(e) => {
+                    Ok(v) => Ok(BoundExpr::Number(v, *span)),
+                    Err(_e) => {
                         // Parser/lexer should have validated; still, report a spanful binder error if it slips through
                         Err(BindError::UnknownVariable {
                             name: format!("invalid-number: {}", lexeme),
@@ -394,12 +440,12 @@ impl Binder {
                     }
                 }
             }
-            Expr::String { value, .. } => Ok(BoundExpr::String(value.clone())),
-            Expr::This(_) => Ok(BoundExpr::This),
+            Expr::String { value, span } => Ok(BoundExpr::String(value.clone(), *span)),
+            Expr::This(span) => Ok(BoundExpr::This(*span)),
 
             Expr::Variable { name } => {
                 if let Some(v) = self.env.lookup_var(&name.name) {
-                    Ok(BoundExpr::Var(v))
+                    Ok(BoundExpr::Var(v, name.span))
                 } else {
                     Err(BindError::UnknownVariable {
                         name: name.name.clone(),
@@ -409,57 +455,59 @@ impl Binder {
                 }
             }
 
-            Expr::If { cond, then_br, else_br, .. } => Ok(BoundExpr::If {
+            Expr::If { cond, then_br, else_br, span } => Ok(BoundExpr::If {
                 cond: Box::new(self.bind_expr(cond)?),
                 then_br: Box::new(self.bind_expr(then_br)?),
                 else_br: Box::new(self.bind_expr(else_br)?),
+                span: *span,
             }),
 
-            Expr::Unary { op, expr, .. } => {
+            Expr::Unary { op, expr, span } => {
                 use ast::UnaryOp;
                 let inner = Box::new(self.bind_expr(expr)?);
                 Ok(match op {
-                    UnaryOp::Not => BoundExpr::Not(inner),
-                    UnaryOp::Neg => BoundExpr::Neg(inner),
+                    UnaryOp::Not => BoundExpr::Not(inner, *span),
+                    UnaryOp::Neg => BoundExpr::Neg(inner, *span),
                 })
             }
 
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary { op, left, right, span } => {
                 use ast::BinaryOp::*;
                 let l = Box::new(self.bind_expr(left)?);
                 let r = Box::new(self.bind_expr(right)?);
                 Ok(match op {
-                    Mul => BoundExpr::Mul(l, r),
-                    Div => BoundExpr::Div(l, r),
-                    Rem => BoundExpr::Mod(l, r),
-                    Add => BoundExpr::Add(l, r),
-                    Sub => BoundExpr::Sub(l, r),
-                    Lt => BoundExpr::Lt(l, r),
-                    Le => BoundExpr::Le(l, r),
-                    Gt => BoundExpr::Gt(l, r),
-                    Ge => BoundExpr::Ge(l, r),
-                    Eq => BoundExpr::Eq(l, r),
-                    Ne => BoundExpr::Ne(l, r),
-                    And => BoundExpr::And(l, r),
-                    Or => BoundExpr::Or(l, r),
+                    Mul => BoundExpr::Mul(l, r, *span),
+                    Div => BoundExpr::Div(l, r, *span),
+                    Rem => BoundExpr::Mod(l, r, *span),
+                    Add => BoundExpr::Add(l, r, *span),
+                    Sub => BoundExpr::Sub(l, r, *span),
+                    Lt => BoundExpr::Lt(l, r, *span),
+                    Le => BoundExpr::Le(l, r, *span),
+                    Gt => BoundExpr::Gt(l, r, *span),
+                    Ge => BoundExpr::Ge(l, r, *span),
+                    Eq => BoundExpr::Eq(l, r, *span),
+                    Ne => BoundExpr::Ne(l, r, *span),
+                    And => BoundExpr::And(l, r, *span),
+                    Or => BoundExpr::Or(l, r, *span),
                 })
             }
 
-            Expr::Member { target, key, .. } => {
+            Expr::Member { target, key, span } => {
                 let t = Box::new(self.bind_expr(target)?);
                 let bk = match key {
-                    ast::MemberKey::Ident(id) => ObjectKey::Ident(id.name.clone()),
-                    ast::MemberKey::Str { value, .. } => ObjectKey::String(value.clone()),
+                    ast::MemberKey::Ident(id) => ObjectKey::Ident(id.name.clone(), id.span),
+                    ast::MemberKey::Str { value, span } => ObjectKey::String(value.clone(), *span),
                 };
-                Ok(BoundExpr::Member(t, bk))
+                Ok(BoundExpr::Member(t, bk, *span))
             }
 
-            Expr::Index { target, index, .. } => Ok(BoundExpr::Index(
+            Expr::Index { target, index, span } => Ok(BoundExpr::Index(
                 Box::new(self.bind_expr(target)?),
                 Box::new(self.bind_expr(index)?),
+                *span,
             )),
 
-            Expr::Slice { target, start, end, .. } => Ok(BoundExpr::Slice {
+            Expr::Slice { target, start, end, span } => Ok(BoundExpr::Slice {
                 target: Box::new(self.bind_expr(target)?),
                 start: match start {
                     Some(s) => Some(Box::new(self.bind_expr(s)?)),
@@ -469,6 +517,7 @@ impl Binder {
                     Some(e) => Some(Box::new(self.bind_expr(e)?)),
                     None => None,
                 },
+                span: *span,
             }),
 
             Expr::Call { callee, args, span } => {
@@ -479,7 +528,7 @@ impl Binder {
                         for a in args {
                             bargs.push(self.bind_expr(a)?);
                         }
-                        Ok(BoundExpr::Call(fid, bargs))
+                        Ok(BoundExpr::Call { id: fid, args: bargs, span: *span })
                     } else {
                         Err(BindError::UnknownFunction {
                             name: name.clone(),
@@ -493,15 +542,15 @@ impl Binder {
                 }
             }
 
-            Expr::ArrayLiteral { elements, .. } => {
+            Expr::ArrayLiteral { elements, span } => {
                 let mut out = Vec::with_capacity(elements.len());
                 for e in elements {
                     out.push(self.bind_expr(e)?);
                 }
-                Ok(BoundExpr::ArrayLiteral(out))
+                Ok(BoundExpr::ArrayLiteral(out, *span))
             }
 
-            Expr::ArrayFor { seq, body, filter, .. } => {
+            Expr::ArrayFor { seq, body, filter, span } => {
                 let bseq = self.bind_expr(seq)?;
                 let bbody = self.bind_expr(body)?;
                 let bfilter =
@@ -510,10 +559,11 @@ impl Binder {
                     seq: Box::new(bseq),
                     elem: Box::new(bbody),
                     filter: bfilter,
+                    span: *span,
                 })
             }
 
-            Expr::ObjectLiteral { entries, .. } => {
+            Expr::ObjectLiteral { entries, span } => {
                 // Convert to a pair list (key-expr, value-expr). Keys are syntactic (ident or string)
                 // we emit keys as string expressions so evaluator can compute object construction.
                 let mut pairs: Vec<(BoundExpr, BoundExpr)> = Vec::with_capacity(entries.len());
@@ -522,9 +572,11 @@ impl Binder {
                     match ent {
                         ast::ObjectEntry::Pair { key, value, .. } => {
                             let kexpr = match key {
-                                ast::ObjectKey::Ident(id) => BoundExpr::String(id.name.clone()),
-                                ast::ObjectKey::Str { value, .. } => {
-                                    BoundExpr::String(value.clone())
+                                ast::ObjectKey::Ident(id) => {
+                                    BoundExpr::String(id.name.clone(), id.span)
+                                }
+                                ast::ObjectKey::Str { value, span } => {
+                                    BoundExpr::String(value.clone(), *span)
                                 }
                             };
                             let vexpr = self.bind_expr(value)?;
@@ -537,10 +589,10 @@ impl Binder {
                         }
                     }
                 }
-                Ok(BoundExpr::ObjectLiteral(pairs, spread))
+                Ok(BoundExpr::ObjectLiteral(pairs, spread, *span))
             }
 
-            Expr::ObjectFor { seq, key, value, filter, .. } => {
+            Expr::ObjectFor { seq, key, value, filter, span } => {
                 let bseq = self.bind_expr(seq)?;
                 let bkey = self.bind_expr(key)?;
                 let bvalue = self.bind_expr(value)?;
@@ -551,6 +603,7 @@ impl Binder {
                     key: Box::new(bkey),
                     value: Box::new(bvalue),
                     filter: bfilter,
+                    span: *span,
                 })
             }
 

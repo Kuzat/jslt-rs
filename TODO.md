@@ -127,8 +127,8 @@ unsafe_code = "forbid"
 
 ## 4) Binder / Name resolution
 
-* [ ] Walk AST to resolve variables (`$x`) and functions (`foo`) to indices/handles.
-* [ ] Environments: lexical scope stacks; capture closure values for `def`.
+* [x] Walk AST to resolve variables (`$x`) and functions (`foo`) to indices/handles.
+* [x] Environments: lexical scope stacks; capture closure values for `def`.
 
   * **Accept:** compile reports unknown names with nearest suggestions (optional Levenshtein later).
 
@@ -255,16 +255,5 @@ unsafe_code = "forbid"
 * Gate `regex`, `time`, `napi`, `pyo3`, `wasm-bindgen`, `tower-lsp` behind features so the default build stays svelte.
 
 ---
-
-### First 90 minutes (to make it real)
-
-1. `cargo new --vcs git jslt-rs && cd jslt-rs`
-2. Create workspace `Cargo.toml` + empty crates (`cargo new crates/lexer --lib`, etc.).
-3. Implement tokens + a handful of lexer tests (focus on `.` vs `.5`, strings, comments).
-4. Stub AST + parse numbers/strings/`.`/`$ident`/member/index; one end-to-end parse test.
-5. Wire `engine::compile` to call parser and return an AST (no eval).
-6. Add `cli` that prints the parsed AST (pretty-printed). You’ve got momentum.
-
-When you’re ready, I can drop a starter `Token` enum + lexer skeleton and the `Expr` enum that matches the spec, so you can slam tasks 1–4 without bike-shedding.
 
 

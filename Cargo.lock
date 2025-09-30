@@ -83,6 +83,8 @@ name = "interp"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "serde",
+ "serde_json",
  "thiserror",
  "value",
 ]

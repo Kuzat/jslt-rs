@@ -142,9 +142,9 @@ unsafe_code = "forbid"
 
 ## 6) Evaluator (interp)
 
-* [ ] Expression evaluation, short-circuit `and`/`or`, truthiness rules (start strict; adjust later if ref impl differs).
-* [ ] Null propagation for member/index/slice per spec.
-* [ ] Evaluation budget + recursion depth guard (config on `Program::apply`).
+* [x] Expression evaluation, short-circuit `and`/`or`, truthiness rules (start strict; adjust later if ref impl differs).
+* [x] Null propagation for member/index/slice per spec.
+* [x] Evaluation budget + recursion depth guard (config on `Program::apply`).
 
   * **Accept:** run simple programs end to end.
 

@@ -397,7 +397,7 @@ impl<'p> Evaluator<'p> {
                 Ok(JsltValue::from_json(Value::Array(out)))
             }
 
-            ObjectFor { seq, key, value, filter, span } => {
+            ObjectFor { seq, key, value, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
                 let arr: Vec<Value> = match seq_val.as_json() {
                     Value::Array(a) => a.clone(),

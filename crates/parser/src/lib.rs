@@ -23,7 +23,8 @@ pub enum ParseErrorKind {
     Lex(#[from] LexErrorKind),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{kind} at {span:?}")]
 pub struct ParseError {
     pub span: Span,
     pub kind: ParseErrorKind,

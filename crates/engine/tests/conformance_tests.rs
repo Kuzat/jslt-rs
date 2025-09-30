@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use engine::compile;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TestCase {
@@ -88,11 +89,10 @@ fn run_java_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::err
     Ok(result)
 }
 
-fn run_rust_jslt(_program: &str, input: &Value) -> Result<Value, Box<dyn std::error::Error>> {
-    // TODO: Implement once we have a working Rust JSLT engine
-    // For now, return the input unchanged for identity transformations
-    // This is just a placeholder to test the infrastructure
-    Ok(input.clone())
+fn run_rust_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    let compiled = compile(program)?;
+    let result: Value = compiled.apply(input, None)?;
+    Ok(result)
 }
 
 fn run_differential_test(test_case: &TestCase) -> TestResult {
@@ -142,7 +142,6 @@ fn run_differential_test(test_case: &TestCase) -> TestResult {
 }
 
 #[test]
-#[ignore] // Ignore by default since it requires Java JSLT setup
 fn test_conformance_against_java_jslt() {
     let test_cases = load_test_cases()
         .expect("Failed to load test cases");

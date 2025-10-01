@@ -242,6 +242,12 @@ unsafe_code = "forbid"
 * [ ] README: quickstart, API examples, CLI usage, feature flags.
 * [ ] Tag `v0.1.0` crates; publish `engine` and `cli` (bindings optional).
 
+## 17) Add extension functions (optional)
+
+* [ ] Add the possibility for users to define their own functions.
+  * [ ] Make sure this works as with original JSLT language.
+* [ ] `wasm` bindings should be updated to support this.
+* [ ] `lsp` should be updated to support this.
 ---
 
 ## Minimal dev tooling

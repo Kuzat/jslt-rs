@@ -4,12 +4,40 @@
   <meta charset="UTF-8">
   <title>JSLT wasm demo</title>
   <style>
-   body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; }
-   textarea { width: 100%; height: 10rem; font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+   :root {
+     --bg: #ffffff;
+     --fg: #111111;
+     --muted: #666666;
+     --border: #d0d7de;
+     --input-bg: #ffffff;
+     --btn-bg: #eeeeee;
+     --btn-fg: #111111;
+     --error: #b00020;
+   }
+
+   @media (prefers-color-scheme: dark) {
+     :root {
+       --bg: #0f1419;
+       --fg: #e6edf3;
+       --muted: #8b949e;
+       --border: #30363d;
+       --input-bg: #161b22;
+       --btn-bg: #21262d;
+       --btn-fg: #e6edf3;
+       --error: #ff6b6b;
+     }
+   }
+
+   html, body { height: 100%; }
+   body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; background: var(--bg); color: var(--fg); }
+   label { color: var(--muted); }
+   textarea { width: 100%; height: 10rem; font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; }
    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
    .col { display: flex; flex-direction: column; gap: 0.5rem; }
-   button { padding: 0.5rem 1rem; }
-   .error { color: #b00020; white-space: pre-wrap; }
+   button { padding: 0.5rem 1rem; background: var(--btn-bg); color: var(--btn-fg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+   button:hover { filter: brightness(1.05); }
+   #status { color: var(--muted); }
+   .error { color: var(--error); white-space: pre-wrap; }
    </style>
 </head>
 <body>

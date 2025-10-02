@@ -125,25 +125,6 @@ fn for_comprehensions() {
 }
 
 #[test]
-#[ignore]
-fn let_bindings_with_semicolons() {
-    // Currently, JSLT does not support multiple bindings in one let statement,
-
-    // Single binding
-    assert_eq!(parse_fmt("let a = 1; a"), "let a = 1;\na");
-
-    // Multiple bindings + trailing semicolon
-    let prog = "let a = 1; b = \"s\"; c = a + 2; $c";
-    // Depending on your pretty-printer, identifiers vs variables differ.
-    // Here we only assert it round-trips without panics and preserves structure.
-    let pretty = parse_fmt(prog);
-    assert!(
-        pretty.contains("let a = 1") && pretty.contains("b = \"s\"") && pretty.contains("c = a + 2"),
-        "unexpected pretty: {pretty}"
-    );
-}
-
-#[test]
 fn normal_let_binding_with_single_value() {
     assert_eq!(parse_fmt("let a = 1\n$a"), "let a = 1\n$a");
 }

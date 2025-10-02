@@ -20,6 +20,22 @@ impl JsltValue {
         Self(Value::Null)
     }
 
+    pub fn bool(b: bool) -> Self {
+        Self(Value::Bool(b))
+    }
+
+    pub fn string(s: String) -> Self {
+        Self(Value::String(s))
+    }
+
+    pub fn number(n: f64) -> Self {
+        Self(Value::Number(Number::from_f64(n).unwrap()))
+    }
+
+    pub fn array(a: Vec<JsltValue>) -> Self {
+        Self(Value::Array(a.into_iter().map(|v| v.0).collect()))
+    }
+
     pub fn is_null(&self) -> bool {
         matches!(self.0, Value::Null)
     }
@@ -147,6 +163,43 @@ impl JsltValue {
                 JsltValue(Value::String(out))
             }
             _ => JsltValue::null(),
+        }
+    }
+
+    // Helper function to find the type of a value.
+    pub fn type_of(&self) -> &'static str {
+        match self.as_json() {
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+    }
+
+    // Helper function to check if a value is truthy.
+    pub fn truthy(&self) -> bool {
+        match self.as_json() {
+            Value::Null => false,
+            Value::Bool(b) => *b,
+            Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
+            Value::String(s) => !s.is_empty(),
+            Value::Array(a) => !a.is_empty(),
+            Value::Object(o) => !o.is_empty(),
+        }
+    }
+
+    // helper function to turn value to string representation
+    pub fn stringify(&self) -> String {
+        match self.as_json() {
+            Value::Null => "null".to_string(),
+            Value::Bool(true) => "true".to_string(),
+            Value::Bool(false) => "false".to_string(),
+            Value::Number(_) => self.as_json().to_string(),
+            Value::String(s) => s.clone(),
+            // For arrays/objects: JSON rendering to match typical JSLT behavior for string()
+            Value::Array(_) | Value::Object(_) => serde_json::to_string(self.as_json()).unwrap_or_default(),
         }
     }
 }

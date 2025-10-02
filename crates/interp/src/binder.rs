@@ -21,6 +21,7 @@ pub struct BoundProgram {
     pub functions: Vec<BoundFunction>,
     pub lets: Vec<(String, BoundExpr)>,
     pub body: BoundExpr,
+    pub builtin_count: usize,
 }
 
 // Bound function holds closure metadata and the bound body
@@ -350,11 +351,27 @@ pub struct Binder {
     env: Env<'static>,
     functions: Vec<BoundFunction>,
     next_fun_id: usize,
+    builtin_count: usize,
 }
 
 impl Binder {
     pub fn new() -> Self {
-        Self { env: Env::new(), functions: Vec::new(), next_fun_id: 0 }
+        let mut env = Env::new();
+
+        // Seed built-in functions from stdlib registry
+        let registry = stdlib::Registry::with_default();
+        for name in registry.names() {
+            if let Some(id) = registry.get_id(name) {
+                env.define_fun(name, FunctionId(id));
+            }
+        }
+
+        Self {
+            env,
+            functions: Vec::new(),
+            next_fun_id: registry.len(), // reserve space for builtins
+            builtin_count: registry.len(),
+        }
     }
 
     fn alloc_fun_id(&mut self) -> FunctionId {
@@ -418,7 +435,12 @@ impl Binder {
         // 4) bind program body
         let body = self.bind_expr(&p.body)?;
 
-        Ok(BoundProgram { functions: self.functions.clone(), lets, body })
+        Ok(BoundProgram {
+            functions: self.functions.clone(),
+            lets,
+            body,
+            builtin_count: self.builtin_count,
+        })
     }
 
     fn bind_expr(&mut self, e: &ast::Expr) -> Result<BoundExpr, BindError> {

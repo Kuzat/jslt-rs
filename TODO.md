@@ -154,8 +154,7 @@ unsafe_code = "forbid"
 
   * `string`, `number`, `boolean`
   * `size`, `keys`, `values`
-  * `get(obj, key, default?)`
-  * `starts-with`, `ends-with`, `contains`, `split`, `join`, `upper`, `lower`, `trim`
+  * `starts-with`, `ends-with`, `contains`, `split`, `join`, `uppercase`, `lowercase`, `trim`
   * `map(arr, f)`, `filter(arr, f)` are **not** language features—consider leaving them out unless JSLT defines them; rely on comprehensions instead.
 * [ ] `regex` gated: `match`, `test`, `replace` using `regex` crate.
 

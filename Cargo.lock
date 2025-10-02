@@ -101,6 +101,7 @@ dependencies = [
  "ast",
  "serde",
  "serde_json",
+ "stdlib",
  "thiserror",
  "value",
 ]
@@ -307,6 +308,8 @@ name = "stdlib"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "serde",
+ "serde_json",
  "thiserror",
  "value",
 ]

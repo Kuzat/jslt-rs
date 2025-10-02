@@ -5,6 +5,7 @@ use crate::binder::{
 use ast::{Program, Span};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use stdlib::Registry;
 use thiserror::Error;
 use value::JsltValue;
 
@@ -77,11 +78,26 @@ struct Evaluator<'p> {
     steps: u64,
     call_depth: usize,
     stack: Vec<Frame>,
+    registry: Registry,
+    builtin_count: usize,
 }
 
 impl<'p> Evaluator<'p> {
     fn new(prog: &'p BoundProgram, cfg: EvalConfig) -> Self {
-        Self { prog, closures: HashMap::new(), cfg, steps: 0, call_depth: 0, stack: Vec::new() }
+        // Initialize builtin registry once. ids 0..builtin_coutn must match binding seeding
+        let registry = Registry::with_default();
+        let builtin_count = prog.builtin_count;
+
+        Self {
+            prog,
+            closures: HashMap::new(),
+            cfg,
+            steps: 0,
+            call_depth: 0,
+            stack: Vec::new(),
+            registry,
+            builtin_count,
+        }
     }
 
     fn bump_steps(&mut self) -> Result<(), RuntimeError> {
@@ -229,7 +245,7 @@ impl<'p> Evaluator<'p> {
 
             If { cond, then_br, else_br, .. } => {
                 let c = self.eval_expr(cond)?;
-                if truthy(&c) {
+                if c.truthy() {
                     self.eval_expr(then_br)
                 } else {
                     self.eval_expr(else_br)
@@ -238,7 +254,7 @@ impl<'p> Evaluator<'p> {
 
             Not(inner, _) => {
                 let v = self.eval_expr(inner)?;
-                Ok(JsltValue::from_json(Value::Bool(!truthy(&v))))
+                Ok(JsltValue::from_json(Value::Bool(!v.truthy())))
             }
             Neg(inner, sp) => {
                 let v = self.eval_expr(inner)?;
@@ -314,7 +330,7 @@ impl<'p> Evaluator<'p> {
 
             And(l, r, _) => {
                 let lv = self.eval_expr(l)?;
-                if !truthy(&lv) {
+                if !lv.truthy() {
                     Ok(lv) // short-circuit
                 } else {
                     self.eval_expr(r)
@@ -322,7 +338,7 @@ impl<'p> Evaluator<'p> {
             }
             Or(l, r, _) => {
                 let lv = self.eval_expr(l)?;
-                if truthy(&lv) {
+                if lv.truthy() {
                     Ok(lv) // short-circuit
                 } else {
                     self.eval_expr(r)
@@ -388,7 +404,7 @@ impl<'p> Evaluator<'p> {
                         active_fun: caller_frame.active_fun,
                     });
                     let pass =
-                        if let Some(f) = filter { truthy(&self.eval_expr(f)?) } else { true };
+                        if let Some(f) = filter { self.eval_expr(f)?.truthy() } else { true };
                     if pass {
                         out.push(self.eval_expr(elem)?.into_json());
                     }
@@ -412,7 +428,7 @@ impl<'p> Evaluator<'p> {
                         active_fun: caller_frame.active_fun,
                     });
                     let pass =
-                        if let Some(f) = filter { truthy(&self.eval_expr(f)?) } else { true };
+                        if let Some(f) = filter { self.eval_expr(f)?.truthy() } else { true };
                     if pass {
                         let k = self.eval_expr(key)?;
                         let kstr = match k.as_json() {
@@ -462,59 +478,90 @@ impl<'p> Evaluator<'p> {
                                 Some(f) => Some(f.trunc() as i64),
                                 None => return Ok(JsltValue::null()),
                             }
-                        } else { None };
+                        } else {
+                            None
+                        };
                         let eidx = if let Some(e2) = end {
                             let ev = self.eval_expr(e2)?;
                             match ev.as_f64_checked() {
                                 Some(f) => Some(f.trunc() as i64),
                                 None => return Ok(JsltValue::null()),
                             }
-                        } else { None };
+                        } else {
+                            None
+                        };
                         Ok(tv.slice(sidx, eidx))
                     }
                     _ => Ok(JsltValue::null()),
                 }
             }
 
-            Call { id, args, span} => {
-                let (fun_id, fun_body) = {
-                    let clo = self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
-                    let expected = clo.fun.params.len();
-                    if args.len() != expected {
-                        return Err(RuntimeError::ArityMismatch {
-                            name: clo.fun.name.clone(),
-                            expected,
-                            got: args.len(),
-                            span: *span,
-                        });
-                    }
-                    (clo.fun.id, clo.fun.body.clone())
-                };
-
-                // evaluate args left to right
+            Call { id, args, span } => {
+                // Evaluate args left to right once for either builtin or user functions
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for a in args {
                     evaluated_args.push(self.eval_expr(a)?);
                 }
 
-                // New frame: '.' carries through from caller
-                let caller_this = self.current_frame().this_val.clone();
-                let new_frame = Frame {
-                    locals: evaluated_args,
-                    this_val: caller_this,
-                    active_fun: Some(fun_id),
-                };
-                self.with_call_depth(|me| {
-                    me.push_frame(new_frame);
-                    let result = me.eval_expr(&fun_body)?;
-                    me.pop_frame();
-                    Ok(result)
-                })
+                // Dispatch to stdlib if id is within builtin range, else user function
+                if id.0 < self.builtin_count {
+                    // builtin function call
+                    match self.registry.call_by_id(id.0, &evaluated_args) {
+                        Ok(v) => Ok(v),
+                        Err(err) => {
+                            // Best-effort to include function name in message
+                            let fname = self
+                                .registry
+                                .get_by_id(id.0)
+                                .map(|f| f.name())
+                                .unwrap_or("<builtin>");
+                            Err(map_stdlib_error(err, fname, *span))
+                        }
+                    }
+                } else {
+                    // user defined function
+                    let (fun_id, fun_body, expected_params) = {
+                        let clo =
+                            self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
+                        (clo.fun.id, clo.fun.body.clone(), clo.fun.params.len())
+                    };
+
+                    if evaluated_args.len() != expected_params {
+                        return Err(RuntimeError::ArityMismatch {
+                            name: self
+                                .closures
+                                .get(id)
+                                .map(|c| c.fun.name.clone())
+                                .unwrap_or_else(|| "<function>".to_string()),
+                            expected: expected_params,
+                            got: evaluated_args.len(),
+                            span: *span,
+                        });
+                    }
+                    // New frame: '.' carries through from caller
+                    let caller_this = self.current_frame().this_val.clone();
+                    let new_frame = Frame {
+                        locals: evaluated_args,
+                        this_val: caller_this,
+                        active_fun: Some(fun_id),
+                    };
+                    self.with_call_depth(|me| {
+                        me.push_frame(new_frame);
+                        let result = me.eval_expr(&fun_body)?;
+                        me.pop_frame();
+                        Ok(result)
+                    })
+                }
             }
         }
     }
 
-    fn eval_add(&mut self, l: &BoundExpr, r: &BoundExpr, span: Span) -> Result<JsltValue, RuntimeError> {
+    fn eval_add(
+        &mut self,
+        l: &BoundExpr,
+        r: &BoundExpr,
+        span: Span,
+    ) -> Result<JsltValue, RuntimeError> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
         match (lv.as_json(), rv.as_json()) {
@@ -589,17 +636,6 @@ impl<'p> Evaluator<'p> {
     }
 }
 
-fn truthy(v: &JsltValue) -> bool {
-    match v.as_json() {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
-    }
-}
-
 // Member access with null propagation
 fn obj_get(target: &JsltValue, key: &ObjectKey) -> JsltValue {
     let k = match key {
@@ -615,23 +651,45 @@ fn obj_get(target: &JsltValue, key: &ObjectKey) -> JsltValue {
 }
 
 // Public entry point: evaluate a bound program against input JSON.
-pub fn apply(bound: &BoundProgram, input: &Value, cfg: Option<EvalConfig>) -> Result<Value, RuntimeError> {
+pub fn apply(
+    bound: &BoundProgram,
+    input: &Value,
+    cfg: Option<EvalConfig>,
+) -> Result<Value, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let ev = Evaluator::new(bound, cfg);
     ev.eval_program(input)
 }
 
 // Convenience: bind + apply from AST program
-pub fn eval(program: &Program, input: &Value, cfg: Option<EvalConfig>) -> Result<Value, Box<dyn std::error::Error>> {
+pub fn eval(
+    program: &Program,
+    input: &Value,
+    cfg: Option<EvalConfig>,
+) -> Result<Value, Box<dyn std::error::Error>> {
     let bound = bind(program)?;
     Ok(apply(&bound, input, cfg)?)
 }
 
+fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> RuntimeError {
+    match err {
+        stdlib::StdlibError::Arity { expected, got } => RuntimeError::TypeError {
+            msg: format!("{} expects {} arguments, got {}", fname, expected, got),
+            span,
+        },
+        stdlib::StdlibError::Type(msg) => RuntimeError::TypeError { msg, span },
+        stdlib::StdlibError::Semantic(msg) => {
+            RuntimeError::Internal(format!("builtin `{}` failed: {}", fname, msg))
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use binder::{BoundExpr as B, ObjectKey as OK, ResolvedVar as RV, BoundFunction, FunctionId, CaptureSpec};
+    use binder::{
+        BoundExpr as B, BoundFunction, CaptureSpec, FunctionId, ObjectKey as OK, ResolvedVar as RV,
+    };
     use serde_json::json;
 
     fn sp() -> ast::Span {
@@ -645,6 +703,7 @@ mod tests {
             functions,
             lets: lets.into_iter().map(|(n, e)| (n.to_string(), e)).collect(),
             body,
+            builtin_count: 0,
         }
     }
 
@@ -697,12 +756,12 @@ mod tests {
         // Array indexing negative and OOB → null
         let body_idx_neg = B::Index(Box::new(B::This(sp())), Box::new(B::Number(-1.0, sp())), sp());
         let p_idx_neg = prog_with(vec![], body_idx_neg, vec![]);
-        let out_idx_neg = apply(&p_idx_neg, &json!([1,2,3]), None).unwrap();
+        let out_idx_neg = apply(&p_idx_neg, &json!([1, 2, 3]), None).unwrap();
         assert_eq!(out_idx_neg, json!(3));
 
         let body_idx_oob = B::Index(Box::new(B::This(sp())), Box::new(B::Number(99.0, sp())), sp());
         let p_idx_oob = prog_with(vec![], body_idx_oob, vec![]);
-        let out_idx_oob = apply(&p_idx_oob, &json!([1,2,3]), None).unwrap();
+        let out_idx_oob = apply(&p_idx_oob, &json!([1, 2, 3]), None).unwrap();
         assert_eq!(out_idx_oob, json!(null));
     }
 
@@ -715,13 +774,18 @@ mod tests {
         assert_eq!(out_add, json!(3.0));
 
         // "a" + "b" -> "ab"
-        let body_cat = B::Add(Box::new(B::String("a".into(), sp())), Box::new(B::String("b".into(), sp())), sp());
+        let body_cat = B::Add(
+            Box::new(B::String("a".into(), sp())),
+            Box::new(B::String("b".into(), sp())),
+            sp(),
+        );
         let p_cat = prog_with(vec![], body_cat, vec![]);
         let out_cat = apply(&p_cat, &json!(null), None).unwrap();
         assert_eq!(out_cat, json!("ab"));
 
         // "a" + 1 -> type error
-        let body_bad = B::Add(Box::new(B::String("a".into(), sp())), Box::new(B::Number(1.0, sp())), sp());
+        let body_bad =
+            B::Add(Box::new(B::String("a".into(), sp())), Box::new(B::Number(1.0, sp())), sp());
         let p_bad = prog_with(vec![], body_bad, vec![]);
         let err = apply(&p_bad, &json!(null), None).unwrap_err();
         match err {
@@ -733,45 +797,32 @@ mod tests {
     #[test]
     fn comparisons_and_equality() {
         // Deep object equality order-insensitive
-        let a = json!({"x": 1, "y": [true, null]});
-        let b = json!({"y": [true, null], "x": 1});
-        let body_eq = B::Eq(
-            Box::new(B::This(sp())),
-            Box::new(B::This(sp())), // We'll feed `a` as input and test equality with itself first
-            sp(),
-        );
         // But to compare a vs b, use lets to bind both and compare vars
         // let l0 = a; let l1 = b; l0 == l1
-        let lets = vec![
-            ("l0", B::This(sp())),
-            ("l1", B::This(sp())),
-        ];
         // Build body: Eq( Var(Local(0)), Var(Local(1)) )
-        let body = B::Eq(Box::new(B::Var(RV::Local(0), sp())), Box::new(B::Var(RV::Local(1), sp())), sp());
-        let p = prog_with(lets, body, vec![]);
-
         // First run with input = a, then overwrite second let with b via a second program
         // However evaluator binds lets from expressions; here both lets read '.' so both become input.
         // Instead, run two separate programs:
         // Program p_ab: lets ["l0"=. , "l1"=.], but we won't use this trick.
         // Simpler: directly compare with bound literals:
-        let body_lit_eq = B::Eq(
-            Box::new(B::String(serde_json::to_string(&a).unwrap(), sp())), // not ideal for objects
-            Box::new(B::String(serde_json::to_string(&b).unwrap(), sp())),
-            sp(),
-        );
         // The above is awkward. Let's instead test equality through evaluator's deep_eq by constructing JsltValue via ObjectLiteral:
         let body_obj_left = B::ObjectLiteral(
             vec![
                 (B::String("x".into(), sp()), B::Number(1.0, sp())),
-                (B::String("y".into(), sp()), B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp())),
+                (
+                    B::String("y".into(), sp()),
+                    B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
+                ),
             ],
             None,
             sp(),
         );
         let body_obj_right = B::ObjectLiteral(
             vec![
-                (B::String("y".into(), sp()), B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp())),
+                (
+                    B::String("y".into(), sp()),
+                    B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
+                ),
                 (B::String("x".into(), sp()), B::Number(1.0, sp())),
             ],
             None,
@@ -798,14 +849,19 @@ mod tests {
     #[test]
     fn logical_short_circuiting() {
         // true or (1/0) must short-circuit and not fail
-        let body_div_zero = B::Div(Box::new(B::Number(1.0, sp())), Box::new(B::Number(0.0, sp())), sp());
+        let body_div_zero =
+            B::Div(Box::new(B::Number(1.0, sp())), Box::new(B::Number(0.0, sp())), sp());
         let body_or = B::Or(Box::new(B::Bool(true, sp())), Box::new(body_div_zero), sp());
         let p_or = prog_with(vec![], body_or, vec![]);
         let out_or = apply(&p_or, &json!(null), None).unwrap();
         assert_eq!(out_or, json!(true));
 
         // false and (1/0) must short-circuit and not fail
-        let body_and = B::And(Box::new(B::Bool(false, sp())), Box::new(B::Div(Box::new(B::Number(1.0, sp())), Box::new(B::Number(0.0, sp())), sp())), sp());
+        let body_and = B::And(
+            Box::new(B::Bool(false, sp())),
+            Box::new(B::Div(Box::new(B::Number(1.0, sp())), Box::new(B::Number(0.0, sp())), sp())),
+            sp(),
+        );
         let p_and = prog_with(vec![], body_and, vec![]);
         let out_and = apply(&p_and, &json!(null), None).unwrap();
         assert_eq!(out_and, json!(false));
@@ -822,17 +878,17 @@ mod tests {
         };
         let p = prog_with(vec![], body, vec![]);
 
-        assert_eq!(apply(&p, &json!(null), None).unwrap(), json!(2.0));       // null -> falsey
-        assert_eq!(apply(&p, &json!(false), None).unwrap(), json!(2.0));      // false -> falsey
-        assert_eq!(apply(&p, &json!(true), None).unwrap(), json!(1.0));       // true -> truthy
-        assert_eq!(apply(&p, &json!(0), None).unwrap(), json!(2.0));          // 0 -> falsey
-        assert_eq!(apply(&p, &json!(2), None).unwrap(), json!(1.0));          // non-zero -> truthy
-        assert_eq!(apply(&p, &json!(""), None).unwrap(), json!(2.0));         // empty string falsey
-        assert_eq!(apply(&p, &json!("x"), None).unwrap(), json!(1.0));        // non-empty string truthy
-        assert_eq!(apply(&p, &json!([]), None).unwrap(), json!(2.0));         // empty array falsey
-        assert_eq!(apply(&p, &json!([0]), None).unwrap(), json!(1.0));        // non-empty array truthy
-        assert_eq!(apply(&p, &json!({}), None).unwrap(), json!(2.0));         // empty object falsey
-        assert_eq!(apply(&p, &json!({"a":1}), None).unwrap(), json!(1.0));    // non-empty object truthy
+        assert_eq!(apply(&p, &json!(null), None).unwrap(), json!(2.0)); // null -> falsey
+        assert_eq!(apply(&p, &json!(false), None).unwrap(), json!(2.0)); // false -> falsey
+        assert_eq!(apply(&p, &json!(true), None).unwrap(), json!(1.0)); // true -> truthy
+        assert_eq!(apply(&p, &json!(0), None).unwrap(), json!(2.0)); // 0 -> falsey
+        assert_eq!(apply(&p, &json!(2), None).unwrap(), json!(1.0)); // non-zero -> truthy
+        assert_eq!(apply(&p, &json!(""), None).unwrap(), json!(2.0)); // empty string falsey
+        assert_eq!(apply(&p, &json!("x"), None).unwrap(), json!(1.0)); // non-empty string truthy
+        assert_eq!(apply(&p, &json!([]), None).unwrap(), json!(2.0)); // empty array falsey
+        assert_eq!(apply(&p, &json!([0]), None).unwrap(), json!(1.0)); // non-empty array truthy
+        assert_eq!(apply(&p, &json!({}), None).unwrap(), json!(2.0)); // empty object falsey
+        assert_eq!(apply(&p, &json!({"a":1}), None).unwrap(), json!(1.0)); // non-empty object truthy
     }
 
     #[test]
@@ -871,13 +927,29 @@ mod tests {
             // Build a nested expression to exceed steps quickly: (((((((1+1)+1)+1)+1)+1)+1)
             B::Add(
                 Box::new(B::Add(
-                    Box::new(B::Add(Box::new(B::Number(1.0, sp())), Box::new(B::Number(1.0, sp())), sp())),
-                    Box::new(B::Add(Box::new(B::Number(1.0, sp())), Box::new(B::Number(1.0, sp())), sp())),
+                    Box::new(B::Add(
+                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::Number(1.0, sp())),
+                        sp(),
+                    )),
+                    Box::new(B::Add(
+                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::Number(1.0, sp())),
+                        sp(),
+                    )),
                     sp(),
                 )),
                 Box::new(B::Add(
-                    Box::new(B::Add(Box::new(B::Number(1.0, sp())), Box::new(B::Number(1.0, sp())), sp())),
-                    Box::new(B::Add(Box::new(B::Number(1.0, sp())), Box::new(B::Number(1.0, sp())), sp())),
+                    Box::new(B::Add(
+                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::Number(1.0, sp())),
+                        sp(),
+                    )),
+                    Box::new(B::Add(
+                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::Number(1.0, sp())),
+                        sp(),
+                    )),
                     sp(),
                 )),
                 sp(),
@@ -912,4 +984,3 @@ mod tests {
         }
     }
 }
-

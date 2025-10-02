@@ -7,6 +7,7 @@ edition = "2021"
 thiserror = { workspace = true }
 ast = { path = "../ast" }
 value = { path = "../value" }
+stdlib = { path = "../stdlib" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

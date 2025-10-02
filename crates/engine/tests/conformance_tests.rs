@@ -179,6 +179,8 @@ fn test_conformance_against_java_jslt() {
         for result in &results {
             if !result.passed {
                 println!("  - {}: {}", result.name, result.error.as_ref().unwrap());
+                println!("    Java: {}", result.java_output.as_ref().unwrap());
+                println!("    Rust: {}", result.rust_output.as_ref().unwrap());
             }
         }
         panic!("Some conformance tests failed");

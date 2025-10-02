@@ -1,6 +1,5 @@
 use serde::Serialize;
 use serde_json::Value;
-use serde_wasm_bindgen::preserve::serialize;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]

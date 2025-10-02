@@ -1,6 +1,7 @@
 use ast::{Binding, Def, Expr, Ident, Let, Program, Span};
 use interp::bind;
 use interp::binder::{BoundExpr, CaptureSpec, FunctionId, ResolvedVar};
+use stdlib::Registry;
 
 fn s() -> Span {
     Span { start: 0, end: 0, line: 1, column: 1 }
@@ -75,9 +76,12 @@ fn function_definition_and_call() {
 
     let bound = bind(&program).expect("bind ok");
 
+    // setup registry to get number of builtin functions
+    let registry = Registry::with_default();
+
     // One function defined, should be id 0
     assert_eq!(bound.functions.len(), 1);
-    assert_eq!(bound.functions[0].id, FunctionId(0));
+    assert_eq!(bound.functions[0].id, FunctionId(registry.len()));
     assert_eq!(bound.functions[0].name, "inc");
     assert_eq!(bound.functions[0].params, vec!["x".to_string()]);
     // No captures for inc(x) that only references its param
@@ -86,7 +90,7 @@ fn function_definition_and_call() {
     // Body is a call to FunctionId(0) with one number arg
     match &bound.body {
         BoundExpr::Call { id: FunctionId(fid), args, .. } => {
-            assert_eq!(*fid, 0);
+            assert_eq!(*fid, registry.len());
             assert_eq!(args.len(), 1);
             match &args[0] {
                 BoundExpr::Number(n, _s) => assert_eq!(*n, 41.0),
@@ -129,6 +133,8 @@ fn closure_captures_outer_let() {
         body: call("g", vec![]),
         span: s(),
     };
+    // Setup registry to get number of builtin functions
+    let registry = Registry::with_default();
 
     let bound = bind(&program).expect("bind ok");
 
@@ -149,7 +155,7 @@ fn closure_captures_outer_let() {
     // Sanity: body calls g (id 0)
     match &bound.body {
         BoundExpr::Call{ id: FunctionId(fid), args, ..} => {
-            assert_eq!(*fid, 0);
+            assert_eq!(*fid, registry.len());
             assert!(args.is_empty());
         }
         other => panic!("expected call to g, got {:?}", other),

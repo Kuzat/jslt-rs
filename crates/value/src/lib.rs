@@ -145,21 +145,14 @@ impl JsltValue {
         match &self.0 {
             Value::Array(arr) => {
                 let (lo, hi) = compute_slice_bounds(start, end, arr.len());
-                let slice = if lo <= hi {
-                    arr[lo..hi].to_vec()
-                } else {
-                    Vec::new()
-                };
+                let slice = if lo <= hi { arr[lo..hi].to_vec() } else { Vec::new() };
                 JsltValue(Value::Array(slice))
             }
             Value::String(s) => {
                 let chars: Vec<char> = s.chars().collect();
                 let (lo, hi) = compute_slice_bounds(start, end, chars.len());
-                let out: String = if lo <= hi {
-                    chars[lo..hi].iter().collect()
-                } else {
-                    String::new()
-                };
+                let out: String =
+                    if lo <= hi { chars[lo..hi].iter().collect() } else { String::new() };
                 JsltValue(Value::String(out))
             }
             _ => JsltValue::null(),
@@ -196,10 +189,31 @@ impl JsltValue {
             Value::Null => "null".to_string(),
             Value::Bool(true) => "true".to_string(),
             Value::Bool(false) => "false".to_string(),
-            Value::Number(_) => self.as_json().to_string(),
+            Value::Number(n) => {
+                // Prefer integer formatting when the numeric value is integral
+                if let Some(i) = n.as_i64() {
+                    i.to_string()
+                } else if let Some(u) = n.as_u64() {
+                    u.to_string()
+                } else if let Some(f) = n.as_f64() {
+                    // For float-backed number, supress trailing ".0"
+                    if f.is_finite() && f.fract() == 0.0 {
+                        // casting to i64 is fine for typical JSLT ranges, uses f64 internally
+                        (f as i64).to_string()
+                    } else {
+                        // Use Rust's default shortest representation
+                        f.to_string()
+                    }
+                } else {
+                    // fallback: default JSON rendering
+                    self.as_json().to_string()
+                }
+            }
             Value::String(s) => s.clone(),
             // For arrays/objects: JSON rendering to match typical JSLT behavior for string()
-            Value::Array(_) | Value::Object(_) => serde_json::to_string(self.as_json()).unwrap_or_default(),
+            Value::Array(_) | Value::Object(_) => {
+                serde_json::to_string(self.as_json()).unwrap_or_default()
+            }
         }
     }
 }
@@ -213,7 +227,7 @@ fn number_eq(a: &Number, b: &Number) -> bool {
             } else {
                 x == y
             }
-        },
+        }
         _ => false,
     }
 }
@@ -315,7 +329,7 @@ mod tests {
         let v = JsltValue(json!([10, 20, 30]));
         assert_eq!(v.index(0).into_json(), json!(10));
         assert_eq!(v.index(2).into_json(), json!(30));
-        assert!(v.index(3).is_null());  // OOB
+        assert!(v.index(3).is_null()); // OOB
         assert_eq!(v.index(-1).into_json(), json!(30));
         assert_eq!(v.index(-3).into_json(), json!(10));
         assert!(v.index(-4).is_null()); // OOB
@@ -340,17 +354,17 @@ mod tests {
     fn slice_array_defaults_and_negatives() {
         let v = JsltValue(json!([0, 1, 2, 3, 4]));
         // Defaults
-        assert_eq!(v.slice(None, None).into_json(), json!([0,1,2,3,4]));
-        assert_eq!(v.slice(Some(2), None).into_json(), json!([2,3,4]));
-        assert_eq!(v.slice(None, Some(3)).into_json(), json!([0,1,2]));
+        assert_eq!(v.slice(None, None).into_json(), json!([0, 1, 2, 3, 4]));
+        assert_eq!(v.slice(Some(2), None).into_json(), json!([2, 3, 4]));
+        assert_eq!(v.slice(None, Some(3)).into_json(), json!([0, 1, 2]));
 
         // Negatives
-        assert_eq!(v.slice(Some(-3), None).into_json(), json!([2,3,4]));
-        assert_eq!(v.slice(None, Some(-2)).into_json(), json!([0,1,2]));
+        assert_eq!(v.slice(Some(-3), None).into_json(), json!([2, 3, 4]));
+        assert_eq!(v.slice(None, Some(-2)).into_json(), json!([0, 1, 2]));
 
         // Mixed and clamped
-        assert_eq!(v.slice(Some(-10), Some(2)).into_json(), json!([0,1,2][..2])); // -> [0,1]
-        assert_eq!(v.slice(Some(3), Some(10)).into_json(), json!([3,4]));
+        assert_eq!(v.slice(Some(-10), Some(2)).into_json(), json!([0, 1, 2][..2])); // -> [0,1]
+        assert_eq!(v.slice(Some(3), Some(10)).into_json(), json!([3, 4]));
 
         // Empty when start > end
         assert_eq!(v.slice(Some(4), Some(2)).into_json(), json!([]));

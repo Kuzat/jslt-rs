@@ -500,3 +500,125 @@ impl JsltFunction for JoinFn {
         Ok(JsltValue::string(out))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn j(v: serde_json::Value) -> JsltValue { JsltValue::from_json(v) }
+
+    #[test]
+    fn registry_with_default_has_all_functions_and_is_stable() {
+        let r = Registry::with_default();
+        // Expect 14 built-ins as registered above
+        assert_eq!(r.len(), 14);
+        for name in [
+            "string","number","boolean","size","keys","values","get-key",
+            "starts-with","ends-with","uppercase","lowercase","trim","contains","join"
+        ] {
+            assert!(r.get_id(name).is_some(), "missing function {}", name);
+        }
+    }
+
+    #[test]
+    fn call_by_id_dispatch_works_uppercase() {
+        let r = Registry::with_default();
+        let id = r.get_id("uppercase").unwrap();
+        let out = r.call_by_id(id, &[j(json!("MiXeD"))]).unwrap();
+        assert_eq!(out, JsltValue::string("MIXED".to_string()));
+    }
+
+    #[test]
+    fn number_parses_and_respects_fallback() {
+        let f = NumberFn;
+        // parse numeric string
+        let ok = f.call(&[j(json!("  42 "))]).unwrap();
+        assert_eq!(ok, JsltValue::number(42.0));
+
+        // preserve numbers
+        let ok2 = f.call(&[j(json!(3.14))]).unwrap();
+        assert_eq!(ok2, JsltValue::number(3.14));
+
+        // null passthrough
+        let n = f.call(&[j(json!(null))]).unwrap();
+        assert!(n.is_null());
+
+        // bad string without fallback => error
+        let err = f.call(&[j(json!("nope"))]).unwrap_err();
+        match err { StdlibError::Type(msg) => assert!(msg.contains("cannot parse")), _ => panic!("wrong err") }
+
+        // bad type with fallback => fallback
+        let out = f.call(&[j(json!({"x":1})), j(json!(999))]).unwrap();
+        assert!(out.deep_eq(&JsltValue::number(999.0)));
+    }
+
+    #[test]
+    fn size_on_string_array_object_and_errors() {
+        let f = SizeFn;
+        assert_eq!(f.call(&[j(json!("hé"))]).unwrap(), JsltValue::number(2.0)); // unicode chars
+        assert_eq!(f.call(&[j(json!([1,2,3]))]).unwrap(), JsltValue::number(3.0));
+        assert_eq!(f.call(&[j(json!({"a":1,"b":2}))]).unwrap(), JsltValue::number(2.0));
+        assert!(f.call(&[j(json!(true))]).is_err());
+        assert!(f.call(&[j(json!(null))]).unwrap().is_null());
+    }
+
+    #[test]
+    fn keys_values_and_get_key() {
+        let obj = j(json!({"a":1,"b":2}));
+        let keys = KeysFn.call(&[obj.clone()]).unwrap();
+        // Order of BTreeMap iteration is sorted by key
+        assert_eq!(keys, JsltValue::array(vec![j(json!("a")), j(json!("b"))]));
+
+        let values = ValuesFn.call(&[obj.clone()]).unwrap();
+        assert_eq!(values, JsltValue::array(vec![j(json!(1)), j(json!(2))]));
+
+        // get existing key
+        let got = GetKeyFn.call(&[obj.clone(), j(json!("b"))]).unwrap();
+        assert_eq!(got, j(json!(2)));
+        // missing key -> null
+        assert!(GetKeyFn.call(&[obj.clone(), j(json!("z"))]).unwrap().is_null());
+        // missing key with default
+        let def = GetKeyFn.call(&[obj.clone(), j(json!("z")), j(json!(123))]).unwrap();
+        assert_eq!(def, j(json!(123)));
+    }
+
+    #[test]
+    fn starts_ends_upper_lower_trim() {
+        assert_eq!(StartsWithFn.call(&[j(json!("hello")), j(json!("he"))]).unwrap(), j(json!(true)));
+        assert_eq!(EndsWithFn.call(&[j(json!("hello")), j(json!("lo"))]).unwrap(), j(json!(true)));
+        assert_eq!(UppercaseFn.call(&[j(json!("MiXeD"))]).unwrap(), j(json!("MIXED")));
+        assert_eq!(LowercaseFn.call(&[j(json!("MiXeD"))]).unwrap(), j(json!("mixed")));
+        assert_eq!(TrimFn.call(&[j(json!("  x \n"))]).unwrap(), j(json!("x")));
+        // null propagation
+        assert!(UppercaseFn.call(&[j(json!(null))]).unwrap().is_null());
+    }
+
+    #[test]
+    fn contains_array_string_object_and_errors() {
+        // array deep equality
+        assert_eq!(ContainsFn.call(&[j(json!({"a":1})), j(json!([{"a":1},{"b":2}]))]).unwrap(), j(json!(true)));
+        // string contains with stringify of needle
+        assert_eq!(ContainsFn.call(&[j(json!(2)), j(json!("12x"))]).unwrap(), j(json!(true)));
+        // object key contains using needle stringify
+        assert_eq!(ContainsFn.call(&[j(json!(1)), j(json!({"1": true}))]).unwrap(), j(json!(true)));
+        // null cases
+        assert_eq!(ContainsFn.call(&[j(json!(null)), j(json!("ab"))]).unwrap(), j(json!(false)));
+        assert_eq!(ContainsFn.call(&[j(json!(null)), j(json!({}))]).unwrap(), j(json!(false)));
+        assert_eq!(ContainsFn.call(&[j(json!(1)), j(json!(null))]).unwrap(), j(json!(false)));
+        // type error
+        assert!(ContainsFn.call(&[j(json!(1)), j(json!(true))]).is_err());
+    }
+
+    #[test]
+    fn join_happy_path_and_null_and_type_errors() {
+        let arr = j(json!(["a", 1, true, null]));
+        let out = JoinFn.call(&[arr, j(json!(","))]).unwrap();
+        assert_eq!(out, j(json!("a,1,true,null")));
+        // null array propagates null
+        assert!(JoinFn.call(&[j(json!(null)), j(json!(","))]).unwrap().is_null());
+        // type errors
+        assert!(JoinFn.call(&[j(json!({})), j(json!(","))]).is_err());
+        assert!(JoinFn.call(&[j(json!([])), j(json!(1))]).is_err());
+    }
+}

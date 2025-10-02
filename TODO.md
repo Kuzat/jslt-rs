@@ -150,13 +150,81 @@ unsafe_code = "forbid"
 
 ## 7) Stdlib v1 (minimal)
 
-* [ ] Core functions (names and arity documented in `docs/stdlib.md`):
+* [ ] Functions (from `docs/stdlib.md`) — check off as implemented in `crates/stdlib/src/lib.rs`:
 
-  * `string`, `number`, `boolean`
-  * `size`, `keys`, `values`
-  * `starts-with`, `ends-with`, `contains`, `split`, `join`, `uppercase`, `lowercase`, `trim`
-  * `map(arr, f)`, `filter(arr, f)` are **not** language features—consider leaving them out unless JSLT defines them; rely on comprehensions instead.
-* [ ] `regex` gated: `match`, `test`, `replace` using `regex` crate.
+  - General
+    - [x] contains(element, sequence)
+    - [x] size(sequence)
+    - [ ] error(message)
+    - [ ] fallback(arg1, arg2, ...)
+    - [ ] min(a, b)
+    - [ ] max(a, b)
+
+  - Numeric
+    - [ ] is-number(value)
+    - [ ] is-integer(value)
+    - [ ] is-decimal(value)
+    - [x] number(value, fallback?)
+    - [ ] round(x)
+    - [ ] floor(x)
+    - [ ] ceiling(x)
+    - [ ] random()
+    - [ ] sum(array)
+    - [ ] mod(a, d)
+    - [ ] hash-int(value)
+
+  - String
+    - [ ] is-string(value)
+    - [x] string(value)
+    - [ ] test(input, regexp)
+    - [ ] capture(input, regexp)
+    - [ ] split(input, regexp)
+    - [x] join(array, separator)
+    - [x] lowercase(string)
+    - [x] uppercase(string)
+    - [ ] sha256-hex(value)
+    - [x] starts-with(tested, prefix)
+    - [x] ends-with(tested, suffix)
+    - [ ] from-json(string, fallback?)
+    - [ ] to-json(value)
+    - [ ] replace(value, regexp, out)
+    - [x] trim(value)
+    - [ ] uuid(msb?, lsb?)
+
+  - Boolean
+    - [x] boolean(value)
+    - [ ] not(value)
+    - [ ] is-boolean(value)
+
+  - Object
+    - [ ] is-object(value)
+    - [x] get-key(object, key, fallback?)
+
+  - Array
+    - [ ] array(value)
+    - [ ] is-array(value)
+    - [ ] flatten(array)
+    - [ ] all(array)
+    - [ ] any(array)
+    - [ ] zip(array1, array2)
+    - [ ] zip-with-index(array)
+    - [ ] index-of(array, value)
+
+  - Time
+    - [ ] now()
+    - [ ] parse-time(time, format, fallback?)
+    - [ ] format-time(timestamp, format, timezone?)
+
+  - URL
+    - [ ] parse-url(url)
+
+  - Notes
+    - [ ] `map(arr, f)`, `filter(arr, f)` are NOT language features—omit unless JSLT defines them; rely on comprehensions instead.
+
+* [ ] Regex-gated (feature = "regex"): implement using `regex` crate where applicable
+  - [ ] test
+  - [ ] capture
+  - [ ] replace
 
   * **Accept:** conformance tests for each function; wrong arity → runtime error with span.
 

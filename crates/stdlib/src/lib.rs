@@ -82,6 +82,7 @@ impl Registry {
         r.register(ContainsFn);
         r.register(SizeFn);
         r.register(ErrorFn);
+        r.register(FallbackFn);
 
         // Numeric
         r.register(NumberFn);
@@ -534,6 +535,30 @@ impl JsltFunction for ErrorFn {
     }
 }
 
+// TODO: Rework this to be lazy and work as macros in the original JSLT
+// TODO: meaning it should take in Expressions and only evaluate them as needed.
+struct FallbackFn;
+impl JsltFunction for FallbackFn {
+    fn name(&self) -> &'static str {
+        "fallback"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Range { min: 2, max: Some(1024) }
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        for v in args {
+            match v.as_json() {
+                Value::Null => {}
+                Value::Array(a) if a.is_empty() => {}
+                Value::Object(o) if o.is_empty() => {}
+                _ => return Ok(v.clone()),
+            }
+        }
+        Ok(JsltValue::null())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,7 +572,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 15);
+        assert_eq!(r.len(), 16);
         for name in [
             "string",
             "number",
@@ -564,6 +589,7 @@ mod tests {
             "contains",
             "join",
             "error",
+            "fallback",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

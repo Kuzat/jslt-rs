@@ -87,6 +87,9 @@ impl Registry {
         r.register(MaxFn);
 
         // Numeric
+        r.register(IsNumberFn);
+        r.register(IsIntegerFn);
+        r.register(IsDecimalFn);
         r.register(NumberFn);
 
         // String
@@ -645,6 +648,59 @@ impl JsltFunction for MaxFn {
     }
 }
 
+struct IsNumberFn;
+impl JsltFunction for IsNumberFn {
+    fn name(&self) -> &'static str {
+        "is-number"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let is_num = args[0].is_number();
+        Ok(JsltValue::bool(is_num))
+    }
+}
+
+struct IsIntegerFn;
+impl JsltFunction for IsIntegerFn {
+    fn name(&self) -> &'static str {
+        "is-integer"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+        let is_int = match v.as_json() {
+            Value::Number(n) => n.is_i64() || n.is_u64(),
+            _ => false,
+        };
+        Ok(JsltValue::bool(is_int))
+    }
+}
+
+struct IsDecimalFn;
+impl JsltFunction for IsDecimalFn {
+    fn name(&self) -> &'static str {
+        "is-decimal"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+        let is_dec = match v.as_json() {
+            Value::Number(n) => n.is_f64(),
+            _ => false,
+        };
+        Ok(JsltValue::bool(is_dec))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,7 +714,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 18);
+        assert_eq!(r.len(), 21);
         for name in [
             "string",
             "number",
@@ -678,6 +734,9 @@ mod tests {
             "fallback",
             "min",
             "max",
+            "is-number",
+            "is-integer",
+            "is-decimal",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

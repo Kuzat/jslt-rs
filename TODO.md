@@ -157,13 +157,13 @@ unsafe_code = "forbid"
     - [x] size(sequence)
     - [x] error(message)
     - [x] fallback(arg1, arg2, ...)
-    - [ ] min(a, b)
-    - [ ] max(a, b)
+    - [x] min(a, b)
+    - [x] max(a, b)
 
   - Numeric
-    - [ ] is-number(value)
-    - [ ] is-integer(value)
-    - [ ] is-decimal(value)
+    - [x] is-number(value)
+    - [x] is-integer(value)
+    - [x] is-decimal(value)
     - [x] number(value, fallback?)
     - [ ] round(x)
     - [ ] floor(x)

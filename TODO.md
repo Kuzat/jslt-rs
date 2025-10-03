@@ -155,7 +155,7 @@ unsafe_code = "forbid"
   - General
     - [x] contains(element, sequence)
     - [x] size(sequence)
-    - [ ] error(message)
+    - [x] error(message)
     - [ ] fallback(arg1, arg2, ...)
     - [ ] min(a, b)
     - [ ] max(a, b)

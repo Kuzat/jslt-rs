@@ -78,21 +78,39 @@ impl Registry {
 
     pub fn with_default() -> Self {
         let mut r = Self::new();
-        // General/string-ish
-        r.register(StringFn);
-        r.register(NumberFn);
-        r.register(BooleanFn);
+        // General
+        r.register(ContainsFn);
         r.register(SizeFn);
+        r.register(ErrorFn);
+
+        // Numeric
+        r.register(NumberFn);
+
+        // String
+        r.register(StringFn);
+        r.register(UppercaseFn);
+        r.register(LowercaseFn);
+        r.register(StartsWithFn);
+        r.register(EndsWithFn);
+        r.register(JoinFn);
+        r.register(TrimFn);
+
+        // Boolean
+        r.register(BooleanFn);
+
+        // Object
         r.register(KeysFn);
         r.register(ValuesFn);
         r.register(GetKeyFn);
-        r.register(StartsWithFn);
-        r.register(EndsWithFn);
-        r.register(UppercaseFn);
-        r.register(LowercaseFn);
-        r.register(TrimFn);
-        r.register(ContainsFn);
-        r.register(JoinFn);
+
+        // Array
+
+        // Time
+
+        // URL
+
+        // Regexp
+
         r
     }
 
@@ -501,21 +519,51 @@ impl JsltFunction for JoinFn {
     }
 }
 
+struct ErrorFn;
+impl JsltFunction for ErrorFn {
+    fn name(&self) -> &'static str {
+        "error"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let msg = expect_string(&args[0], "error", 1)?;
+        Err(StdlibError::Semantic(msg.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn j(v: serde_json::Value) -> JsltValue { JsltValue::from_json(v) }
+    fn j(v: serde_json::Value) -> JsltValue {
+        JsltValue::from_json(v)
+    }
 
     #[test]
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 14);
+        assert_eq!(r.len(), 15);
         for name in [
-            "string","number","boolean","size","keys","values","get-key",
-            "starts-with","ends-with","uppercase","lowercase","trim","contains","join"
+            "string",
+            "number",
+            "boolean",
+            "size",
+            "keys",
+            "values",
+            "get-key",
+            "starts-with",
+            "ends-with",
+            "uppercase",
+            "lowercase",
+            "trim",
+            "contains",
+            "join",
+            "error",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }
@@ -546,7 +594,10 @@ mod tests {
 
         // bad string without fallback => error
         let err = f.call(&[j(json!("nope"))]).unwrap_err();
-        match err { StdlibError::Type(msg) => assert!(msg.contains("cannot parse")), _ => panic!("wrong err") }
+        match err {
+            StdlibError::Type(msg) => assert!(msg.contains("cannot parse")),
+            _ => panic!("wrong err"),
+        }
 
         // bad type with fallback => fallback
         let out = f.call(&[j(json!({"x":1})), j(json!(999))]).unwrap();
@@ -557,7 +608,7 @@ mod tests {
     fn size_on_string_array_object_and_errors() {
         let f = SizeFn;
         assert_eq!(f.call(&[j(json!("hé"))]).unwrap(), JsltValue::number(2.0)); // unicode chars
-        assert_eq!(f.call(&[j(json!([1,2,3]))]).unwrap(), JsltValue::number(3.0));
+        assert_eq!(f.call(&[j(json!([1, 2, 3]))]).unwrap(), JsltValue::number(3.0));
         assert_eq!(f.call(&[j(json!({"a":1,"b":2}))]).unwrap(), JsltValue::number(2.0));
         assert!(f.call(&[j(json!(true))]).is_err());
         assert!(f.call(&[j(json!(null))]).unwrap().is_null());
@@ -585,7 +636,10 @@ mod tests {
 
     #[test]
     fn starts_ends_upper_lower_trim() {
-        assert_eq!(StartsWithFn.call(&[j(json!("hello")), j(json!("he"))]).unwrap(), j(json!(true)));
+        assert_eq!(
+            StartsWithFn.call(&[j(json!("hello")), j(json!("he"))]).unwrap(),
+            j(json!(true))
+        );
         assert_eq!(EndsWithFn.call(&[j(json!("hello")), j(json!("lo"))]).unwrap(), j(json!(true)));
         assert_eq!(UppercaseFn.call(&[j(json!("MiXeD"))]).unwrap(), j(json!("MIXED")));
         assert_eq!(LowercaseFn.call(&[j(json!("MiXeD"))]).unwrap(), j(json!("mixed")));
@@ -597,7 +651,10 @@ mod tests {
     #[test]
     fn contains_array_string_object_and_errors() {
         // array deep equality
-        assert_eq!(ContainsFn.call(&[j(json!({"a":1})), j(json!([{"a":1},{"b":2}]))]).unwrap(), j(json!(true)));
+        assert_eq!(
+            ContainsFn.call(&[j(json!({"a":1})), j(json!([{"a":1},{"b":2}]))]).unwrap(),
+            j(json!(true))
+        );
         // string contains with stringify of needle
         assert_eq!(ContainsFn.call(&[j(json!(2)), j(json!("12x"))]).unwrap(), j(json!(true)));
         // object key contains using needle stringify

@@ -83,6 +83,8 @@ impl Registry {
         r.register(SizeFn);
         r.register(ErrorFn);
         r.register(FallbackFn);
+        r.register(MinFn);
+        r.register(MaxFn);
 
         // Numeric
         r.register(NumberFn);
@@ -559,6 +561,90 @@ impl JsltFunction for FallbackFn {
     }
 }
 
+struct MinFn;
+impl JsltFunction for MinFn {
+    fn name(&self) -> &'static str {
+        "min"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let a = &args[0];
+        let b = &args[1];
+
+        if a.is_null() || b.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Compare only when types are compatible. Otherwise: type error
+        let ord = match (a.as_json(), b.as_json()) {
+            (Value::Number(na), Value::Number(nb)) => {
+                let fa = na.as_f64().unwrap_or(0.0);
+                let fb = nb.as_f64().unwrap_or(0.0);
+                fa.total_cmp(&fb)
+            }
+            (Value::String(sa), Value::String(sb)) => sa.cmp(sb),
+            (Value::Bool(ba), Value::Bool(bb)) => ba.cmp(bb),
+            // Mismatched or unsuported type
+            _ => {
+                return Err(StdlibError::Type(format!(
+                    "min: incompatible types {} and {}",
+                    a.type_of(),
+                    b.type_of()
+                )))
+            }
+        };
+
+        Ok(match ord {
+            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => a.clone(),
+            std::cmp::Ordering::Greater => b.clone(),
+        })
+    }
+}
+
+struct MaxFn;
+impl JsltFunction for MaxFn {
+    fn name(&self) -> &'static str {
+        "max"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let a = &args[0];
+        let b = &args[1];
+
+        if a.is_null() || b.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let ord = match (a.as_json(), b.as_json()) {
+            (Value::Number(na), Value::Number(nb)) => {
+                let fa = na.as_f64().unwrap_or(0.0);
+                let fb = nb.as_f64().unwrap_or(0.0);
+                fa.total_cmp(&fb)
+            }
+            (Value::String(sa), Value::String(sb)) => sa.cmp(sb),
+            (Value::Bool(ba), Value::Bool(bb)) => ba.cmp(bb),
+            _ => {
+                return Err(StdlibError::Type(format!(
+                    "max: incompatible types {} and {}",
+                    a.type_of(),
+                    b.type_of()
+                )))
+            }
+        };
+
+        Ok(match ord {
+            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => b.clone(),
+            std::cmp::Ordering::Greater => a.clone(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,7 +658,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 16);
+        assert_eq!(r.len(), 18);
         for name in [
             "string",
             "number",
@@ -590,6 +676,8 @@ mod tests {
             "join",
             "error",
             "fallback",
+            "min",
+            "max",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

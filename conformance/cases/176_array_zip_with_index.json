@@ -3,5 +3,10 @@
   "description": "zip-with-index([\"a\"]) → [{value,index}]",
   "program": "zip-with-index([\"a\"])",
   "input": {},
-  "expected": [{ "value": "a", "index": 0 }]
+  "expected": [
+    {
+      "index": 0,
+      "value": "a"
+    }
+  ]
 }

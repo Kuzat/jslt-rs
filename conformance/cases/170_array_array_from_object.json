@@ -3,5 +3,10 @@
   "description": "array(object) → array of {key,value}",
   "program": "array({\"a\":1})",
   "input": {},
-  "expected": [{ "key": "a", "value": 1 }]
+  "expected": [
+    {
+      "key": "a",
+      "value": 1
+    }
+  ]
 }

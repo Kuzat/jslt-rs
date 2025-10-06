@@ -3,5 +3,8 @@
   "description": "from-json(\"[1,2]\") → [1,2]",
   "program": "from-json(\"[1,2]\")",
   "input": {},
-  "expected": [1,2]
+  "expected": [
+    1,
+    2
+  ]
 }

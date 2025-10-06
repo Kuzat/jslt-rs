@@ -1,0 +1,7 @@
+{
+  "name": "117_numeric_random_range_check",
+  "description": "random() is in [0,1]",
+  "program": "boolean(random() >= 0 and random() <= 1)",
+  "input": {},
+  "expected": true
+}

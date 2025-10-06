@@ -1,0 +1,7 @@
+{
+  "name": "171_array_is_array_true",
+  "description": "is-array([1]) → true",
+  "program": "is-array([1])",
+  "input": {},
+  "expected": true
+}

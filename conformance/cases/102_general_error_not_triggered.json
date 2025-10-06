@@ -1,0 +1,7 @@
+{
+  "name": "102_general_error_not_triggered",
+  "description": "error(message) inside non-taken branch should not halt",
+  "program": "if (false) error(\"should not happen\") else \"ok\"",
+  "input": {},
+  "expected": "ok"
+}

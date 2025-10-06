@@ -1,0 +1,7 @@
+{
+  "name": "118_numeric_sum",
+  "description": "sum([1,2,3]) → 6",
+  "program": "sum([1,2,3])",
+  "input": {},
+  "expected": 6
+}

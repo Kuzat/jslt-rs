@@ -1,0 +1,7 @@
+{
+  "name": "120_numeric_hash_int_is_integer",
+  "description": "hash-int(...) returns an integer (value not stable across envs)",
+  "program": "is-integer(hash-int(\"test\"))",
+  "input": {},
+  "expected": true
+}

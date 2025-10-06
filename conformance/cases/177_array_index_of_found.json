@@ -1,0 +1,7 @@
+{
+  "name": "177_array_index_of_found",
+  "description": "index-of([0,1,2],1) → 1",
+  "program": "index-of([0,1,2], 1)",
+  "input": {},
+  "expected": 1
+}

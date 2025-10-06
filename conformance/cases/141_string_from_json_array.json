@@ -1,0 +1,7 @@
+{
+  "name": "141_string_from_json_array",
+  "description": "from-json(\"[1,2]\") → [1,2]",
+  "program": "from-json(\"[1,2]\")",
+  "input": {},
+  "expected": [1,2]
+}

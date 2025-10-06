@@ -1,0 +1,7 @@
+{
+  "name": "176_array_zip_with_index",
+  "description": "zip-with-index([\"a\"]) → [{value,index}]",
+  "program": "zip-with-index([\"a\"])",
+  "input": {},
+  "expected": [{ "value": "a", "index": 0 }]
+}

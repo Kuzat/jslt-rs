@@ -1,0 +1,7 @@
+{
+  "name": "142_string_to_json_scalar",
+  "description": "to-json(1) → \"1\"",
+  "program": "to-json(1)",
+  "input": {},
+  "expected": "1"
+}

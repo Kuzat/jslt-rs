@@ -1,0 +1,7 @@
+{
+  "name": "181_time_parse_time_and_format_roundtrip",
+  "description": "format-time(parse-time(...), pattern) → original text",
+  "program": "format-time(parse-time(\"2018-05-30T11:46:37Z\", \"yyyy-MM-dd'T'HH:mm:ssX\"), \"yyyy-MM-dd'T'HH:mm:ss'Z'\")",
+  "input": {},
+  "expected": "2018-05-30T11:46:37Z"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "172_array_flatten_nested",
+  "description": "flatten([1,[2,[3]]]) → [1,2,3]",
+  "program": "flatten([1,[2,[3]]])",
+  "input": {},
+  "expected": [1,2,3]
+}

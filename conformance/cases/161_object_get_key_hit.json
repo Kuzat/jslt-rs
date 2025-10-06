@@ -1,0 +1,7 @@
+{
+  "name": "161_object_get_key_hit",
+  "description": "get-key returns existing value",
+  "program": "get-key({\"no\":\"Norway\"}, \"no\")",
+  "input": {},
+  "expected": "Norway"
+}

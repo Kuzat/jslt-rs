@@ -1,0 +1,7 @@
+{
+  "name": "151_boolean_not_of_zero_true",
+  "description": "not(0) → true",
+  "program": "not(0)",
+  "input": {},
+  "expected": true
+}

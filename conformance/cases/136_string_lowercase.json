@@ -1,0 +1,7 @@
+{
+  "name": "136_string_lowercase",
+  "description": "lowercase(\"ABC\") → \"abc\"",
+  "program": "lowercase(\"ABC\")",
+  "input": {},
+  "expected": "abc"
+}

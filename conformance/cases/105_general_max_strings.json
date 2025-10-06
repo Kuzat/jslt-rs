@@ -1,0 +1,7 @@
+{
+  "name": "105_general_max_strings",
+  "description": "max(a,b) with strings",
+  "program": "max(\"a\", \"b\")",
+  "input": {},
+  "expected": "b"
+}

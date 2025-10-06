@@ -1,0 +1,7 @@
+{
+  "name": "112_numeric_is_decimal_true",
+  "description": "is-decimal(value) true for decimal",
+  "program": "is-decimal(1.0)",
+  "input": {},
+  "expected": true
+}

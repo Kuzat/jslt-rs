@@ -1,0 +1,7 @@
+{
+  "name": "100_general_contains_array_true",
+  "description": "contains(element, array) → true when present",
+  "program": "contains(1, [1,2,3])",
+  "input": {},
+  "expected": true
+}

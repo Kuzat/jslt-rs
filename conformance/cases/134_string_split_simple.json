@@ -1,0 +1,7 @@
+{
+  "name": "134_string_split_simple",
+  "description": "split(\"1,2\", \",\") → [\"1\",\"2\"]",
+  "program": "split(\"1,2\", \",\")",
+  "input": {},
+  "expected": ["1","2"]
+}

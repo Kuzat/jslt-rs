@@ -1,0 +1,7 @@
+{
+  "name": "110_numeric_is_number_true",
+  "description": "is-number(value) true for numeric",
+  "program": "is-number(1.0)",
+  "input": {},
+  "expected": true
+}

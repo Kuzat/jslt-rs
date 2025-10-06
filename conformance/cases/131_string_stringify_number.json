@@ -1,0 +1,7 @@
+{
+  "name": "131_string_stringify_number",
+  "description": "string(123) → \"123\"",
+  "program": "string(123)",
+  "input": {},
+  "expected": "123"
+}

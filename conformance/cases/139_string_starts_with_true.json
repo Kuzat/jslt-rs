@@ -1,0 +1,7 @@
+{
+  "name": "139_string_starts_with_true",
+  "description": "starts-with(\"prohibition\",\"pro\") → true",
+  "program": "starts-with(\"prohibition\", \"pro\")",
+  "input": {},
+  "expected": true
+}

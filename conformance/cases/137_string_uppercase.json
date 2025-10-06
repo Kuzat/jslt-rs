@@ -1,0 +1,7 @@
+{
+  "name": "137_string_uppercase",
+  "description": "uppercase(\"abc\") → \"ABC\"",
+  "program": "uppercase(\"abc\")",
+  "input": {},
+  "expected": "ABC"
+}

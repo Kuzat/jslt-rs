@@ -1,0 +1,7 @@
+{
+  "name": "145_string_uuid_from_msb_lsb",
+  "description": "uuid(0,0) deterministic variant",
+  "program": "uuid(0, 0)",
+  "input": {},
+  "expected": "00000000-0000-1000-8000-000000000000"
+}

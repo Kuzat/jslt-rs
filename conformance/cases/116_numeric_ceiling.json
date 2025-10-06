@@ -1,0 +1,7 @@
+{
+  "name": "116_numeric_ceiling",
+  "description": "ceiling(1.01) → 2",
+  "program": "ceiling(1.01)",
+  "input": {},
+  "expected": 2
+}

@@ -1,0 +1,7 @@
+{
+  "name": "174_array_any_true",
+  "description": "any([false,true]) → true",
+  "program": "any([false,true])",
+  "input": {},
+  "expected": true
+}

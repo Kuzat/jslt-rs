@@ -1,0 +1,7 @@
+{
+  "name": "132_string_test_regex_substring_match",
+  "description": "test(\"abc123\", \"\\\\d+\") → true",
+  "program": "test(\"abc123\", \"\\\\d+\")",
+  "input": {},
+  "expected": true
+}

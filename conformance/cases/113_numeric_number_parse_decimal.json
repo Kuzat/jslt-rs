@@ -1,0 +1,7 @@
+{
+  "name": "113_numeric_number_parse_decimal",
+  "description": "number(\"-0.23\") → -0.23",
+  "program": "number(\"-0.23\")",
+  "input": {},
+  "expected": -0.23
+}

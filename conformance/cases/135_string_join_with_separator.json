@@ -1,0 +1,7 @@
+{
+  "name": "135_string_join_with_separator",
+  "description": "join([\"a\",\"b\"], \"-\") → \"a-b\"",
+  "program": "join([\"a\",\"b\"], \"-\")",
+  "input": {},
+  "expected": "a-b"
+}

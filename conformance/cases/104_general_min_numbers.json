@@ -1,0 +1,7 @@
+{
+  "name": "104_general_min_numbers",
+  "description": "min(a,b) with numbers",
+  "program": "min(10, 1)",
+  "input": {},
+  "expected": 1
+}

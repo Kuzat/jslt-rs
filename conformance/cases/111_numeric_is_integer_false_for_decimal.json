@@ -1,0 +1,7 @@
+{
+  "name": "111_numeric_is_integer_false_for_decimal",
+  "description": "is-integer(value) false for non-integral",
+  "program": "is-integer(1.0)",
+  "input": {},
+  "expected": false
+}

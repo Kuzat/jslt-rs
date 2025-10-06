@@ -1,0 +1,7 @@
+{
+  "name": "140_string_ends_with_true",
+  "description": "ends-with(\"prohibition\",\"ion\") → true",
+  "program": "ends-with(\"prohibition\", \"ion\")",
+  "input": {},
+  "expected": true
+}

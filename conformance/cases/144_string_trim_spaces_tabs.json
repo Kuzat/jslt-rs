@@ -1,0 +1,7 @@
+{
+  "name": "144_string_trim_spaces_tabs",
+  "description": "trim(\"  abc \\t\") → \"abc\"",
+  "program": "trim(\"  abc \\t\")",
+  "input": {},
+  "expected": "abc"
+}

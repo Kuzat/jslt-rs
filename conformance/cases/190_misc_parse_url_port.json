@@ -1,0 +1,7 @@
+{
+  "name": "190_misc_parse_url_port",
+  "description": "parse-url(...).port extracts numeric port",
+  "program": "parse-url(\"https://example.com:8443/\").port",
+  "input": {},
+  "expected": 8443
+}

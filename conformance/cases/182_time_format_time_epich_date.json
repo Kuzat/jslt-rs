@@ -1,0 +1,7 @@
+{
+  "name": "182_time_format_time_epoch_date",
+  "description": "format-time(0, \"yyyy-MM-dd\") → 1970-01-01",
+  "program": "format-time(0, \"yyyy-MM-dd\")",
+  "input": {},
+  "expected": "1970-01-01"
+}

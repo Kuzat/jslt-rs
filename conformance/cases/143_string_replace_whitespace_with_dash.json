@@ -1,0 +1,7 @@
+{
+  "name": "143_string_replace_whitespace_with_dash",
+  "description": "replace(\"abc def\", \"\\\\s+\", \"-\") → \"abc-def\"",
+  "program": "replace(\"abc def\", \"\\\\s+\", \"-\")",
+  "input": {},
+  "expected": "abc-def"
+}

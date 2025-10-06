@@ -1,0 +1,7 @@
+{
+  "name": "152_boolean_is_boolean_true",
+  "description": "is-boolean(true) → true",
+  "program": "is-boolean(true)",
+  "input": {},
+  "expected": true
+}

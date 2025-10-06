@@ -1,0 +1,7 @@
+{
+  "name": "115_numeric_floor",
+  "description": "floor(1.51) → 1",
+  "program": "floor(1.51)",
+  "input": {},
+  "expected": 1
+}

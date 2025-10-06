@@ -55,7 +55,7 @@ JSLT operates on a JSON‑like value lattice:
 
 * **Numbers** support decimal and exponent forms: `0`, `12`, `3.14`, `.5`, `1.`, `1e6`, `2.5E-3`.
 
-  * A leading `.` followed by a digit is a number literal; a bare `.` is the **context** token (see §6).
+  * A leading `.` followed by a digit is not valid a number literal as reflecting the orignal JSLT;
 * **Strings** use double quotes `"…"` and JSON escapes: `\" \\ \/ \b \f \n \r \t \uXXXX`.
 
   * Invalid escapes and unpaired surrogates are errors.

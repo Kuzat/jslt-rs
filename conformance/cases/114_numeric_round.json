@@ -1,0 +1,7 @@
+{
+  "name": "114_numeric_round",
+  "description": "round(1.51) → 2",
+  "program": "round(1.51)",
+  "input": {},
+  "expected": 2
+}

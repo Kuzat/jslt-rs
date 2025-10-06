@@ -1,0 +1,7 @@
+{
+  "name": "180_time_now_type_check",
+  "description": "now() returns a number (non-deterministic value)",
+  "program": "is-number(now())",
+  "input": {},
+  "expected": true
+}

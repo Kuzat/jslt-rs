@@ -1,0 +1,7 @@
+{
+  "name": "150_boolean_boolean_false_for_zero",
+  "description": "boolean(0) → false",
+  "program": "boolean(0)",
+  "input": {},
+  "expected": false
+}

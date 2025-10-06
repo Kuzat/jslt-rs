@@ -1,0 +1,7 @@
+{
+  "name": "160_object_is_object_true",
+  "description": "is-object({}) → true",
+  "program": "is-object({\"a\":1})",
+  "input": {},
+  "expected": true
+}

@@ -1,0 +1,7 @@
+{
+  "name": "133_string_capture_named_groups",
+  "description": "capture with named groups returns object",
+  "program": "capture(\"http://a/b\", \"http://(?<host>[^/]+)/(?<rest>.+)\")",
+  "input": {},
+  "expected": { "host": "a", "rest": "b" }
+}

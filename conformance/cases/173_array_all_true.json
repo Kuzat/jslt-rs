@@ -1,0 +1,7 @@
+{
+  "name": "173_array_all_true",
+  "description": "all([true,true]) → true",
+  "program": "all([true,true])",
+  "input": {},
+  "expected": true
+}

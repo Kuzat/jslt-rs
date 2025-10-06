@@ -1,0 +1,7 @@
+{
+  "name": "103_general_fallback",
+  "description": "fallback returns first non-empty/non-null",
+  "program": "fallback(null, [], {}, \"value\")",
+  "input": {},
+  "expected": "value"
+}

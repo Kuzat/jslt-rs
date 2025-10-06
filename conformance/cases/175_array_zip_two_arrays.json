@@ -1,0 +1,7 @@
+{
+  "name": "175_array_zip_two_arrays",
+  "description": "zip([\"a\",\"b\"],[1,2]) → pairs",
+  "program": "zip([\"a\",\"b\"],[1,2])",
+  "input": {},
+  "expected": [["a",1],["b",2]]
+}

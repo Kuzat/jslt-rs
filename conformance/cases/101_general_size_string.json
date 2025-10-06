@@ -1,0 +1,7 @@
+{
+  "name": "101_general_size_string",
+  "description": "size(string) → length",
+  "program": "size(\"abcdef\")",
+  "input": {},
+  "expected": 6
+}

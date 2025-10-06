@@ -1,0 +1,7 @@
+{
+  "name": "119_numeric_mod_euclidean_negative_dividend",
+  "description": "mod(-10, 3) → 2",
+  "program": "mod(-10, 3)",
+  "input": {},
+  "expected": 2
+}

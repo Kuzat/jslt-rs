@@ -28,8 +28,12 @@ impl JsltValue {
         Self(Value::String(s))
     }
 
-    pub fn number(n: f64) -> Self {
+    pub fn number_f64(n: f64) -> Self {
         Self(Value::Number(Number::from_f64(n).unwrap()))
+    }
+    
+    pub fn number_i64(n: i64) -> Self {
+        Self(Value::Number(Number::from(n)))
     }
 
     pub fn array(a: Vec<JsltValue>) -> Self {

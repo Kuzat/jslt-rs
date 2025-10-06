@@ -235,7 +235,7 @@ impl JsltFunction for NumberFn {
         if let Some(s) = v.0.as_str() {
             let s_trim = s.trim();
             match s_trim.parse::<f64>() {
-                Ok(n) => Ok(JsltValue::number(n)),
+                Ok(n) => Ok(JsltValue::number_f64(n)),
                 Err(_) => {
                     if let Some(fb) = fallback {
                         Ok(fb.clone())
@@ -291,7 +291,7 @@ impl JsltFunction for SizeFn {
         } else {
             return Err(StdlibError::Type(format!("size: unsupported type {}", v.type_of())));
         };
-        Ok(JsltValue::number(n as f64))
+        Ok(JsltValue::number_i64(n as i64))
     }
 }
 
@@ -755,11 +755,11 @@ mod tests {
         let f = NumberFn;
         // parse numeric string
         let ok = f.call(&[j(json!("  42 "))]).unwrap();
-        assert_eq!(ok, JsltValue::number(42.0));
+        assert_eq!(ok, JsltValue::number_f64(42.0));
 
         // preserve numbers
         let ok2 = f.call(&[j(json!(3.14))]).unwrap();
-        assert_eq!(ok2, JsltValue::number(3.14));
+        assert_eq!(ok2, JsltValue::number_f64(3.14));
 
         // null passthrough
         let n = f.call(&[j(json!(null))]).unwrap();
@@ -774,15 +774,15 @@ mod tests {
 
         // bad type with fallback => fallback
         let out = f.call(&[j(json!({"x":1})), j(json!(999))]).unwrap();
-        assert!(out.deep_eq(&JsltValue::number(999.0)));
+        assert!(out.deep_eq(&JsltValue::number_f64(999.0)));
     }
 
     #[test]
     fn size_on_string_array_object_and_errors() {
         let f = SizeFn;
-        assert_eq!(f.call(&[j(json!("hé"))]).unwrap(), JsltValue::number(2.0)); // unicode chars
-        assert_eq!(f.call(&[j(json!([1, 2, 3]))]).unwrap(), JsltValue::number(3.0));
-        assert_eq!(f.call(&[j(json!({"a":1,"b":2}))]).unwrap(), JsltValue::number(2.0));
+        assert_eq!(f.call(&[j(json!("hé"))]).unwrap(), JsltValue::number_f64(2.0)); // unicode chars
+        assert_eq!(f.call(&[j(json!([1, 2, 3]))]).unwrap(), JsltValue::number_f64(3.0));
+        assert_eq!(f.call(&[j(json!({"a":1,"b":2}))]).unwrap(), JsltValue::number_f64(2.0));
         assert!(f.call(&[j(json!(true))]).is_err());
         assert!(f.call(&[j(json!(null))]).unwrap().is_null());
     }

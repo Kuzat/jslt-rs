@@ -91,6 +91,7 @@ impl Registry {
         r.register(IsIntegerFn);
         r.register(IsDecimalFn);
         r.register(NumberFn);
+        r.register(RoundFn);
 
         // String
         r.register(StringFn);
@@ -701,6 +702,46 @@ impl JsltFunction for IsDecimalFn {
     }
 }
 
+struct RoundFn;
+impl JsltFunction for RoundFn {
+    fn name(&self) -> &'static str {
+        "round"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        match v.as_json() {
+            Value::Number(n) => {
+                if n.is_i64() || n.is_u64() {
+                    // Already integer
+                    Ok(v.clone())
+                } else if let Some(f) = n.as_f64() {
+                    let r = f.round();
+                    if r >= i64::MIN as f64 && r <= i64::MAX as f64 {
+                        // Prefer integer if in i64 range
+                        Ok(JsltValue::number_i64(r as i64))
+                    } else {
+                        // Otherwise, return as f64 for extremely large numbers
+                        Ok(JsltValue::number_f64(r))
+                    }
+                } else {
+                    // Should not occur with serde_json::Number
+                    Err(StdlibError::Type("round: unsupported numeric value".to_string()))
+                }
+            }
+            _ => Err(StdlibError::Type("round: unsupported type".to_string())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -714,7 +755,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 21);
+        assert_eq!(r.len(), 22);
         for name in [
             "string",
             "number",
@@ -737,6 +778,7 @@ mod tests {
             "is-number",
             "is-integer",
             "is-decimal",
+            "round",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

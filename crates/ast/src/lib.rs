@@ -76,6 +76,12 @@ pub struct Ident {
 }
 
 #[derive(Debug, Clone)]
+pub enum NumericKind {
+    Int,
+    Float,
+}
+
+#[derive(Debug, Clone)]
 pub enum Expr {
     // Literals / base
     Null(Span),
@@ -85,6 +91,7 @@ pub enum Expr {
     },
     Number {
         lexeme: String,
+        kind: NumericKind,
         span: Span,
     },
     String {
@@ -566,7 +573,12 @@ mod tests {
     }
 
     fn num(n: &str) -> Expr {
-        Expr::Number { lexeme: n.to_string(), span: sp() }
+        let kind = if n.contains('.') || n.contains('e') || n.contains('E') {
+            NumericKind::Float
+        } else {
+            NumericKind::Int
+        };
+        Expr::Number { lexeme: n.to_string(), kind, span: sp() }
     }
 
     fn str_(s: &str) -> Expr {

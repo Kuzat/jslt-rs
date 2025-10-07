@@ -283,11 +283,11 @@ impl JsltFunction for SizeFn {
             return Ok(JsltValue::null());
         }
         let n = if let Some(s) = v.0.as_str() {
-            s.chars().count() as u64
+            s.chars().count()
         } else if let Some(a) = v.0.as_array() {
-            a.len() as u64
+            a.len()
         } else if let Some(o) = v.0.as_object() {
-            o.len() as u64
+            o.len()
         } else {
             return Err(StdlibError::Type(format!("size: unsupported type {}", v.type_of())));
         };
@@ -780,9 +780,9 @@ mod tests {
     #[test]
     fn size_on_string_array_object_and_errors() {
         let f = SizeFn;
-        assert_eq!(f.call(&[j(json!("hé"))]).unwrap(), JsltValue::number_f64(2.0)); // unicode chars
-        assert_eq!(f.call(&[j(json!([1, 2, 3]))]).unwrap(), JsltValue::number_f64(3.0));
-        assert_eq!(f.call(&[j(json!({"a":1,"b":2}))]).unwrap(), JsltValue::number_f64(2.0));
+        assert_eq!(f.call(&[j(json!("hé"))]).unwrap(), JsltValue::number_i64(2)); // unicode chars
+        assert_eq!(f.call(&[j(json!([1, 2, 3]))]).unwrap(), JsltValue::number_i64(3));
+        assert_eq!(f.call(&[j(json!({"a":1,"b":2}))]).unwrap(), JsltValue::number_i64(2));
         assert!(f.call(&[j(json!(true))]).is_err());
         assert!(f.call(&[j(json!(null))]).unwrap().is_null());
     }

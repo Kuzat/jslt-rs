@@ -208,11 +208,14 @@ impl<'p> Evaluator<'p> {
         match e {
             Null(_) => Ok(JsltValue::null()),
             Bool(b, _) => Ok(JsltValue::from_json(Value::Bool(*b))),
-            Number(n, sp) => {
+            NumberFloat(n, sp) => {
                 if !n.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
                 }
-                Ok(JsltValue::from_json(json!(n)))
+                Ok(JsltValue::number_f64(*n))
+            }
+            NumberInt(n, _) => {
+                Ok(JsltValue::number_i64(*n))
             }
             String(s, _) => Ok(JsltValue::from_json(Value::String(s.clone()))),
             This(_) => Ok(self.current_frame().this_val.clone()),
@@ -738,15 +741,15 @@ mod tests {
     #[test]
     fn index_and_slice_semantics() {
         // String indexing and slicing
-        let body_idx = B::Index(Box::new(B::This(sp())), Box::new(B::Number(1.0, sp())), sp());
+        let body_idx = B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(1, sp())), sp());
         let p_idx = prog_with(vec![], body_idx, vec![]);
         let out_idx = apply(&p_idx, &json!("héllo"), None).unwrap();
         assert_eq!(out_idx, json!("é"));
 
         let body_slice = B::Slice {
             target: Box::new(B::This(sp())),
-            start: Some(Box::new(B::Number(1.0, sp()))),
-            end: Some(Box::new(B::Number(4.0, sp()))),
+            start: Some(Box::new(B::NumberInt(1, sp()))),
+            end: Some(Box::new(B::NumberInt(4, sp()))),
             span: sp(),
         };
         let p_slice = prog_with(vec![], body_slice, vec![]);
@@ -754,12 +757,12 @@ mod tests {
         assert_eq!(out_slice, json!("ell"));
 
         // Array indexing negative and OOB → null
-        let body_idx_neg = B::Index(Box::new(B::This(sp())), Box::new(B::Number(-1.0, sp())), sp());
+        let body_idx_neg = B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(-1, sp())), sp());
         let p_idx_neg = prog_with(vec![], body_idx_neg, vec![]);
         let out_idx_neg = apply(&p_idx_neg, &json!([1, 2, 3]), None).unwrap();
         assert_eq!(out_idx_neg, json!(3));
 
-        let body_idx_oob = B::Index(Box::new(B::This(sp())), Box::new(B::Number(99.0, sp())), sp());
+        let body_idx_oob = B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(99, sp())), sp());
         let p_idx_oob = prog_with(vec![], body_idx_oob, vec![]);
         let out_idx_oob = apply(&p_idx_oob, &json!([1, 2, 3]), None).unwrap();
         assert_eq!(out_idx_oob, json!(null));
@@ -768,7 +771,7 @@ mod tests {
     #[test]
     fn arithmetic_and_type_errors() {
         // 1 + 2
-        let body_add = B::Add(Box::new(B::Number(1.0, sp())), Box::new(B::Number(2.0, sp())), sp());
+        let body_add = B::Add(Box::new(B::NumberInt(1, sp())), Box::new(B::NumberInt(2, sp())), sp());
         let p_add = prog_with(vec![], body_add, vec![]);
         let out_add = apply(&p_add, &json!(null), None).unwrap();
         assert_eq!(out_add, json!(3.0));
@@ -785,7 +788,7 @@ mod tests {
 
         // "a" + 1 -> type error
         let body_bad =
-            B::Add(Box::new(B::String("a".into(), sp())), Box::new(B::Number(1.0, sp())), sp());
+            B::Add(Box::new(B::String("a".into(), sp())), Box::new(B::NumberInt(1, sp())), sp());
         let p_bad = prog_with(vec![], body_bad, vec![]);
         let err = apply(&p_bad, &json!(null), None).unwrap_err();
         match err {
@@ -808,7 +811,7 @@ mod tests {
         // The above is awkward. Let's instead test equality through evaluator's deep_eq by constructing JsltValue via ObjectLiteral:
         let body_obj_left = B::ObjectLiteral(
             vec![
-                (B::String("x".into(), sp()), B::Number(1.0, sp())),
+                (B::String("x".into(), sp()), B::NumberInt(1, sp())),
                 (
                     B::String("y".into(), sp()),
                     B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
@@ -823,7 +826,7 @@ mod tests {
                     B::String("y".into(), sp()),
                     B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
                 ),
-                (B::String("x".into(), sp()), B::Number(1.0, sp())),
+                (B::String("x".into(), sp()), B::NumberInt(1, sp())),
             ],
             None,
             sp(),
@@ -836,7 +839,7 @@ mod tests {
         // Mixed-type comparison should error
         let p_cmp_err = prog_with(
             vec![],
-            B::Lt(Box::new(B::String("a".into(), sp())), Box::new(B::Number(1.0, sp())), sp()),
+            B::Lt(Box::new(B::String("a".into(), sp())), Box::new(B::NumberFloat(1.0, sp())), sp()),
             vec![],
         );
         let err = apply(&p_cmp_err, &json!(null), None).unwrap_err();
@@ -850,7 +853,7 @@ mod tests {
     fn logical_short_circuiting() {
         // true or (1/0) must short-circuit and not fail
         let body_div_zero =
-            B::Div(Box::new(B::Number(1.0, sp())), Box::new(B::Number(0.0, sp())), sp());
+            B::Div(Box::new(B::NumberFloat(1.0, sp())), Box::new(B::NumberFloat(0.0, sp())), sp());
         let body_or = B::Or(Box::new(B::Bool(true, sp())), Box::new(body_div_zero), sp());
         let p_or = prog_with(vec![], body_or, vec![]);
         let out_or = apply(&p_or, &json!(null), None).unwrap();
@@ -859,7 +862,7 @@ mod tests {
         // false and (1/0) must short-circuit and not fail
         let body_and = B::And(
             Box::new(B::Bool(false, sp())),
-            Box::new(B::Div(Box::new(B::Number(1.0, sp())), Box::new(B::Number(0.0, sp())), sp())),
+            Box::new(B::Div(Box::new(B::NumberFloat(1.0, sp())), Box::new(B::NumberFloat(0.0, sp())), sp())),
             sp(),
         );
         let p_and = prog_with(vec![], body_and, vec![]);
@@ -872,30 +875,30 @@ mod tests {
         // if (.) 1 else 2 with different inputs
         let body = B::If {
             cond: Box::new(B::This(sp())),
-            then_br: Box::new(B::Number(1.0, sp())),
-            else_br: Box::new(B::Number(2.0, sp())),
+            then_br: Box::new(B::NumberInt(1, sp())),
+            else_br: Box::new(B::NumberInt(2, sp())),
             span: sp(),
         };
         let p = prog_with(vec![], body, vec![]);
 
-        assert_eq!(apply(&p, &json!(null), None).unwrap(), json!(2.0)); // null -> falsey
-        assert_eq!(apply(&p, &json!(false), None).unwrap(), json!(2.0)); // false -> falsey
-        assert_eq!(apply(&p, &json!(true), None).unwrap(), json!(1.0)); // true -> truthy
-        assert_eq!(apply(&p, &json!(0), None).unwrap(), json!(2.0)); // 0 -> falsey
-        assert_eq!(apply(&p, &json!(2), None).unwrap(), json!(1.0)); // non-zero -> truthy
-        assert_eq!(apply(&p, &json!(""), None).unwrap(), json!(2.0)); // empty string falsey
-        assert_eq!(apply(&p, &json!("x"), None).unwrap(), json!(1.0)); // non-empty string truthy
-        assert_eq!(apply(&p, &json!([]), None).unwrap(), json!(2.0)); // empty array falsey
-        assert_eq!(apply(&p, &json!([0]), None).unwrap(), json!(1.0)); // non-empty array truthy
-        assert_eq!(apply(&p, &json!({}), None).unwrap(), json!(2.0)); // empty object falsey
-        assert_eq!(apply(&p, &json!({"a":1}), None).unwrap(), json!(1.0)); // non-empty object truthy
+        assert_eq!(apply(&p, &json!(null), None).unwrap(), json!(2)); // null -> falsey
+        assert_eq!(apply(&p, &json!(false), None).unwrap(), json!(2)); // false -> falsey
+        assert_eq!(apply(&p, &json!(true), None).unwrap(), json!(1)); // true -> truthy
+        assert_eq!(apply(&p, &json!(0), None).unwrap(), json!(2)); // 0 -> falsey
+        assert_eq!(apply(&p, &json!(2), None).unwrap(), json!(1)); // non-zero -> truthy
+        assert_eq!(apply(&p, &json!(""), None).unwrap(), json!(2)); // empty string falsey
+        assert_eq!(apply(&p, &json!("x"), None).unwrap(), json!(1)); // non-empty string truthy
+        assert_eq!(apply(&p, &json!([]), None).unwrap(), json!(2)); // empty array falsey
+        assert_eq!(apply(&p, &json!([0]), None).unwrap(), json!(1)); // non-empty array truthy
+        assert_eq!(apply(&p, &json!({}), None).unwrap(), json!(2)); // empty object falsey
+        assert_eq!(apply(&p, &json!({"a":1}), None).unwrap(), json!(1)); // non-empty object truthy
     }
 
     #[test]
     fn function_call_with_capture() {
         // let x = 2; def addx(y) x + y; addx(3) => 5
         // Top-level let slot 0 is 'x'
-        let lets = vec![("x", B::Number(2.0, sp()))];
+        let lets = vec![("x", B::NumberInt(2, sp()))];
 
         // Function body: Add(Var Captured(depth=1, slot=0), Var Local(0))  // x + y
         let fid = FunctionId(0);
@@ -912,7 +915,7 @@ mod tests {
         };
 
         // Call addx(3)
-        let body = B::Call { id: fid, args: vec![B::Number(3.0, sp())], span: sp() };
+        let body = B::Call { id: fid, args: vec![B::NumberInt(3, sp())], span: sp() };
         let p = prog_with(lets, body, vec![fun]);
 
         let out = apply(&p, &json!(null), None).unwrap();
@@ -928,26 +931,26 @@ mod tests {
             B::Add(
                 Box::new(B::Add(
                     Box::new(B::Add(
-                        Box::new(B::Number(1.0, sp())),
-                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::NumberInt(1, sp())),
+                        Box::new(B::NumberInt(1, sp())),
                         sp(),
                     )),
                     Box::new(B::Add(
-                        Box::new(B::Number(1.0, sp())),
-                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::NumberInt(1, sp())),
+                        Box::new(B::NumberInt(1, sp())),
                         sp(),
                     )),
                     sp(),
                 )),
                 Box::new(B::Add(
                     Box::new(B::Add(
-                        Box::new(B::Number(1.0, sp())),
-                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::NumberInt(1, sp())),
+                        Box::new(B::NumberInt(1, sp())),
                         sp(),
                     )),
                     Box::new(B::Add(
-                        Box::new(B::Number(1.0, sp())),
-                        Box::new(B::Number(1.0, sp())),
+                        Box::new(B::NumberInt(1, sp())),
+                        Box::new(B::NumberInt(2, sp())),
                         sp(),
                     )),
                     sp(),

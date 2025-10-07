@@ -47,7 +47,8 @@ pub struct CaptureSpec {
 pub enum BoundExpr {
     Null(Span),
     Bool(bool, Span),
-    Number(f64, Span),
+    NumberFloat(f64, Span),
+    NumberInt(i64, Span),
     String(String, Span),
 
     // Context '.'
@@ -129,7 +130,8 @@ impl BoundExpr {
         match self {
             Null(s) => *s,
             Bool(_, s) => *s,
-            Number(_, s) => *s,
+            NumberFloat(_, s) => *s,
+            NumberInt(_, s) => *s,
             String(_, s) => *s,
             This(s) => *s,
             Var(_, s) => *s,
@@ -448,17 +450,33 @@ impl Binder {
         match e {
             Expr::Null(s) => Ok(BoundExpr::Null(*s)),
             Expr::Bool { value, span } => Ok(BoundExpr::Bool(*value, *span)),
-            Expr::Number { lexeme, span } => {
-                // Parse once here; numbers are runetime f64 in the interpreter
-                match lexeme.parse::<f64>() {
-                    Ok(v) => Ok(BoundExpr::Number(v, *span)),
-                    Err(_e) => {
-                        // Parser/lexer should have validated; still, report a spanful binder error if it slips through
-                        Err(BindError::UnknownVariable {
-                            name: format!("invalid-number: {}", lexeme),
-                            span: *span,
-                            suggestions: vec![],
-                        })
+            Expr::Number { lexeme, kind, span } => {
+                match kind {
+                    ast::NumericKind::Float => {
+                        match lexeme.parse::<f64>() {
+                            Ok(v) => Ok(BoundExpr::NumberFloat(v, *span)),
+                            Err(_e) => {
+                                // Parser/lexer should have validated; still, report a spanful binder error if it slips through
+                                Err(BindError::UnknownVariable {
+                                    name: format!("invalid-number: {}", lexeme),
+                                    span: *span,
+                                    suggestions: vec![],
+                                })
+                            }
+                        }
+                    }
+                    ast::NumericKind::Int => {
+                        match lexeme.parse::<i64>() {
+                            Ok(v) => Ok(BoundExpr::NumberInt(v, *span)),
+                            Err(_e) => {
+                                // Parser/lexer should have validated; still, report a spanful binder error if it slips through
+                                Err(BindError::UnknownVariable {
+                                    name: format!("invalid-number: {}", lexeme),
+                                    span: *span,
+                                    suggestions: vec![],
+                                })
+                            }
+                        }
                     }
                 }
             }

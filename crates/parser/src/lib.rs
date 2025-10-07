@@ -1,4 +1,7 @@
-use ast::{BinaryOp, Binding, Def, Expr, Ident, Let, MemberKey, ObjectEntry, ObjectKey, Program, Span, UnaryOp};
+use ast::{
+    BinaryOp, Binding, Def, Expr, Ident, Let, MemberKey, NumericKind, ObjectEntry, ObjectKey,
+    Program, Span, UnaryOp,
+};
 use lexer::{LexErrorKind, Lexer, Token};
 use std::mem;
 use thiserror::Error;
@@ -373,7 +376,11 @@ impl<'a> Parser<'a> {
                         };
                         let end_span = self.expect(Token::RBracket, "']' for index")?;
                         let span = Span::join(start, end_span);
-                        expr = Expr::Index { target: Box::new(expr), index: Box::new(first_expr), span };
+                        expr = Expr::Index {
+                            target: Box::new(expr),
+                            index: Box::new(first_expr),
+                            span,
+                        };
                     }
                 }
                 Token::LParen => {
@@ -417,11 +424,17 @@ impl<'a> Parser<'a> {
                 self.bump();
                 Ok(Expr::Bool { value: false, span: s })
             }
-            Token::Number(n) => {
+            Token::NumberFloat(n) => {
                 let s = self.cur.span;
                 let v = *n;
                 self.bump();
-                Ok(Expr::Number { lexeme: v.to_string(), span: s })
+                Ok(Expr::Number { lexeme: v.to_string(), kind: NumericKind::Float, span: s })
+            }
+            Token::NumberInt(n) => {
+                let s = self.cur.span;
+                let v = *n;
+                self.bump();
+                Ok(Expr::Number { lexeme: v.to_string(), kind: NumericKind::Int, span: s })
             }
             Token::String(st) => {
                 let s = self.cur.span;
@@ -556,24 +569,17 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair {
-                                key,
-                                value: v,
-                                span,
-                            }
+                            ObjectEntry::Pair { key, value: v, span }
                         }
                         Token::Ident(id) => {
                             let kspan = self.cur.span;
-                            let key = ObjectKey::Ident(Ident {name: id.clone(), span: self.cur.span});
+                            let key =
+                                ObjectKey::Ident(Ident { name: id.clone(), span: self.cur.span });
                             self.bump();
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair {
-                                key,
-                                value: v,
-                                span,
-                            }
+                            ObjectEntry::Pair { key, value: v, span }
                         }
                         _ => {
                             return Err(ParseError::unexpected(
@@ -586,7 +592,7 @@ impl<'a> Parser<'a> {
                     entries.push(entry);
                     if self.eat(&Token::Comma) {
                         // continue reading entries
-                        continue
+                        continue;
                     } else {
                         break;
                     }
@@ -655,4 +661,3 @@ fn next_token(lx: &mut Lexer<'_>) -> Result<Tok, ParseError> {
         Err(le) => Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
     }
 }
-

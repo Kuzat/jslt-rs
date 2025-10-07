@@ -12,7 +12,12 @@ fn ident(name: &str) -> Ident {
 }
 
 fn num(n: &str) -> Expr {
-    Expr::Number { lexeme: n.to_string(), span: s() }
+    let kind = if n.contains('.') || n.contains('e') || n.contains('E') {
+        ast::NumericKind::Float
+    } else {
+        ast::NumericKind::Int
+    };
+    Expr::Number { lexeme: n.to_string(), kind, span: s() }
 }
 
 fn var(name: &str) -> Expr {
@@ -45,7 +50,7 @@ fn let_binding_and_variable_resolution() {
     // there should be one let tuple ("x", Number(1.0))
     assert_eq!(bound.lets.len(), 1);
     match &bound.lets[0].1 {
-        BoundExpr::Number(v, _s) => assert_eq!(*v, 1.0),
+        BoundExpr::NumberInt(v, _s) => assert_eq!(*v, 1),
         _ => panic!("expected bound number for let x"),
     }
 
@@ -93,7 +98,7 @@ fn function_definition_and_call() {
             assert_eq!(*fid, registry.len());
             assert_eq!(args.len(), 1);
             match &args[0] {
-                BoundExpr::Number(n, _s) => assert_eq!(*n, 41.0),
+                BoundExpr::NumberInt(n, _s) => assert_eq!(*n, 41),
                 _ => panic!("expected numeric argument"),
             }
         }
@@ -108,7 +113,7 @@ fn function_definition_and_call() {
                 _ => panic!("expected local var for param x"),
             }
             match right.as_ref() {
-                BoundExpr::Number(n, _s) => assert_eq!(*n, 1.0),
+                BoundExpr::NumberInt(n, _s) => assert_eq!(*n, 1),
                 _ => panic!("expected numeric literal 1"),
             }
         }
@@ -154,7 +159,7 @@ fn closure_captures_outer_let() {
 
     // Sanity: body calls g (id 0)
     match &bound.body {
-        BoundExpr::Call{ id: FunctionId(fid), args, ..} => {
+        BoundExpr::Call { id: FunctionId(fid), args, .. } => {
             assert_eq!(*fid, registry.len());
             assert!(args.is_empty());
         }

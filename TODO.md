@@ -165,7 +165,7 @@ unsafe_code = "forbid"
     - [x] is-integer(value)
     - [x] is-decimal(value)
     - [x] number(value, fallback?)
-    - [ ] round(x)
+    - [x] round(x)
     - [ ] floor(x)
     - [ ] ceiling(x)
     - [ ] random()

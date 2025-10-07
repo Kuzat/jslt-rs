@@ -92,6 +92,8 @@ impl Registry {
         r.register(IsDecimalFn);
         r.register(NumberFn);
         r.register(RoundFn);
+        r.register(FloorFn);
+        r.register(CeilingFn);
 
         // String
         r.register(StringFn);
@@ -742,6 +744,78 @@ impl JsltFunction for RoundFn {
     }
 }
 
+struct FloorFn;
+impl JsltFunction for FloorFn {
+    fn name(&self) -> &'static str {
+        "floor"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        match v.as_json() {
+            Value::Number(n) => {
+                if n.is_i64() || n.is_u64() {
+                    Ok(v.clone())
+                } else if let Some(f) = n.as_f64() {
+                    let r = f.floor();
+                    if r >= i64::MIN as f64 && r <= i64::MAX as f64 {
+                        Ok(JsltValue::number_i64(r as i64))
+                    } else {
+                        Ok(JsltValue::number_f64(r))
+                    }
+                } else {
+                    Err(StdlibError::Type("floor: unsupported numeric value".to_string()))
+                }
+            }
+            _ => Err(StdlibError::Type("floor: unsupported type".to_string())),
+        }
+    }
+}
+
+struct CeilingFn;
+impl JsltFunction for CeilingFn {
+    fn name(&self) -> &'static str {
+        "ceiling"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        match v.as_json() {
+            Value::Number(n) => {
+                if n.is_i64() || n.is_u64() {
+                    Ok(v.clone())
+                } else if let Some(f) = n.as_f64() {
+                    let r = f.ceil();
+                    if r >= i64::MIN as f64 && r <= i64::MAX as f64 {
+                        Ok(JsltValue::number_i64(r as i64))
+                    } else {
+                        Ok(JsltValue::number_f64(r))
+                    }
+                } else {
+                    Err(StdlibError::Type("floor: unsupported numeric value".to_string()))
+                }
+            }
+            _ => Err(StdlibError::Type("floor: unsupported type".to_string())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,7 +829,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 22);
+        assert_eq!(r.len(), 24);
         for name in [
             "string",
             "number",
@@ -779,6 +853,8 @@ mod tests {
             "is-integer",
             "is-decimal",
             "round",
+            "floor",
+            "ceiling",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

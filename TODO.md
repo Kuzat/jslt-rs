@@ -168,7 +168,7 @@ unsafe_code = "forbid"
     - [x] round(x)
     - [x] floor(x)
     - [x] ceiling(x)
-    - [ ] random()
+    - [x] random()
     - [ ] sum(array)
     - [ ] mod(a, d)
     - [ ] hash-int(value)
@@ -217,9 +217,6 @@ unsafe_code = "forbid"
 
   - URL
     - [ ] parse-url(url)
-
-  - Notes
-    - [ ] `map(arr, f)`, `filter(arr, f)` are NOT language features—omit unless JSLT defines them; rely on comprehensions instead.
 
 * [ ] Regex-gated (feature = "regex"): implement using `regex` crate where applicable
   - [ ] test

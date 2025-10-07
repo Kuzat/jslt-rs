@@ -94,6 +94,7 @@ impl Registry {
         r.register(RoundFn);
         r.register(FloorFn);
         r.register(CeilingFn);
+        r.register(RandomFn);
 
         // String
         r.register(StringFn);
@@ -816,6 +817,21 @@ impl JsltFunction for CeilingFn {
     }
 }
 
+struct RandomFn;
+impl JsltFunction for RandomFn {
+    fn name(&self) -> &'static str {
+        "random"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(0)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+       let x: f64 = rand::random();
+        Ok(JsltValue::number_f64(x))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -829,7 +845,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 24);
+        assert_eq!(r.len(), 25);
         for name in [
             "string",
             "number",
@@ -855,6 +871,7 @@ mod tests {
             "round",
             "floor",
             "ceiling",
+            "random",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

@@ -169,7 +169,7 @@ unsafe_code = "forbid"
     - [x] floor(x)
     - [x] ceiling(x)
     - [x] random()
-    - [ ] sum(array)
+    - [x] sum(array)
     - [ ] mod(a, d)
     - [ ] hash-int(value)
 

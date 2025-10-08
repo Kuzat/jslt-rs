@@ -95,6 +95,7 @@ impl Registry {
         r.register(FloorFn);
         r.register(CeilingFn);
         r.register(RandomFn);
+        r.register(SumFn);
 
         // String
         r.register(StringFn);
@@ -827,8 +828,74 @@ impl JsltFunction for RandomFn {
     }
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
-       let x: f64 = rand::random();
+        let x: f64 = rand::random();
         Ok(JsltValue::number_f64(x))
+    }
+}
+
+struct SumFn;
+impl JsltFunction for SumFn {
+    fn name(&self) -> &'static str {
+        "sum"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let arr = &args[0];
+
+        if arr.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let a = expect_array(arr, "sum", 1)?;
+
+        // Accumulate integers in i128 to reduce overflow risk.
+        // If we encounter any decimal value we switch to f64 accumulation
+        let mut int_acc: i128 = 0;
+        let mut float_acc: f64 = 0.0;
+        let mut any_float = false;
+
+        for v in a {
+            match v {
+                Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        if any_float {
+                            float_acc += i as f64;
+                        } else {
+                            int_acc = int_acc.saturating_add(i as i128)
+                        }
+                    } else if let Some(u) = n.as_u64() {
+                        if any_float {
+                            float_acc += u as f64;
+                        } else {
+                            int_acc = int_acc.saturating_add(u as i128)
+                        }
+                    } else if let Some(f) = n.as_f64() {
+                        any_float = true;
+                        float_acc += f;
+                    } else {
+                        return Err(StdlibError::Type(
+                            "sum: unsupported numeric value".to_string(),
+                        ));
+                    }
+                }
+                _ => return Err(StdlibError::Type("sum: elements must be numbers".to_string())),
+            }
+        }
+
+        if any_float {
+            let total = float_acc + int_acc as f64;
+            Ok(JsltValue::number(total))
+        } else {
+            if int_acc >= i64::MIN as i128 && int_acc <= i64::MAX as i128 {
+                Ok(JsltValue::number_i64(int_acc as i64))
+            } else {
+                // fallback to f64 if outside i64 range
+                Ok(JsltValue::number_f64(int_acc as f64))
+            }
+        }
     }
 }
 
@@ -845,7 +912,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 25);
+        assert_eq!(r.len(), 26);
         for name in [
             "string",
             "number",
@@ -872,6 +939,7 @@ mod tests {
             "floor",
             "ceiling",
             "random",
+            "sum",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }
@@ -985,5 +1053,12 @@ mod tests {
         // type errors
         assert!(JoinFn.call(&[j(json!({})), j(json!(","))]).is_err());
         assert!(JoinFn.call(&[j(json!([])), j(json!(1))]).is_err());
+    }
+
+    #[test]
+    fn sum_with_float_summing_to_int_result_should_return_int() {
+        let arr = j(json!([1.5, 1.5]));
+        let out = SumFn.call(&[arr]).unwrap();
+        assert_eq!(out, j(json!(3)));
     }
 }

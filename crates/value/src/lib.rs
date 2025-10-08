@@ -28,10 +28,24 @@ impl JsltValue {
         Self(Value::String(s))
     }
 
+    /// Constructs a numeric value from an f64, but prefer an integer
+    /// representation when the value is exactly integral and fits in i64.
+    ///
+    /// Note: caller must ensure the input is finite; NaN/Inf cannot be
+    /// represented in serde_json::Number and will panic if passed to `number_f64`
+    pub fn number(n: f64) -> Self {
+        if n.is_finite() && n.fract() == 0.0 {
+            if n >= i64::MIN as f64 && n <= i64::MAX as f64 {
+                return Self::number_i64(n as i64);
+            }
+        }
+        Self::number_f64(n)
+    }
+
     pub fn number_f64(n: f64) -> Self {
         Self(Value::Number(Number::from_f64(n).unwrap()))
     }
-    
+
     pub fn number_i64(n: i64) -> Self {
         Self(Value::Number(Number::from(n)))
     }
@@ -395,5 +409,11 @@ mod tests {
         let v = JsltValue(json!({"a": 1}));
         assert!(v.index(0).is_null());
         assert!(v.slice(None, None).is_null());
+    }
+
+    #[test]
+    fn number_convert_integral_floats_to_integers() {
+        let v = JsltValue::number(1.0);
+        assert_eq!(v, JsltValue::number_i64(1));
     }
 }

@@ -9,6 +9,7 @@
 
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use value::JsltValue;
 
@@ -101,8 +102,9 @@ impl Registry {
 
         // String
         r.register(StringFn);
-        r.register(UppercaseFn);
         r.register(LowercaseFn);
+        r.register(UppercaseFn);
+        r.register(Sha256HexFn);
         r.register(StartsWithFn);
         r.register(EndsWithFn);
         r.register(JoinFn);
@@ -1039,6 +1041,41 @@ impl JsltFunction for HashIntFn {
     }
 }
 
+// Helper: lower-hex encoded bytes without extra deps
+fn to_hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+struct Sha256HexFn;
+impl JsltFunction for Sha256HexFn {
+    fn name(&self) -> &'static str {
+        "sha256-hex"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Spec: non-strings are stringified; strings are used as-is
+        let message = v.stringify();
+        let digest = Sha256::digest(message.as_bytes());
+        let hex = to_hex_lower(&digest);
+        Ok(JsltValue::string(hex))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1052,7 +1089,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 28);
+        assert_eq!(r.len(), 29);
         for name in [
             "string",
             "number",
@@ -1082,6 +1119,7 @@ mod tests {
             "sum",
             "mod",
             "hash-int",
+            "sha256-hex",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

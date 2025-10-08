@@ -97,6 +97,7 @@ impl Registry {
         r.register(RandomFn);
         r.register(SumFn);
         r.register(ModFn);
+        r.register(HashIntFn);
 
         // String
         r.register(StringFn);
@@ -220,6 +221,59 @@ fn expect_int_i128(v: &JsltValue, fname: &str, argn: usize) -> Result<i128, Stdl
         ))),
     }
 }
+
+// Produce a canonical JSON string like serde_json/to_string() without whitespace,
+// but with object keys sorted so that key order doesn't affect the result.
+fn canonical_json_string(v: &Value, out: &mut String) {
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::String(s) => {
+            // reuse serde_json's escaping by serializing the string itself
+            // this gives a quoted string with proper escapes
+            out.push_str(&serde_json::to_string(s).expect("string serialize"));
+        }
+        Value::Array(a) => {
+            out.push('[');
+            for (i, elt) in a.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                canonical_json_string(elt, out);
+            }
+            out.push(']');
+        }
+        Value::Object(m) => {
+            out.push('{');
+            // sort keys lexicographically
+            let mut keys: Vec<&str> = m.keys().map(|k| k.as_str()).collect();
+            keys.sort_unstable();
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                // key must be JSON string with quotes/escapes
+                out.push_str(&serde_json::to_string(k).expect("key serialize"));
+                out.push(':');
+                let val = &m[*k];
+                canonical_json_string(val, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+// Java's String.hashCode over UTF-16 code units:
+// h = 31*h + code_unit, 32-bit signed with wrapping semantics.
+fn java_string_hash(s: &str) -> i32 {
+    let mut h: i32 = 0;
+    for cu in s.encode_utf16() {
+        h = h.wrapping_mul(31).wrapping_add(cu as i32);
+    }
+    h
+}
+
 
 // ---------------------- Functions ----------------------
 
@@ -961,6 +1015,30 @@ impl JsltFunction for ModFn {
     }
 }
 
+struct HashIntFn;
+impl JsltFunction for HashIntFn {
+    fn name(&self) -> &'static str {
+        "hash-int"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Build canonical JSON then compute java-like hash over UTF-16 code units
+        let mut s = String::with_capacity(64);
+        canonical_json_string(v.as_json(), &mut s);
+        let h = java_string_hash(&s) as i64;
+        Ok(JsltValue::number_i64(h))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -974,7 +1052,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 27);
+        assert_eq!(r.len(), 28);
         for name in [
             "string",
             "number",
@@ -1003,6 +1081,7 @@ mod tests {
             "random",
             "sum",
             "mod",
+            "hash-int",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

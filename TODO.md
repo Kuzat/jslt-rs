@@ -171,7 +171,7 @@ unsafe_code = "forbid"
     - [x] random()
     - [x] sum(array)
     - [x] mod(a, d)
-    - [ ] hash-int(value)
+    - [x] hash-int(value)
 
   - String
     - [ ] is-string(value)

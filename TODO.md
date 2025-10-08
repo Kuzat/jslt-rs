@@ -170,7 +170,7 @@ unsafe_code = "forbid"
     - [x] ceiling(x)
     - [x] random()
     - [x] sum(array)
-    - [ ] mod(a, d)
+    - [x] mod(a, d)
     - [ ] hash-int(value)
 
   - String

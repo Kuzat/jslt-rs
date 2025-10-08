@@ -96,6 +96,7 @@ impl Registry {
         r.register(CeilingFn);
         r.register(RandomFn);
         r.register(SumFn);
+        r.register(ModFn);
 
         // String
         r.register(StringFn);
@@ -194,6 +195,30 @@ fn expect_array<'a>(
             v.type_of()
         ))
     })
+}
+
+fn expect_int_i128(v: &JsltValue, fname: &str, argn: usize) -> Result<i128, StdlibError> {
+    match v.as_json() {
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(i as i128)
+            } else if let Some(u) = n.as_u64() {
+                Ok(u as i128)
+            } else if n.as_f64().is_some() {
+                Err(StdlibError::Type(format!(
+                    "{fname} expects argument #{argn} to be integer, got decimal"
+                )))
+            } else {
+                Err(StdlibError::Type(format!(
+                    "{fname} expects argument #{argn} to be integer number",
+                )))
+            }
+        }
+        _ => Err(StdlibError::Type(format!(
+            "{fname} expects argument #{argn} to be integer, got {}",
+            v.type_of()
+        ))),
+    }
 }
 
 // ---------------------- Functions ----------------------
@@ -899,6 +924,43 @@ impl JsltFunction for SumFn {
     }
 }
 
+struct ModFn;
+impl JsltFunction for ModFn {
+    fn name(&self) -> &'static str {
+        "mod"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let a = &args[0];
+        let b = &args[1];
+
+        if a.is_null() || b.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Helper to extract
+        let ai = expect_int_i128(a, "mod", 1)?;
+        let di = expect_int_i128(b, "mod", 2)?;
+
+        if di == 0 {
+            return Err(StdlibError::Semantic("mod: divisor cannot be zero".to_string()));
+        }
+
+        // Euclidean modules: result in 0..abs(d)
+        let d_abs = if di < 0 { -di } else { di };
+        let r = ((ai % di) + d_abs) % d_abs;
+
+        if r >= i64::MIN as i128 && r <= i64::MAX as i128 {
+            Ok(JsltValue::number_i64(r as i64))
+        } else {
+            Ok(JsltValue::number_f64(r as f64))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -912,7 +974,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 26);
+        assert_eq!(r.len(), 27);
         for name in [
             "string",
             "number",
@@ -940,6 +1002,7 @@ mod tests {
             "ceiling",
             "random",
             "sum",
+            "mod",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

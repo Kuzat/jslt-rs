@@ -7,9 +7,9 @@
 //! get-key (and alias get), starts-with, ends-with, upper, lower, trim,
 //! contains, join.
 
-use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use serde_json::{from_str, to_string, Map, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use thiserror::Error;
 use value::JsltValue;
 
@@ -101,6 +101,7 @@ impl Registry {
         r.register(HashIntFn);
 
         // String
+        r.register(IsStringFn);
         r.register(StringFn);
         r.register(LowercaseFn);
         r.register(UppercaseFn);
@@ -108,6 +109,8 @@ impl Registry {
         r.register(StartsWithFn);
         r.register(EndsWithFn);
         r.register(JoinFn);
+        r.register(FromJsonFn);
+        r.register(ToJsonFn);
         r.register(TrimFn);
 
         // Boolean
@@ -275,7 +278,6 @@ fn java_string_hash(s: &str) -> i32 {
     }
     h
 }
-
 
 // ---------------------- Functions ----------------------
 
@@ -1076,12 +1078,88 @@ impl JsltFunction for Sha256HexFn {
     }
 }
 
+struct IsStringFn;
+impl JsltFunction for IsStringFn {
+    fn name(&self) -> &'static str {
+        "is-string"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        Ok(JsltValue::bool(args[0].is_string()))
+    }
+}
+
+struct FromJsonFn;
+impl JsltFunction for FromJsonFn {
+    fn name(&self) -> &'static str {
+        "from-json"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Range { min: 1, max: Some(2) }
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+        let fallback = args.get(1);
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Expect string; wrong type -> fallback or error
+        let s = match v.as_json().as_str() {
+            Some(s) => s,
+            None => {
+                if let Some(fb) = fallback {
+                    return Ok(fb.clone());
+                } else {
+                    return Err(StdlibError::Type(format!(
+                        "from-json: argument must be a string, got {}",
+                        v.type_of()
+                    )));
+                }
+            }
+        };
+
+        match from_str::<Value>(s) {
+            Ok(parsed) => Ok(JsltValue::from_json(parsed)),
+            Err(_) => {
+                if let Some(fb) = fallback {
+                    Ok(fb.clone())
+                } else {
+                    Err(StdlibError::Type("from-json: failed to parse JSON".to_string()))
+                }
+            }
+        }
+    }
+}
+
+struct ToJsonFn;
+impl JsltFunction for ToJsonFn {
+    fn name(&self) -> &'static str {
+        "to-json"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        // Serialize any JSON vlaue to compact JSON text
+        let s = to_string(args[0].as_json())
+            .map_err(|e| StdlibError::Semantic(format!("to-json: {}", e)))?;
+        Ok(JsltValue::string(s))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn j(v: serde_json::Value) -> JsltValue {
+    fn j(v: Value) -> JsltValue {
         JsltValue::from_json(v)
     }
 
@@ -1089,7 +1167,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 29);
+        assert_eq!(r.len(), 32);
         for name in [
             "string",
             "number",
@@ -1120,6 +1198,9 @@ mod tests {
             "mod",
             "hash-int",
             "sha256-hex",
+            "is-string",
+            "from-json",
+            "to-json",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

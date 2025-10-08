@@ -174,7 +174,7 @@ unsafe_code = "forbid"
     - [x] hash-int(value)
 
   - String
-    - [ ] is-string(value)
+    - [x] is-string(value)
     - [x] string(value)
     - [ ] test(input, regexp)
     - [ ] capture(input, regexp)
@@ -182,10 +182,10 @@ unsafe_code = "forbid"
     - [x] join(array, separator)
     - [x] lowercase(string)
     - [x] uppercase(string)
-    - [ ] sha256-hex(value)
+    - [x] sha256-hex(value)
     - [x] starts-with(tested, prefix)
     - [x] ends-with(tested, suffix)
-    - [ ] from-json(string, fallback?)
+    - [x] from-json(string, fallback?)
     - [ ] to-json(value)
     - [ ] replace(value, regexp, out)
     - [x] trim(value)

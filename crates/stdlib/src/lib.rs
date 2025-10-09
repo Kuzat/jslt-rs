@@ -1,4 +1,4 @@
-//! stdlib v1: registry + all original JSLT stdlib functions
+//! stdlib v1: registry and all original JSLT stdlib functions
 
 #[cfg(feature = "regex")]
 use regex::Regex;
@@ -170,6 +170,10 @@ impl Registry {
         self.order.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.by_name.keys().map(|s| s.as_str())
     }
@@ -251,7 +255,7 @@ fn canonical_json_string(v: &Value, out: &mut String) {
         Value::String(s) => {
             // reuse serde_json's escaping by serializing the string itself
             // this gives a quoted string with proper escapes
-            out.push_str(&serde_json::to_string(s).expect("string serialize"));
+            out.push_str(&to_string(s).expect("string serialize"));
         }
         Value::Array(a) => {
             out.push('[');
@@ -273,7 +277,7 @@ fn canonical_json_string(v: &Value, out: &mut String) {
                     out.push(',');
                 }
                 // key must be JSON string with quotes/escapes
-                out.push_str(&serde_json::to_string(k).expect("key serialize"));
+                out.push_str(&to_string(k).expect("key serialize"));
                 out.push(':');
                 let val = &m[*k];
                 canonical_json_string(val, out);
@@ -985,13 +989,11 @@ impl JsltFunction for SumFn {
         if any_float {
             let total = float_acc + int_acc as f64;
             Ok(JsltValue::number(total))
+        } else if int_acc >= i64::MIN as i128 && int_acc <= i64::MAX as i128 {
+            Ok(JsltValue::number_i64(int_acc as i64))
         } else {
-            if int_acc >= i64::MIN as i128 && int_acc <= i64::MAX as i128 {
-                Ok(JsltValue::number_i64(int_acc as i64))
-            } else {
-                // fallback to f64 if outside i64 range
-                Ok(JsltValue::number_f64(int_acc as f64))
-            }
+            // fallback to f64 if outside i64 range
+            Ok(JsltValue::number_f64(int_acc as f64))
         }
     }
 }
@@ -1127,13 +1129,13 @@ impl JsltFunction for FromJsonFn {
         let s = match v.as_json().as_str() {
             Some(s) => s,
             None => {
-                if let Some(fb) = fallback {
-                    return Ok(fb.clone());
+                return if let Some(fb) = fallback {
+                    Ok(fb.clone())
                 } else {
-                    return Err(StdlibError::Type(format!(
+                    Err(StdlibError::Type(format!(
                         "from-json: argument must be a string, got {}",
                         v.type_of()
-                    )));
+                    )))
                 }
             }
         };
@@ -1425,11 +1427,11 @@ impl JsltFunction for UuidV4JSLT {
 
                 // Pack big-endian into bytes
                 let mut bytes = [0u8; 16];
-                for i in 0..8 {
-                    bytes[i] = ((masked_msb >> (8 * (7 - i))) & 0xFF) as u8;
+                for (i, byte) in bytes.iter_mut().enumerate().take(8) {
+                    *byte = ((masked_msb >> (8 * (7 - i))) & 0xFF) as u8;
                 }
-                for i in 0..8 {
-                    bytes[8 + i] = ((masked_lsb >> (8 * (7 - i))) & 0xFF) as u8;
+                for (i, byte) in bytes.iter_mut().skip(8).enumerate().take(8) {
+                    *byte = ((masked_lsb >> (8 * (7 - i))) & 0xFF) as u8;
                 }
 
                 Ok(JsltValue::string(format_uuid_hyphenated(&bytes)))
@@ -1488,7 +1490,7 @@ impl JsltFunction for FlattenFn {
             return Ok(JsltValue::null());
         }
 
-        let arr = expect_array(&v, "flatten", 1)?;
+        let arr = expect_array(v, "flatten", 1)?;
 
         fn flatten_value(val: &Value, out: &mut Vec<Value>) {
             match val {
@@ -1526,7 +1528,7 @@ impl JsltFunction for AllFn {
             return Ok(JsltValue::null());
         }
 
-        let arr = expect_array(&v, "all", 1)?;
+        let arr = expect_array(v, "all", 1)?;
 
         let mut result = true;
         for elt in arr {
@@ -1556,7 +1558,7 @@ impl JsltFunction for AnyFn {
             return Ok(JsltValue::null());
         }
 
-        let arr = expect_array(&v, "any", 1)?;
+        let arr = expect_array(v, "any", 1)?;
 
         let mut result = false;
         for elt in arr {
@@ -1587,8 +1589,8 @@ impl JsltFunction for ZipFn {
             return Ok(JsltValue::null());
         }
 
-        let arr1 = expect_array(&a, "zip", 1)?;
-        let arr2 = expect_array(&b, "zip", 2)?;
+        let arr1 = expect_array(a, "zip", 1)?;
+        let arr2 = expect_array(b, "zip", 2)?;
 
         if arr1.len() != arr2.len() {
             return Err(StdlibError::Semantic(
@@ -1625,7 +1627,7 @@ impl JsltFunction for ZipWithIndexFn {
             return Ok(JsltValue::null());
         }
 
-        let arr = expect_array(&a, "zip-with-index", 1)?;
+        let arr = expect_array(a, "zip-with-index", 1)?;
 
         let mut out: Vec<JsltValue> = Vec::with_capacity(arr.len());
         for (idx, val) in arr.iter().enumerate() {
@@ -1756,8 +1758,8 @@ mod tests {
         assert_eq!(ok, JsltValue::number_f64(42.0));
 
         // preserve numbers
-        let ok2 = f.call(&[j(json!(3.14))]).unwrap();
-        assert_eq!(ok2, JsltValue::number_f64(3.14));
+        let ok2 = f.call(&[j(json!(4.14))]).unwrap();
+        assert_eq!(ok2, JsltValue::number_f64(4.14));
 
         // null passthrough
         let n = f.call(&[j(json!(null))]).unwrap();
@@ -1788,11 +1790,11 @@ mod tests {
     #[test]
     fn keys_values_and_get_key() {
         let obj = j(json!({"a":1,"b":2}));
-        let keys = KeysFn.call(&[obj.clone()]).unwrap();
+        let keys = KeysFn.call(std::slice::from_ref(&obj)).unwrap();
         // Order of BTreeMap iteration is sorted by key
         assert_eq!(keys, JsltValue::array(vec![j(json!("a")), j(json!("b"))]));
 
-        let values = ValuesFn.call(&[obj.clone()]).unwrap();
+        let values = ValuesFn.call(std::slice::from_ref(&obj)).unwrap();
         assert_eq!(values, JsltValue::array(vec![j(json!(1)), j(json!(2))]));
 
         // get existing key

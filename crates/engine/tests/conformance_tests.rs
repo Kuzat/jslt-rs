@@ -76,7 +76,7 @@ fn run_java_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::err
     }
 
     let result_str = String::from_utf8(output.stdout)?;
-    let result: Value = serde_json::from_str(&result_str.trim())?;
+    let result: Value = serde_json::from_str(result_str.trim())?;
     Ok(result)
 }
 

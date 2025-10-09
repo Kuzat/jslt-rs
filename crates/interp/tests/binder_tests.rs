@@ -215,8 +215,8 @@ fn unknown_function_yields_error_with_suggestions() {
     let msg = format!("{}", err);
     assert!(msg.contains("unknown function"), "msg={}", msg);
     assert!(msg.contains("nope"), "msg={}", msg);
-    // Suggestion machinery may propose "near" (distance 2)
-    assert!(msg.contains("near") || !msg.contains("did you mean"), "msg={}", msg);
+    // will suggest not()
+    assert!(msg.contains("not") || !msg.contains("did you mean"), "msg={}", msg);
 }
 
 #[test]

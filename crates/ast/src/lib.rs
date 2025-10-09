@@ -166,7 +166,7 @@ pub enum Expr {
     },
     ObjectFor {
         seq: Box<Expr>,            // for (seq)
-        key: Box<Expr>,            // key expr (must evaluaate to string later)
+        key: Box<Expr>,            // key expr (must evaluate to string later)
         value: Box<Expr>,          // value expr
         filter: Option<Box<Expr>>, // optional "if cond"
         span: Span,
@@ -256,7 +256,7 @@ impl Expr {
 }
 
 impl fmt::Display for Program {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for d in &self.defs {
             writeln!(f, "{d}")?;
         }

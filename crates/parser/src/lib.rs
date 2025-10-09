@@ -121,18 +121,12 @@ impl<'a> Parser<'a> {
         self.expect(Token::Let, "'let'")?;
         let mut bindings = Vec::new();
 
-        loop {
-            let name = self.expect_ident()?;
-            let name_span = name.span.clone();
-            self.expect(Token::Eq, "'=' after let binding")?;
-            let expr = self.parse_if_or_expr()?;
-            let expr_span = expr.span();
-            bindings.push(Binding { name, value: expr, span: Span::join(name_span, expr_span) });
-
-            // Currently JSLT does not support multiple bindings in one let statement,
-            // so we should do the same and break here. In future we may support this.
-            break;
-        }
+        let name = self.expect_ident()?;
+        let name_span = name.span;
+        self.expect(Token::Eq, "'=' after let binding")?;
+        let expr = self.parse_if_or_expr()?;
+        let expr_span = expr.span();
+        bindings.push(Binding { name, value: expr, span: Span::join(name_span, expr_span) });
 
         let span = Span::join(start, bindings.last().unwrap().span);
         Ok(Let { bindings, span })

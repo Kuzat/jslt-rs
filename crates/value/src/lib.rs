@@ -34,10 +34,8 @@ impl JsltValue {
     /// Note: caller must ensure the input is finite; NaN/Inf cannot be
     /// represented in serde_json::Number and will panic if passed to `number_f64`
     pub fn number(n: f64) -> Self {
-        if n.is_finite() && n.fract() == 0.0 {
-            if n >= i64::MIN as f64 && n <= i64::MAX as f64 {
-                return Self::number_i64(n as i64);
-            }
+        if n.is_finite() && n.fract() == 0.0 && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
+            return Self::number_i64(n as i64);
         }
         Self::number_f64(n)
     }

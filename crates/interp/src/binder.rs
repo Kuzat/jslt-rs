@@ -198,8 +198,8 @@ fn edit_distance(a: &str, b: &str) -> usize {
         return m;
     }
     let mut dp = vec![0usize; n + 1];
-    for j in 0..=n {
-        dp[j] = j;
+    for (j, entry) in dp.iter_mut().enumerate().take(n + 1) {
+        *entry = j;
     }
     for i in 1..=m {
         let mut prev = dp[0];
@@ -354,6 +354,12 @@ pub struct Binder {
     functions: Vec<BoundFunction>,
     next_fun_id: usize,
     builtin_count: usize,
+}
+
+impl Default for Binder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Binder {
@@ -573,7 +579,7 @@ impl Binder {
                         Err(BindError::UnknownFunction {
                             name: name.clone(),
                             span: *span,
-                            suggestions: self.env.fun_suggestions(&name),
+                            suggestions: self.env.fun_suggestions(name),
                         })
                     }
                 } else {
@@ -655,7 +661,7 @@ impl Binder {
                 Err(BindError::UnknownFunction {
                     name: name.clone(),
                     span: *span,
-                    suggestions: self.env.fun_suggestions(&name),
+                    suggestions: self.env.fun_suggestions(name),
                 })
             }
         }

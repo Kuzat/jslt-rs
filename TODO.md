@@ -186,15 +186,15 @@ unsafe_code = "forbid"
     - [x] starts-with(tested, prefix)
     - [x] ends-with(tested, suffix)
     - [x] from-json(string, fallback?)
-    - [ ] to-json(value)
+    - [x] to-json(value)
     - [ ] replace(value, regexp, out)
     - [x] trim(value)
     - [ ] uuid(msb?, lsb?)
 
   - Boolean
     - [x] boolean(value)
-    - [ ] not(value)
-    - [ ] is-boolean(value)
+    - [x] not(value)
+    - [x] is-boolean(value)
 
   - Object
     - [ ] is-object(value)

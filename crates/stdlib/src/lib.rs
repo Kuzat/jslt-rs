@@ -124,6 +124,8 @@ impl Registry {
         r.register(ArrayFn);
         r.register(IsArrayFn);
         r.register(FlattenFn);
+        r.register(AllFn);
+        r.register(AnyFn);
 
         // Time
 
@@ -1505,6 +1507,66 @@ impl JsltFunction for FlattenFn {
     }
 }
 
+struct AllFn;
+impl JsltFunction for AllFn {
+    fn name(&self) -> &'static str {
+        "all"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let arr = expect_array(&v, "all", 1)?;
+
+        let mut result = true;
+        for elt in arr {
+            if !JsltValue::from_json(elt.clone()).truthy() {
+                result = false;
+                break;
+            }
+        }
+
+        Ok(JsltValue::bool(result))
+    }
+}
+
+struct AnyFn;
+impl JsltFunction for AnyFn {
+    fn name(&self) -> &'static str {
+        "any"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let arr = expect_array(&v, "any", 1)?;
+
+        let mut result = false;
+        for elt in arr {
+            if JsltValue::from_json(elt.clone()).truthy() {
+                result = true;
+                break;
+            }
+        }
+
+        Ok(JsltValue::bool(result))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1518,7 +1580,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 43);
+        assert_eq!(r.len(), 45);
         for name in [
             "string",
             "number",
@@ -1567,6 +1629,8 @@ mod tests {
             "uuid",
             "array",
             "flatten",
+            "all",
+            "any",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

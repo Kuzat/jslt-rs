@@ -204,8 +204,8 @@ unsafe_code = "forbid"
     - [x] array(value)
     - [x] is-array(value)
     - [x] flatten(array)
-    - [ ] all(array)
-    - [ ] any(array)
+    - [x] all(array)
+    - [x] any(array)
     - [ ] zip(array1, array2)
     - [ ] zip-with-index(array)
     - [ ] index-of(array, value)
@@ -227,15 +227,15 @@ unsafe_code = "forbid"
 
 ## 8) Conformance harness
 
-* [ ] Define fixture format (JSON keeps deps minimal):
+* [x] Define fixture format (JSON keeps deps minimal):
 
   ```json
   { "program": "def f(x) x+1\nf(.a)",
     "input": { "a": 1 },
     "expected": 2 }
   ```
-* [ ] Test runner in `engine/tests/conformance.rs` that loads each fixture and runs compile+apply.
-* [ ] Differential test script (optional dev tool) that:
+* [x] Test runner in `engine/tests/conformance.rs` that loads each fixture and runs compile+apply.
+* [x] Differential test script (optional dev tool) that:
 
   * runs Java JSLT on the same fixtures to regenerate `expected`.
   * stores outputs next to cases (so we can see deltas).

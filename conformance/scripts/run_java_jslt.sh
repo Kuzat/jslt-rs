@@ -40,7 +40,7 @@ if [ -z "$JAR_ACTUAL" ] || [ "$JAVA_JSLT_DIR" -nt "$JAR_ACTUAL" ]; then
     # Try to build with current Java version
     if ! ./gradlew :core:shadowJar --quiet; then
         echo "Build failed. If you're using Java 21+, try switching to Java 17:" >&2
-        echo "  sdk use java 17.0.16-corretto  # if using sdkman" >&2
+        echo "  sdk use java 17.0.16-amzn  # if using sdkman" >&2
         echo "  or set JAVA_HOME to a Java 11-17 installation" >&2
         exit 1
     fi

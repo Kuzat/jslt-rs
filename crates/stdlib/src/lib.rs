@@ -123,6 +123,7 @@ impl Registry {
         // Array
         r.register(ArrayFn);
         r.register(IsArrayFn);
+        r.register(FlattenFn);
 
         // Time
 
@@ -1466,6 +1467,44 @@ impl JsltFunction for ArrayFn {
     }
 }
 
+struct FlattenFn;
+impl JsltFunction for FlattenFn {
+    fn name(&self) -> &'static str {
+        "flatten"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let arr = expect_array(&v, "flatten", 1)?;
+
+        fn flatten_value(val: &Value, out: &mut Vec<Value>) {
+            match val {
+                Value::Array(arr) => {
+                    for elt in arr {
+                        flatten_value(elt, out);
+                    }
+                }
+                _ => out.push(val.clone()),
+            }
+        }
+
+        let mut flat: Vec<Value> = Vec::new();
+        for elt in arr {
+            flatten_value(elt, &mut flat);
+        }
+
+        Ok(JsltValue::from_json(Value::Array(flat)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1479,7 +1518,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 42);
+        assert_eq!(r.len(), 43);
         for name in [
             "string",
             "number",
@@ -1527,6 +1566,7 @@ mod tests {
             "replace",
             "uuid",
             "array",
+            "flatten",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

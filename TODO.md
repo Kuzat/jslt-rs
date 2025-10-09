@@ -203,7 +203,7 @@ unsafe_code = "forbid"
   - Array
     - [x] array(value)
     - [x] is-array(value)
-    - [ ] flatten(array)
+    - [x] flatten(array)
     - [ ] all(array)
     - [ ] any(array)
     - [ ] zip(array1, array2)
@@ -218,10 +218,10 @@ unsafe_code = "forbid"
   - URL
     - [ ] parse-url(url)
 
-* [ ] Regex-gated (feature = "regex"): implement using `regex` crate where applicable
-  - [ ] test
-  - [ ] capture
-  - [ ] replace
+* [x] Regex-gated (feature = "regex"): implement using `regex` crate where applicable
+  - [x] test
+  - [x] capture
+  - [x] replace
 
   * **Accept:** conformance tests for each function; wrong arity → runtime error with span.
 

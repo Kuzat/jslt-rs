@@ -119,11 +119,13 @@ impl Registry {
         r.register(IsBooleanFn);
 
         // Object
+        r.register(IsObjectFn);
         r.register(KeysFn);
         r.register(ValuesFn);
         r.register(GetKeyFn);
 
         // Array
+        r.register(IsArrayFn);
 
         // Time
 
@@ -1184,6 +1186,34 @@ impl JsltFunction for IsBooleanFn {
     }
 }
 
+struct IsObjectFn;
+impl JsltFunction for IsObjectFn {
+    fn name(&self) -> &'static str {
+        "is-object"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        Ok(JsltValue::bool(args[0].is_object()))
+    }
+}
+
+struct IsArrayFn;
+impl JsltFunction for IsArrayFn {
+    fn name(&self) -> &'static str {
+        "is-array"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        Ok(JsltValue::bool(args[0].is_array()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1197,7 +1227,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 34);
+        assert_eq!(r.len(), 36);
         for name in [
             "string",
             "number",
@@ -1233,6 +1263,8 @@ mod tests {
             "to-json",
             "not",
             "is-boolean",
+            "is-object",
+            "is-array",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

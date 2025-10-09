@@ -197,12 +197,12 @@ unsafe_code = "forbid"
     - [x] is-boolean(value)
 
   - Object
-    - [ ] is-object(value)
+    - [x] is-object(value)
     - [x] get-key(object, key, fallback?)
 
   - Array
     - [ ] array(value)
-    - [ ] is-array(value)
+    - [x] is-array(value)
     - [ ] flatten(array)
     - [ ] all(array)
     - [ ] any(array)

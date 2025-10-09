@@ -250,7 +250,7 @@ impl<'a> Lexer<'a> {
             if let Some(d) = self.peek_char() {
                 if d.is_ascii_digit() {
                     // invalid leading zero like 01
-                    // Consume subsequent digits just to form a coherent span
+                    // Consume the following digits just to form a coherent span
                     while let Some(d) = self.bump_char() {
                         if d.is_ascii_digit() {
                             let _ = self.bump_char();
@@ -387,10 +387,10 @@ impl<'a> Lexer<'a> {
             code = (code << 4) | hv;
             let _ = self.bump_char();
         }
-        Ok(char::from_u32(code).ok_or_else(|| LexError {
+        char::from_u32(code).ok_or_else(|| LexError {
             span: self.make_span(start),
             kind: LexErrorKind::InvalidUnicodeEscape,
-        })?)
+        })
     }
 
     fn scan_string(&mut self) -> Result<(Token, Span), LexError> {
@@ -622,15 +622,12 @@ impl<'a> Lexer<'a> {
             }
             '!' => {
                 self.consume_char();
-                if self.peek_char() == Some('=') {
+                return if self.peek_char() == Some('=') {
                     self.consume_char();
-                    return Ok((Token::BangEq, self.make_span(start)));
+                    Ok((Token::BangEq, self.make_span(start)))
                 } else {
-                    return Err(LexError {
-                        span: self.make_span(start),
-                        kind: LexErrorKind::InvalidChar,
-                    });
-                }
+                    Err(LexError { span: self.make_span(start), kind: LexErrorKind::InvalidChar })
+                };
             }
             '<' => {
                 let (tok, sp) = self.two_char_op('<', '=', Token::LtEq, Token::Lt);
@@ -642,12 +639,12 @@ impl<'a> Lexer<'a> {
             }
             '-' => {
                 // Number only if followed by a digit; otherwise it's Minus
-                if matches!(self.peek_char_n(1), Some(d) if d.is_ascii_digit()) {
-                    return self.scan_number(start);
+                return if matches!(self.peek_char_n(1), Some(d) if d.is_ascii_digit()) {
+                    self.scan_number(start)
                 } else {
                     self.consume_char();
-                    return Ok((Token::Minus, self.make_span(start)));
-                }
+                    Ok((Token::Minus, self.make_span(start)))
+                };
             }
             '"' => return self.scan_string(),
             _ => {}
@@ -675,16 +672,11 @@ mod tests {
 
     fn collect_tokens(mut lx: Lexer) -> Vec<Token> {
         let mut toks = Vec::new();
-        loop {
-            match lx.next_token() {
-                Ok((t, _)) => {
-                    let is_eof = matches!(t, Token::Eof);
-                    toks.push(t);
-                    if is_eof {
-                        break;
-                    }
-                }
-                Err(_) => break,
+        while let Ok((t, _)) = lx.next_token() {
+            let is_eof = matches!(t, Token::Eof);
+            toks.push(t);
+            if is_eof {
+                break;
             }
         }
         toks

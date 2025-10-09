@@ -121,6 +121,7 @@ impl Registry {
         r.register(GetKeyFn);
 
         // Array
+        r.register(ArrayFn);
         r.register(IsArrayFn);
 
         // Time
@@ -1432,6 +1433,39 @@ impl JsltFunction for UuidV4JSLT {
     }
 }
 
+struct ArrayFn;
+impl JsltFunction for ArrayFn {
+    fn name(&self) -> &'static str {
+        "array"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        match v.as_json() {
+            Value::Array(_) => Ok(v.clone()),
+            Value::Object(obj) => {
+                let mut out: Vec<JsltValue> = Vec::with_capacity(obj.len());
+                for (k, val) in obj.iter() {
+                    let mut entry = Map::new();
+                    entry.insert("key".to_string(), Value::String(k.clone()));
+                    entry.insert("value".to_string(), val.clone());
+                    out.push(JsltValue::from_json(Value::Object(entry)));
+                }
+                Ok(JsltValue::array(out))
+            }
+            _ => Err(StdlibError::Type(format!("array: unsupported type {}", v.type_of()))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1445,7 +1479,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 41);
+        assert_eq!(r.len(), 42);
         for name in [
             "string",
             "number",
@@ -1492,6 +1526,7 @@ mod tests {
             #[cfg(feature = "regex")]
             "replace",
             "uuid",
+            "array",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

@@ -201,7 +201,7 @@ unsafe_code = "forbid"
     - [x] get-key(object, key, fallback?)
 
   - Array
-    - [ ] array(value)
+    - [x] array(value)
     - [x] is-array(value)
     - [ ] flatten(array)
     - [ ] all(array)

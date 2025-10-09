@@ -123,4 +123,4 @@ This project is in early development. See `TODO.md` for the detailed implementat
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+Apache License, Version 2.0 - see [LICENSE](LICENSE) file for details.

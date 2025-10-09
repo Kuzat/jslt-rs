@@ -189,7 +189,7 @@ unsafe_code = "forbid"
     - [x] to-json(value)
     - [x] replace(value, regexp, out)
     - [x] trim(value)
-    - [ ] uuid(msb?, lsb?)
+    - [x] uuid(msb?, lsb?)
 
   - Boolean
     - [x] boolean(value)

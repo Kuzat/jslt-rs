@@ -107,6 +107,7 @@ impl Registry {
         r.register(FromJsonFn);
         r.register(ToJsonFn);
         r.register(TrimFn);
+        r.register(UuidV4JSLT);
 
         // Boolean
         r.register(BooleanFn);
@@ -1308,10 +1309,8 @@ impl JsltFunction for SplitFn {
         let re = Regex::new(pattern)
             .map_err(|e| StdlibError::Semantic(format!("split: invalid regexp {}", e)))?;
 
-        let parts: Vec<JsltValue> = re
-            .split(&input)
-            .map(|s| JsltValue::string(s.to_string()))
-            .collect();
+        let parts: Vec<JsltValue> =
+            re.split(&input).map(|s| JsltValue::string(s.to_string())).collect();
 
         Ok(JsltValue::array(parts))
     }
@@ -1334,7 +1333,11 @@ impl JsltFunction for ReplaceFn {
             return Ok(JsltValue::null());
         }
 
-        let value = args[0].as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| args[0].stringify());
+        let value = args[0]
+            .as_json()
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| args[0].stringify());
         let pattern = expect_string(&args[1], "replace", 2)?;
         let out = expect_string(&args[2], "replace", 3)?;
 
@@ -1344,12 +1347,88 @@ impl JsltFunction for ReplaceFn {
         // Spec: error if the regexp EVER matches the empty string
         if re.find("").is_some() {
             return Err(StdlibError::Semantic(
-                "replace: regexp must not match the empty string".to_string()
+                "replace: regexp must not match the empty string".to_string(),
             ));
         }
 
         let replaced = re.replace_all(&value, out).into_owned();
         Ok(JsltValue::string(replaced))
+    }
+}
+
+// Helper: format a 16-byte UUID as 8-4-4-4-12 lower-hex with dashes.
+fn format_uuid_hyphenated(bytes: &[u8; 16]) -> String {
+    let mut out = String::with_capacity(16);
+    let hex = to_hex_lower(bytes);
+    // hex is 32 chars; insert dashes at 8, 12, 16, 20
+    out.push_str(&hex[0..8]);
+    out.push('-');
+    out.push_str(&hex[8..12]);
+    out.push('-');
+    out.push_str(&hex[12..16]);
+    out.push('-');
+    out.push_str(&hex[16..20]);
+    out.push('-');
+    out.push_str(&hex[20..32]);
+    out
+}
+
+struct UuidV4JSLT;
+impl JsltFunction for UuidV4JSLT {
+    fn name(&self) -> &'static str {
+        "uuid"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Range { min: 0, max: Some(2) }
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        match args.len() {
+            0 => {
+                // Random v4 (RFC 4122) UUID
+                let mut b: [u8; 16] = rand::random();
+                // Set version to 4 (bits 12..15 of time_hi_and_version)
+                b[6] = (b[6] & 0x0F) | 0x40;
+                // Set variant to RFC 4122 (10xx)
+                b[8] = (b[8] & 0x3F) | 0x80;
+                Ok(JsltValue::string(format_uuid_hyphenated(&b)))
+            }
+            2 => {
+                // NIL UUID special case
+                if args[0].is_null() && args[1].is_null() {
+                    return Ok(JsltValue::string(
+                        "00000000-0000-0000-0000-000000000000".to_string(),
+                    ));
+                }
+
+                // Match original JSLT mask logic exactly (Java's UUID(long, long) semantics
+                let msb_i = expect_int_i128(&args[0], "uuid", 1)?;
+                let lsb_i = expect_int_i128(&args[1], "uuid", 2)?;
+
+                // Preserve two's complement bit patterns
+                let msb_raw = msb_i as u64;
+                let lsb_raw = lsb_i as u64;
+
+                // maskMSB: (msb & 0xFFFFFFFFFFFF0000) + (1 << 12) + ((msb & 0xFFFF) >> 4)
+                let masked_msb =
+                    (msb_raw & 0xFFFFFFFFFFFF0000u64) | (1u64 << 12) | ((msb_raw & 0xFFFF) >> 4);
+
+                // maskLSB: (lsb & 0x3FFFFFFFFFFFFFFF) + 0x8000000000000000
+                let masked_lsb = (lsb_raw & 0x3FFF_FFFF_FFFF_FFFFu64) | 0x8000_0000_0000_0000u64;
+
+                // Pack big-endian into bytes
+                let mut bytes = [0u8; 16];
+                for i in 0..8 {
+                    bytes[i] = ((masked_msb >> (8 * (7 - i))) & 0xFF) as u8;
+                }
+                for i in 0..8 {
+                    bytes[8 + i] = ((masked_lsb >> (8 * (7 - i))) & 0xFF) as u8;
+                }
+
+                Ok(JsltValue::string(format_uuid_hyphenated(&bytes)))
+            }
+            _ => Err(StdlibError::Arity { expected: "0 or 2".to_string(), got: args.len() }),
+        }
     }
 }
 
@@ -1366,7 +1445,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 40);
+        assert_eq!(r.len(), 41);
         for name in [
             "string",
             "number",
@@ -1412,6 +1491,7 @@ mod tests {
             "split",
             #[cfg(feature = "regex")]
             "replace",
+            "uuid",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

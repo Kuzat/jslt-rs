@@ -132,7 +132,20 @@ unsafe_code = "forbid"
 
   * **Accept:** compile reports unknown names with nearest suggestions (optional Levenshtein later).
 
-## 5) Value model
+## 5) Import statements
+
+* [ ] Implement module import system:
+  * `import "module.jslt" as name` — imports module and binds to namespace prefix.
+  * `import "module.jslt" as func` — imports module with final expression as callable function.
+  * Module resolution (initially from classpath/filesystem).
+  * Cyclic import detection.
+  * Import statements must appear before variable/function declarations.
+  * Imported functions accessed via `prefix:function-name(...)`.
+  * Imported modules can import other modules.
+
+  * **Accept:** can import and use functions from external modules; cyclic imports are rejected with clear error; modules without final expression work as namespaces; modules with final expression work as functions.
+
+## 6) Value model
 
 * [x] `JsltValue(serde_json::Value)` facade with helpers:
 
@@ -140,7 +153,7 @@ unsafe_code = "forbid"
   * null helpers, array/string index & slice with negative indices and bounds → `null`.
   * **Accept:** unit tests for index/slice semantics.
 
-## 6) Evaluator (interp)
+## 7) Evaluator (interp)
 
 * [x] Expression evaluation, short-circuit `and`/`or`, truthiness rules (start strict; adjust later if ref impl differs).
 * [x] Null propagation for member/index/slice per spec.
@@ -148,7 +161,7 @@ unsafe_code = "forbid"
 
   * **Accept:** run simple programs end to end.
 
-## 7) Stdlib v1 (minimal)
+## 8) Stdlib v1 (minimal)
 
 * [ ] Functions (from `docs/stdlib.md`) — check off as implemented in `crates/stdlib/src/lib.rs`:
 
@@ -225,7 +238,7 @@ unsafe_code = "forbid"
 
   * **Accept:** conformance tests for each function; wrong arity → runtime error with span.
 
-## 8) Conformance harness
+## 9) Conformance harness
 
 * [x] Define fixture format (JSON keeps deps minimal):
 
@@ -241,28 +254,28 @@ unsafe_code = "forbid"
   * stores outputs next to cases (so we can see deltas).
   * **Accept:** N canonical cases pass; any failing case is either spec OPEN or a true bug.
 
-## 9) CLI
+## 10) CLI
 
 * [ ] `jslt -p program.jslt -i input.json` → prints result JSON.
 * [ ] `--eval 'expr'` shortcut; `--pretty`.
 
   * **Accept:** used in README examples; handles stdin/stdout.
 
-## 10) Error polish
+## 11) Error polish
 
 * [ ] One error type with parse/type/runtime variants; include spans; nice `Display`.
 * [ ] Show a code frame on CLI errors (point to span).
 
   * **Accept:** user-friendly messages; no panics for user mistakes.
 
-## 11) Performance checks (lightweight)
+## 12) Performance checks (lightweight)
 
 * [ ] Add a handful of `criterion` benches (compile hot path, map-like comprehension).
 * [ ] Avoid cloning large values; use `Rc` where helpful.
 
   * **Accept:** compile+eval of medium templates stays within sane allocations.
 
-## 12) C ABI (optional but recommended for interop)
+## 13) C ABI (optional but recommended for interop)
 
 * [ ] `capi` crate exposing:
 
@@ -276,20 +289,20 @@ unsafe_code = "forbid"
 
   * **Accept:** tiny C example compiles and runs.
 
-## 13) Node/Python bindings (optional)
+## 14) Node/Python bindings (optional)
 
 * [ ] `node`: napi-rs; export `compile()` returning an opaque handle + `apply(handle, value)`.
 * [ ] `python`: pyo3; expose `Program` class.
 
   * **Accept:** smoke tests calling both from their runtimes.
 
-## 14) WASM (optional)
+## 15) WASM (optional)
 
-* [ ] `wasm`: `wasm-bindgen`; export `compile/apply` with JS `Any` ↔ `JsltValue` conversions via `serde-wasm-bindgen`.
+* [x] `wasm`: `wasm-bindgen`; export `compile/apply` with JS `Any` ↔ `JsltValue` conversions via `serde-wasm-bindgen`.
 
   * **Accept:** browser demo in `examples/wasm/`.
 
-## 15) LSP (optional but nice)
+## 16) LSP (optional but nice)
 
 * [ ] `lsp`: tower-lsp; features:
 
@@ -299,14 +312,14 @@ unsafe_code = "forbid"
   * format (pretty-printer)
   * **Accept:** works in VS Code via simple client config.
 
-## 16) Docs & release hygiene
+## 17) Docs & release hygiene
 
 * [ ] Fill `docs/stdlib.md` with signatures and semantics.
 * [ ] Update `docs/spec.md` to remove OPENs as we confirm via diff tests.
 * [ ] README: quickstart, API examples, CLI usage, feature flags.
 * [ ] Tag `v0.1.0` crates; publish `engine` and `cli` (bindings optional).
 
-## 17) Add extension functions (optional)
+## 18) Add extension functions (optional)
 
 * [ ] Add the possibility for users to define their own functions.
   * [ ] Make sure this works as with original JSLT language.
@@ -318,11 +331,6 @@ unsafe_code = "forbid"
 
 * **CI:** GitHub Actions with matrix (ubuntu/mac/windows), steps: `fmt`, `clippy`, `test`.
 * **xtask (optional):** `cargo xtask gen-headers`, `cargo xtask regen-fixtures`, `cargo xtask bench`.
-
-## Sanity on deps
-
-* Base path (`lexer`/`parser`/`interp`/`engine`) uses only `serde` + `serde_json` + `thiserror` (drop `thiserror` if you want).
-* Gate `regex`, `time`, `napi`, `pyo3`, `wasm-bindgen`, `tower-lsp` behind features so the default build stays svelte.
 
 ---
 

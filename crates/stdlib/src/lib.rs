@@ -126,6 +126,9 @@ impl Registry {
         r.register(FlattenFn);
         r.register(AllFn);
         r.register(AnyFn);
+        r.register(ZipFn);
+        r.register(ZipWithIndexFn);
+        r.register(IndexOfFn);
 
         // Time
 
@@ -1567,6 +1570,104 @@ impl JsltFunction for AnyFn {
     }
 }
 
+struct ZipFn;
+impl JsltFunction for ZipFn {
+    fn name(&self) -> &'static str {
+        "zip"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let a = &args[0];
+        let b = &args[1];
+
+        if a.is_null() || b.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let arr1 = expect_array(&a, "zip", 1)?;
+        let arr2 = expect_array(&b, "zip", 2)?;
+
+        if arr1.len() != arr2.len() {
+            return Err(StdlibError::Semantic(
+                "zip: input arrays must have the same length".to_string(),
+            ));
+        }
+
+        let mut out: Vec<JsltValue> = Vec::with_capacity(arr1.len());
+        for (v1, v2) in arr1.iter().zip(arr2.iter()) {
+            let pair = JsltValue::array(vec![
+                JsltValue::from_json(v1.clone()),
+                JsltValue::from_json(v2.clone()),
+            ]);
+            out.push(pair);
+        }
+
+        Ok(JsltValue::array(out))
+    }
+}
+
+struct ZipWithIndexFn;
+impl JsltFunction for ZipWithIndexFn {
+    fn name(&self) -> &'static str {
+        "zip-with-index"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let a = &args[0];
+
+        if a.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let arr = expect_array(&a, "zip-with-index", 1)?;
+
+        let mut out: Vec<JsltValue> = Vec::with_capacity(arr.len());
+        for (idx, val) in arr.iter().enumerate() {
+            let mut obj = Map::new();
+            obj.insert("value".to_string(), val.clone());
+            obj.insert("index".to_string(), Value::Number((idx as i64).into()));
+            out.push(JsltValue::from_json(Value::Object(obj)));
+        }
+
+        Ok(JsltValue::array(out))
+    }
+}
+
+struct IndexOfFn;
+impl JsltFunction for IndexOfFn {
+    fn name(&self) -> &'static str {
+        "index-of"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let a = &args[0];
+        let n = &args[1];
+
+        if a.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let arr = expect_array(a, "index-of", 1)?;
+
+        for (i, elt) in arr.iter().enumerate() {
+            if JsltValue::from_json(elt.clone()).eq(n) {
+                return Ok(JsltValue::number_i64(i as i64));
+            }
+        }
+
+        Ok(JsltValue::number_i64(-1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1580,7 +1681,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 45);
+        assert_eq!(r.len(), 48);
         for name in [
             "string",
             "number",
@@ -1631,6 +1732,9 @@ mod tests {
             "flatten",
             "all",
             "any",
+            "zip",
+            "zip-with-index",
+            "index-of",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

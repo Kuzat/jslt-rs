@@ -206,9 +206,9 @@ unsafe_code = "forbid"
     - [x] flatten(array)
     - [x] all(array)
     - [x] any(array)
-    - [ ] zip(array1, array2)
-    - [ ] zip-with-index(array)
-    - [ ] index-of(array, value)
+    - [x] zip(array1, array2)
+    - [x] zip-with-index(array)
+    - [x] index-of(array, value)
 
   - Time
     - [ ] now()

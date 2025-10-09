@@ -131,6 +131,7 @@ impl Registry {
         r.register(IndexOfFn);
 
         // Time
+        r.register(NowFn);
 
         // URL
 
@@ -1670,6 +1671,44 @@ impl JsltFunction for IndexOfFn {
     }
 }
 
+// s small helper that returns seconds since Unix epoch (UTC) with sub-second precision as f64
+// works on native and wasm32
+fn now_seconds_portable() -> Result<f64, String> {
+    // wasm32 use JS Date.now(); others use systemTime
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Requires the `js-sys` crate (usually pulled in with wasm-bindgen
+        let millis = js_sys::Date::now();
+        let secs = millis / 1000.0;
+        Ok(secs)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let dur = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+        Ok(dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1_000_000_000.0)
+    }
+}
+
+struct NowFn;
+impl JsltFunction for NowFn {
+    fn name(&self) -> &'static str {
+        "now"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(0)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        // Seconds since Unix epoch (UTC) as floating point, with sub-second precision
+        let secs = now_seconds_portable()
+            .map_err(|e| StdlibError::Semantic(format!("now: {}", e)))?;
+        Ok(JsltValue::number_f64(secs))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1683,7 +1722,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 48);
+        assert_eq!(r.len(), 49);
         for name in [
             "string",
             "number",
@@ -1737,6 +1776,7 @@ mod tests {
             "zip",
             "zip-with-index",
             "index-of",
+            "now",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

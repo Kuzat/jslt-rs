@@ -407,6 +407,7 @@ dependencies = [
 name = "stdlib"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "rand",
  "regex",
  "serde",

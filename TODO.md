@@ -211,7 +211,7 @@ unsafe_code = "forbid"
     - [x] index-of(array, value)
 
   - Time
-    - [ ] now()
+    - [x] now()
     - [ ] parse-time(time, format, fallback?)
     - [ ] format-time(timestamp, format, timezone?)
 

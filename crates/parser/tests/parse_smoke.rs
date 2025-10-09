@@ -54,16 +54,10 @@ fn precedence_and_grouping() {
 #[test]
 fn if_expression_lowest_precedence() {
     // if (a) b else c and d => if(a) b else (c and d)
-    assert_eq!(
-        parse_fmt("if ($a) $b else $c and $d"),
-        "if ($a) $b else $c and $d"
-    );
+    assert_eq!(parse_fmt("if ($a) $b else $c and $d"), "if ($a) $b else $c and $d");
 
     // (if (true) 1 else 2) + 1 gets parenthesized when needed
-    assert_eq!(
-        parse_fmt("(if (true) 1 else 2) + 1"),
-        "(if (true) 1 else 2) + 1"
-    );
+    assert_eq!(parse_fmt("(if (true) 1 else 2) + 1"), "(if (true) 1 else 2) + 1");
 }
 
 #[test]
@@ -86,10 +80,7 @@ fn postfix_chain_member_index_call_and_quoted_member() {
     assert_eq!(parse_fmt("$f.g(1, \"s\", $x)"), "$f.g(1, \"s\", $x)");
 
     // Mixed chain
-    assert_eq!(
-        parse_fmt(".a[1:3](42).\"weird-key\"[0]"),
-        ".a[1:3](42).\"weird-key\"[0]"
-    );
+    assert_eq!(parse_fmt(".a[1:3](42).\"weird-key\"[0]"), ".a[1:3](42).\"weird-key\"[0]");
 }
 
 #[test]
@@ -97,10 +88,7 @@ fn arrays_and_objects_and_spread() {
     assert_eq!(parse_fmt("[1, \"two\", false]"), "[1, \"two\", false]");
 
     // Object literal with ident key, quoted key, and spread
-    assert_eq!(
-        parse_fmt("{ a: 1, \"x y\": \"v\", *: $rest }"),
-        "{a: 1, \"x y\": \"v\", *: $rest}"
-    );
+    assert_eq!(parse_fmt("{ a: 1, \"x y\": \"v\", *: $rest }"), "{a: 1, \"x y\": \"v\", *: $rest}");
 }
 
 #[test]
@@ -112,16 +100,10 @@ fn for_comprehensions() {
     assert_eq!(parse_fmt("[for ($seq) 1 if true]"), "[for ($seq) 1 if true]");
 
     // {for (seq) key: value}
-    assert_eq!(
-        parse_fmt("{for ($seq) \"k\": $v}"),
-        "{for ($seq) \"k\": $v}"
-    );
+    assert_eq!(parse_fmt("{for ($seq) \"k\": $v}"), "{for ($seq) \"k\": $v}");
 
     // {for (seq) key: value if cond}
-    assert_eq!(
-        parse_fmt("{for ($seq) $a.b: 2 if $x == 3}"),
-        "{for ($seq) $a.b: 2 if $x == 3}"
-    );
+    assert_eq!(parse_fmt("{for ($seq) $a.b: 2 if $x == 3}"), "{for ($seq) $a.b: 2 if $x == 3}");
 }
 
 #[test]
@@ -131,9 +113,8 @@ fn normal_let_binding_with_single_value() {
 
 #[test]
 fn multiple_let_bindings_in_program() {
-    assert_eq!(parse_fmt(
-        "let a = 1\nlet b = 2\nlet c = a + b\n$c"
-    ),
+    assert_eq!(
+        parse_fmt("let a = 1\nlet b = 2\nlet c = a + b\n$c"),
         "let a = 1\nlet b = 2\nlet c = a + b\n$c"
     )
 }
@@ -145,9 +126,8 @@ fn single_def_with_single_value() {
 
 #[test]
 fn multiple_defs_in_program() {
-    assert_eq!(parse_fmt(
-        "def foo(a, b) a + b\ndef bar(a, b) a * b\nfoo(1, 2) + bar(2, 3)"
-    ),
+    assert_eq!(
+        parse_fmt("def foo(a, b) a + b\ndef bar(a, b) a * b\nfoo(1, 2) + bar(2, 3)"),
         "def foo(a, b) a + b\ndef bar(a, b) a * b\nfoo(1, 2) + bar(2, 3)"
     )
 }

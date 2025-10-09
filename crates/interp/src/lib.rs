@@ -214,9 +214,7 @@ impl<'p> Evaluator<'p> {
                 }
                 Ok(JsltValue::number_f64(*n))
             }
-            NumberInt(n, _) => {
-                Ok(JsltValue::number_i64(*n))
-            }
+            NumberInt(n, _) => Ok(JsltValue::number_i64(*n)),
             String(s, _) => Ok(JsltValue::from_json(Value::String(s.clone()))),
             This(_) => Ok(self.current_frame().this_val.clone()),
 
@@ -757,12 +755,14 @@ mod tests {
         assert_eq!(out_slice, json!("ell"));
 
         // Array indexing negative and OOB → null
-        let body_idx_neg = B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(-1, sp())), sp());
+        let body_idx_neg =
+            B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(-1, sp())), sp());
         let p_idx_neg = prog_with(vec![], body_idx_neg, vec![]);
         let out_idx_neg = apply(&p_idx_neg, &json!([1, 2, 3]), None).unwrap();
         assert_eq!(out_idx_neg, json!(3));
 
-        let body_idx_oob = B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(99, sp())), sp());
+        let body_idx_oob =
+            B::Index(Box::new(B::This(sp())), Box::new(B::NumberInt(99, sp())), sp());
         let p_idx_oob = prog_with(vec![], body_idx_oob, vec![]);
         let out_idx_oob = apply(&p_idx_oob, &json!([1, 2, 3]), None).unwrap();
         assert_eq!(out_idx_oob, json!(null));
@@ -771,7 +771,8 @@ mod tests {
     #[test]
     fn arithmetic_and_type_errors() {
         // 1 + 2
-        let body_add = B::Add(Box::new(B::NumberInt(1, sp())), Box::new(B::NumberInt(2, sp())), sp());
+        let body_add =
+            B::Add(Box::new(B::NumberInt(1, sp())), Box::new(B::NumberInt(2, sp())), sp());
         let p_add = prog_with(vec![], body_add, vec![]);
         let out_add = apply(&p_add, &json!(null), None).unwrap();
         assert_eq!(out_add, json!(3.0));
@@ -862,7 +863,11 @@ mod tests {
         // false and (1/0) must short-circuit and not fail
         let body_and = B::And(
             Box::new(B::Bool(false, sp())),
-            Box::new(B::Div(Box::new(B::NumberFloat(1.0, sp())), Box::new(B::NumberFloat(0.0, sp())), sp())),
+            Box::new(B::Div(
+                Box::new(B::NumberFloat(1.0, sp())),
+                Box::new(B::NumberFloat(0.0, sp())),
+                sp(),
+            )),
             sp(),
         );
         let p_and = prog_with(vec![], body_and, vec![]);

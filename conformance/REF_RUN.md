@@ -53,6 +53,8 @@ Each test case is a JSON file with the following structure:
    - Install with `brew install openjdk@17` (macOS) or `sudo apt install openjdk-17-jdk` (Ubuntu)
 2. **Rust**: Required to run our Rust implementation
 3. **jq**: Required for test fixture validation and maintenance scripts
+4. Fetch the `java-jslt` git submodule
+   5. `git submodule update --init`
 
 ### Local Testing
 

@@ -176,9 +176,9 @@ unsafe_code = "forbid"
   - String
     - [x] is-string(value)
     - [x] string(value)
-    - [ ] test(input, regexp)
-    - [ ] capture(input, regexp)
-    - [ ] split(input, regexp)
+    - [x] test(input, regexp)
+    - [x] capture(input, regexp)
+    - [x] split(input, regexp)
     - [x] join(array, separator)
     - [x] lowercase(string)
     - [x] uppercase(string)
@@ -187,7 +187,7 @@ unsafe_code = "forbid"
     - [x] ends-with(tested, suffix)
     - [x] from-json(string, fallback?)
     - [x] to-json(value)
-    - [ ] replace(value, regexp, out)
+    - [x] replace(value, regexp, out)
     - [x] trim(value)
     - [ ] uuid(msb?, lsb?)
 

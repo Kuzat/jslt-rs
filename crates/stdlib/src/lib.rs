@@ -1,12 +1,7 @@
-//! Minimal stdlib v1: registry + a hanful of basic functions.
-//! This crate defined:
-//! - JsltFunction trait
-//! - StdlibError (arity/type/semantic errors)
-//! - Registry that registers built-ins and supports dispatch by function id
-//! - a start set of functions: string, number, boolean, size, keys, values
-//! get-key (and alias get), starts-with, ends-with, upper, lower, trim,
-//! contains, join.
+//! stdlib v1: registry + all original JSLT stdlib functions
 
+#[cfg(feature = "regex")]
+use regex::Regex;
 use serde_json::{from_str, to_string, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -131,7 +126,14 @@ impl Registry {
 
         // URL
 
-        // Regexp
+        // Regex
+        #[cfg(feature = "regex")]
+        {
+            r.register(TestFn);
+            r.register(CaptureFn);
+            r.register(SplitFn);
+            r.register(ReplaceFn);
+        }
 
         r
     }
@@ -1214,6 +1216,143 @@ impl JsltFunction for IsArrayFn {
     }
 }
 
+#[cfg(feature = "regex")]
+struct TestFn;
+#[cfg(feature = "regex")]
+impl JsltFunction for TestFn {
+    fn name(&self) -> &'static str {
+        "test"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let i = &args[0];
+        let r = &args[1];
+
+        if i.is_null() {
+            return Ok(JsltValue::bool(false));
+        }
+
+        let input = i.as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let pattern = expect_string(r, "test", 2)?;
+
+        let re = Regex::new(pattern)
+            .map_err(|e| StdlibError::Semantic(format!("test: invalid regexp {}", e)))?;
+        Ok(JsltValue::bool(re.is_match(&input)))
+    }
+}
+
+#[cfg(feature = "regex")]
+struct CaptureFn;
+#[cfg(feature = "regex")]
+impl JsltFunction for CaptureFn {
+    fn name(&self) -> &'static str {
+        "capture"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let i = &args[0];
+        let r = &args[1];
+
+        if i.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let input = i.as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let pattern = expect_string(r, "capture", 2)?;
+
+        let re = Regex::new(pattern)
+            .map_err(|e| StdlibError::Semantic(format!("capture: invalid regexp {}", e)))?;
+
+        if let Some(caps) = re.captures(&input) {
+            let mut obj = Map::new();
+            for name in re.capture_names().flatten() {
+                if let Some(m) = caps.name(name) {
+                    obj.insert(name.to_string(), Value::String(m.as_str().to_string()));
+                }
+            }
+            Ok(JsltValue::from_json(Value::Object(obj)))
+        } else {
+            // No match empty object
+            Ok(JsltValue::from_json(Value::Object(Map::new())))
+        }
+    }
+}
+
+#[cfg(feature = "regex")]
+struct SplitFn;
+#[cfg(feature = "regex")]
+impl JsltFunction for SplitFn {
+    fn name(&self) -> &'static str {
+        "split"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(2)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let i = &args[0];
+        let r = &args[1];
+
+        if i.is_null() {
+            return Ok(JsltValue::null());
+        }
+        let input = i.as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let pattern = expect_string(r, "split", 2)?;
+
+        let re = Regex::new(pattern)
+            .map_err(|e| StdlibError::Semantic(format!("split: invalid regexp {}", e)))?;
+
+        let parts: Vec<JsltValue> = re
+            .split(&input)
+            .map(|s| JsltValue::string(s.to_string()))
+            .collect();
+
+        Ok(JsltValue::array(parts))
+    }
+}
+
+#[cfg(feature = "regex")]
+struct ReplaceFn;
+#[cfg(feature = "regex")]
+impl JsltFunction for ReplaceFn {
+    fn name(&self) -> &'static str {
+        "replace"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(3)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+
+        if args[0].is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        let value = args[0].as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| args[0].stringify());
+        let pattern = expect_string(&args[1], "replace", 2)?;
+        let out = expect_string(&args[2], "replace", 3)?;
+
+        let re = Regex::new(pattern)
+            .map_err(|e| StdlibError::Semantic(format!("replace: invalid regexp {}", e)))?;
+
+        // Spec: error if the regexp EVER matches the empty string
+        if re.find("").is_some() {
+            return Err(StdlibError::Semantic(
+                "replace: regexp must not match the empty string".to_string()
+            ));
+        }
+
+        let replaced = re.replace_all(&value, out).into_owned();
+        Ok(JsltValue::string(replaced))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1227,7 +1366,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 36);
+        assert_eq!(r.len(), 40);
         for name in [
             "string",
             "number",
@@ -1265,6 +1404,14 @@ mod tests {
             "is-boolean",
             "is-object",
             "is-array",
+            #[cfg(feature = "regex")]
+            "test",
+            #[cfg(feature = "regex")]
+            "capture",
+            #[cfg(feature = "regex")]
+            "split",
+            #[cfg(feature = "regex")]
+            "replace",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

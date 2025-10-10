@@ -136,12 +136,15 @@ unsafe_code = "forbid"
 
 * [ ] Implement module import system:
   * `import "module.jslt" as name` — imports module and binds to namespace prefix.
+    * This means that if the `module.jslt` does not end with an expression then it should be treated as a namespace.
   * `import "module.jslt" as func` — imports module with final expression as callable function.
+    * This means that if the `module.jslt` does end with an expression then it should be treated as a function.
   * Module resolution (initially from classpath/filesystem).
   * Cyclic import detection.
   * Import statements must appear before variable/function declarations.
   * Imported functions accessed via `prefix:function-name(...)`.
   * Imported modules can import other modules.
+  * Changes how valid programs are in the AST (e.g. final expression is now optional as we can have modules with no final expression).
 
   * **Accept:** can import and use functions from external modules; cyclic imports are rejected with clear error; modules without final expression work as namespaces; modules with final expression work as functions.
 
@@ -163,7 +166,7 @@ unsafe_code = "forbid"
 
 ## 8) Stdlib v1 (minimal)
 
-* [ ] Functions (from `docs/stdlib.md`) — check off as implemented in `crates/stdlib/src/lib.rs`:
+* [x] Functions (from `docs/stdlib.md`) — check off as implemented in `crates/stdlib/src/lib.rs`:
 
   - General
     - [x] contains(element, sequence)

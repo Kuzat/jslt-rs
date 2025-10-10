@@ -5,8 +5,9 @@ edition = "2021"
 license = "Apache-2.0"
 
 [features]
-default = ["regex"]
+default = ["regex", "chrono"]
 regex = ["dep:regex"]
+chrono = ["dep:chrono"]
 
 [dependencies]
 serde = { workspace = true }
@@ -15,10 +16,11 @@ thiserror = { workspace = true }
 rand = { workspace = true }
 sha2 = { workspace = true }
 regex = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 value = { path = "../value" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3.81"
+js-sys = { workspace = true}
 
 [lints]
 workspace = true

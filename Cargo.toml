@@ -22,6 +22,8 @@ thiserror = "2.0.17"            # tiny, improves error ergonomics (can drop if y
 rand = { version = "0.9.2" }
 sha2 = "0.10.9"
 regex = "1"  # gate under feature at crate level
+chrono = "0.4.42"
+js-sys = "0.3.81"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

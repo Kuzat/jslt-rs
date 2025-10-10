@@ -1,5 +1,8 @@
 //! stdlib v1: registry and all original JSLT stdlib functions
 
+mod time;
+
+use crate::time::{now_seconds_portable, parse_time_utc_seconds, ParseTimeErr};
 #[cfg(feature = "regex")]
 use regex::Regex;
 use serde_json::{from_str, to_string, Map, Value};
@@ -132,6 +135,13 @@ impl Registry {
 
         // Time
         r.register(NowFn);
+        // TODO: These are probably not the best working functions,
+        // todo: and was added with help of AI to match the Java implementation.
+        #[cfg(feature = "chrono")]
+        {
+            r.register(ParseTimeFn);
+            r.register(FormatTimeFn);
+        }
 
         // URL
 
@@ -1671,27 +1681,6 @@ impl JsltFunction for IndexOfFn {
     }
 }
 
-// s small helper that returns seconds since Unix epoch (UTC) with sub-second precision as f64
-// works on native and wasm32
-fn now_seconds_portable() -> Result<f64, String> {
-    // wasm32 use JS Date.now(); others use systemTime
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Requires the `js-sys` crate (usually pulled in with wasm-bindgen
-        let millis = js_sys::Date::now();
-        let secs = millis / 1000.0;
-        Ok(secs)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let dur = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| e.to_string())?;
-        Ok(dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1_000_000_000.0)
-    }
-}
-
 struct NowFn;
 impl JsltFunction for NowFn {
     fn name(&self) -> &'static str {
@@ -1703,9 +1692,127 @@ impl JsltFunction for NowFn {
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
         // Seconds since Unix epoch (UTC) as floating point, with sub-second precision
-        let secs = now_seconds_portable()
-            .map_err(|e| StdlibError::Semantic(format!("now: {}", e)))?;
+        let secs =
+            now_seconds_portable().map_err(|e| StdlibError::Semantic(format!("now: {}", e)))?;
         Ok(JsltValue::number_f64(secs))
+    }
+}
+
+#[cfg(feature = "chrono")]
+struct ParseTimeFn;
+#[cfg(feature = "chrono")]
+impl JsltFunction for ParseTimeFn {
+    fn name(&self) -> &'static str {
+        "parse-time"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Range { min: 2, max: Some(3) }
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let time_v = &args[0];
+        let format_v = &args[1];
+        let fallback = args.get(2);
+
+        if time_v.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Expect strings (time and format)
+        let time_s = match time_v.as_json().as_str() {
+            Some(s) => s,
+            None => {
+                return if let Some(fb) = fallback {
+                    Ok(fb.clone())
+                } else {
+                    Err(StdlibError::Type(format!(
+                        "parse-time: argument #1 must be string, got {}",
+                        time_v.type_of()
+                    )))
+                }
+            }
+        };
+        let fmt_s = match format_v.as_json().as_str() {
+            Some(s) => s,
+            None => {
+                return if let Some(fb) = fallback {
+                    Ok(fb.clone())
+                } else {
+                    Err(StdlibError::Type(format!(
+                        "parse-time: argument #2 must be string, got {}",
+                        format_v.type_of()
+                    )))
+                }
+            }
+        };
+
+        match parse_time_utc_seconds(time_s, fmt_s) {
+            Ok(secs) => Ok(JsltValue::number_f64(secs)),
+            Err(ParseTimeErr::BadFormat(msg)) => {
+                // Mirrors SimpleDateFormat bad pattern -> hard error
+                Err(StdlibError::Semantic(format!(
+                    "parse-time: Couldn't parse format '{}' : {}",
+                    fmt_s, msg
+                )))
+            }
+            Err(ParseTimeErr::ParseFailed(_msg)) => {
+                if let Some(fb) = fallback {
+                    Ok(fb.clone())
+                } else {
+                    Err(StdlibError::Semantic(format!("parse-time: {}", _msg)))
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "chrono")]
+struct FormatTimeFn;
+#[cfg(feature = "chrono")]
+impl JsltFunction for FormatTimeFn {
+    fn name(&self) -> &'static str {
+        "format-time"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Range { min: 2, max: Some(3) }
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+
+        let ts = &args[0];
+        let fmt = &args[1];
+        let tz_v = args.get(2);
+
+        if ts.is_null() {
+            return Ok(JsltValue::null());
+        }
+
+        // Expect timestamp as number -> seconds since epoch (can be integer or decimal)
+        let seconds = match ts.as_json() {
+            Value::Number(n) => n.as_f64().ok_or_else(|| {
+                StdlibError::Type("format-time: timestamp must be a number".to_string())
+            })?,
+            _ => {
+                return Err(StdlibError::Type(format!(
+                    "format-time: timestamp must be a number, got {}",
+                    ts.type_of()
+                )))
+            }
+        };
+
+        // Expect format string
+        let fmt_s = expect_string(fmt, "format-time", 2)?;
+
+        // Optional timezone string; default UTC if omitted or null
+        let tz_opt: Option<&str> = match tz_v {
+            Some(v) if !v.is_null() => Some(expect_string(v, "format-time", 3)?),
+            _ => None,
+        };
+
+        // Delegate to chrono-based formatter (UTC default; optional timezone override)
+        let out = time::format_time_with_chrono(seconds, fmt_s, tz_opt)
+            .map_err(|e| StdlibError::Semantic(format!("format-time: {}", e)))?;
+        Ok(JsltValue::string(out))
     }
 }
 
@@ -1722,7 +1829,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 49);
+        assert_eq!(r.len(), 51);
         for name in [
             "string",
             "number",
@@ -1777,6 +1884,10 @@ mod tests {
             "zip-with-index",
             "index-of",
             "now",
+            #[cfg(feature = "chrono")]
+            "parse-time",
+            #[cfg(feature = "chrono")]
+            "format-time",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

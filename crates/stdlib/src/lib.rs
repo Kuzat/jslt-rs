@@ -1,6 +1,7 @@
 //! stdlib v1: registry and all original JSLT stdlib functions
 
 mod time;
+mod url;
 
 use crate::time::{now_seconds_portable, parse_time_utc_seconds, ParseTimeErr};
 #[cfg(feature = "regex")]
@@ -144,6 +145,7 @@ impl Registry {
         }
 
         // URL
+        r.register(ParseUrlFn);
 
         // Regex
         #[cfg(feature = "regex")]
@@ -1816,6 +1818,30 @@ impl JsltFunction for FormatTimeFn {
     }
 }
 
+struct ParseUrlFn;
+impl JsltFunction for ParseUrlFn {
+    fn name(&self) -> &'static str {
+        "parse-url"
+    }
+    fn arity(&self) -> Arity {
+        Arity::Exact(1)
+    }
+    fn call(&self, args: &[JsltValue]) -> StdResult {
+        self.arity().check(args.len())?;
+        let v = &args[0];
+
+        if v.is_null() {
+            return Ok(JsltValue::null());
+        }
+        let s = expect_string(v, "parse-url", 0)?;
+
+        let out =
+            url::parse_url(s).map_err(|e| StdlibError::Semantic(format!("parse-url: {}", e)))?;
+
+        Ok(JsltValue::from_json(Value::Object(out)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1829,7 +1855,7 @@ mod tests {
     fn registry_with_default_has_all_functions_and_is_stable() {
         let r = Registry::with_default();
         // Expect 14 built-ins as registered above
-        assert_eq!(r.len(), 51);
+        assert_eq!(r.len(), 52);
         for name in [
             "string",
             "number",
@@ -1888,6 +1914,7 @@ mod tests {
             "parse-time",
             #[cfg(feature = "chrono")]
             "format-time",
+            "parse-url",
         ] {
             assert!(r.get_id(name).is_some(), "missing function {}", name);
         }

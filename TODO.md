@@ -225,11 +225,11 @@ unsafe_code = "forbid"
 
   - Time
     - [x] now()
-    - [ ] parse-time(time, format, fallback?)
-    - [ ] format-time(timestamp, format, timezone?)
+    - [x] parse-time(time, format, fallback?)
+    - [x] format-time(timestamp, format, timezone?)
 
   - URL
-    - [ ] parse-url(url)
+    - [x] parse-url(url)
 
 * [x] Regex-gated (feature = "regex"): implement using `regex` crate where applicable
   - [x] test

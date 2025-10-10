@@ -1,7 +1,23 @@
 {
   "name": "190_misc_parse_url_port",
   "description": "parse-url(...).port extracts numeric port",
-  "program": "parse-url(\"https://example.com:8443/\").port",
+  "program": "parse-url(\"https://user:pass@example.com:8443/hello/path?name=value&name2=value2#fragment\")",
   "input": {},
-  "expected": 8443
+  "expected": {
+    "host": "example.com",
+    "port": 8443,
+    "path": "/hello/path",
+    "scheme": "https",
+    "query": "name=value&name2=value2",
+    "parameters": {
+      "name": [
+        "value"
+      ],
+      "name2": [
+        "value2"
+      ]
+    },
+    "fragment": "fragment",
+    "userinfo": "user:pass"
+  }
 }

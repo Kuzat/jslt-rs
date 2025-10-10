@@ -26,8 +26,7 @@ pub fn parse_url(url: &str) -> Result<Map<String, Value>, String> {
         rest = &rest[2..];
 
         // Split off path-start (first '/' or '?' or '#' ends authority)
-        let auth_end =
-            rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
         let authority = &rest[..auth_end];
         rest = &rest[auth_end..];
 

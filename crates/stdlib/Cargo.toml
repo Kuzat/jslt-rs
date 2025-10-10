@@ -19,7 +19,7 @@ chrono = { workspace = true, optional = true }
 value = { path = "../value" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = { workspace = true}
+js-sys = { workspace = true }
 
 [lints]
 workspace = true

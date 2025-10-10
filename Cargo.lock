@@ -500,7 +500,6 @@ dependencies = [
  "js-sys",
  "rand",
  "regex",
- "serde",
  "serde_json",
  "sha2",
  "thiserror",

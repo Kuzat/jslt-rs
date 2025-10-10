@@ -40,9 +40,18 @@ impl Span {
 // Program root: defs, lets, and the final expression
 #[derive(Debug, Clone)]
 pub struct Program {
+    pub imports: Vec<Import>,
     pub defs: Vec<Def>,
     pub lets: Vec<Let>,
-    pub body: Expr,
+    pub body: Option<Expr>,
+    pub span: Span,
+}
+
+// import "path"
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub path: String,  // "module.jslt"
+    pub alias: String, // alias used in this file
     pub span: Span,
 }
 
@@ -257,6 +266,9 @@ impl Expr {
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for i in &self.imports {
+            writeln!(f, "import \"{}\" as {}", i.path, i.alias)?;
+        }
         for d in &self.defs {
             writeln!(f, "{d}")?;
         }
@@ -265,7 +277,10 @@ impl fmt::Display for Program {
                 writeln!(f, "{l}")?;
             }
         }
-        write!(f, "{}", self.body)
+        if let Some(b) = &self.body {
+            write!(f, "{}", b)?;
+        }
+        Ok(())
     }
 }
 

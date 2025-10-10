@@ -1,6 +1,6 @@
 use ast::{
-    BinaryOp, Binding, Def, Expr, Ident, Let, MemberKey, NumericKind, ObjectEntry, ObjectKey,
-    Program, Span, UnaryOp,
+    BinaryOp, Binding, Def, Expr, Ident, Import, Let, MemberKey, NumericKind, ObjectEntry,
+    ObjectKey, Program, Span, UnaryOp,
 };
 use lexer::{LexErrorKind, Lexer, Token};
 use std::mem;
@@ -68,8 +68,14 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_program(&mut self) -> ParseResult<Program> {
+        let mut imports = Vec::new();
         let mut defs = Vec::new();
         let mut lets = Vec::new();
+
+        // import must come first
+        while let Token::Import = self.cur.tok {
+            imports.push(self.parse_import_stmt()?);
+        }
 
         // Consume any number of top-level def/let
         loop {
@@ -83,8 +89,11 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Final expression
-        let expr = self.parse_if_or_expr()?;
+        // Optional final expression
+        let maybe_expr = match self.cur.tok {
+            Token::Eof => None,
+            _ => Some(self.parse_if_or_expr()?),
+        };
 
         // Expect EOF
         let (t, s) = (self.cur.tok.clone(), self.cur.span);
@@ -92,8 +101,58 @@ impl<'a> Parser<'a> {
             return Err(ParseError::unexpected(s, t, "end of input"));
         }
 
+        // Span: if body exists, use its span; otherwise use single-point at EOF
+        let span = if let Some(ref expr) = maybe_expr { expr.span() } else { s };
+
         // Program span is the expr span (def/lets can be recorded separately in AST if needed)
-        Ok(Program { defs, lets, body: expr, span: s })
+        Ok(Program { imports, defs, lets, body: maybe_expr, span })
+    }
+
+    fn parse_import_stmt(&mut self) -> ParseResult<Import> {
+        let start = self.cur.span;
+
+        // expect string path
+        let (path, path_span) = match &self.cur.tok {
+            Token::String(s) => {
+                let sp = self.cur.span;
+                let p = s.clone();
+                self.bump();
+                (p, sp)
+            }
+            _ => {
+                return Err(ParseError::unexpected(
+                    self.cur.span,
+                    self.cur.tok.clone(),
+                    "string literal",
+                ))
+            }
+        };
+
+        // expect "as"
+        // we don't have an 'as' token/keyword; reuse ident 'as'
+        // TODO: Should we add a 'as' keyword?
+        match &self.cur.tok {
+            Token::Ident(ref s) if s == "as" => {
+                self.bump();
+            }
+            _ => {
+                return Err(ParseError::unexpected(
+                    self.cur.span,
+                    self.cur.tok.clone(),
+                    "'as' after import path",
+                ))
+            }
+        }
+
+        // alias must be an identifier
+        let alias_ident = self.expect_ident()?;
+        let end = alias_ident.span;
+
+        Ok(Import {
+            path,
+            alias: alias_ident.name,
+            span: Span::join(start, Span::join(path_span, end)),
+        })
     }
 
     fn parse_def(&mut self) -> ParseResult<Def> {

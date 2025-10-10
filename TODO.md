@@ -278,34 +278,20 @@ unsafe_code = "forbid"
 
   * **Accept:** compile+eval of medium templates stays within sane allocations.
 
-## 13) C ABI (optional but recommended for interop)
-
-* [ ] `capi` crate exposing:
-
-  ```c
-  typedef struct jslt_prog jslt_prog_t;
-  jslt_prog_t* jslt_compile(const char* src, char** err_json);
-  int jslt_apply(jslt_prog_t*, const char* input_json, char** output_json, char** err_json);
-  void jslt_free(void*);
-  ```
-* [ ] `cbindgen` to generate `include/jslt.h`.
-
-  * **Accept:** tiny C example compiles and runs.
-
-## 14) Node/Python bindings (optional)
+## 13) Node/Python bindings (optional)
 
 * [ ] `node`: napi-rs; export `compile()` returning an opaque handle + `apply(handle, value)`.
 * [ ] `python`: pyo3; expose `Program` class.
 
   * **Accept:** smoke tests calling both from their runtimes.
 
-## 15) WASM (optional)
+## 14) WASM (optional)
 
 * [x] `wasm`: `wasm-bindgen`; export `compile/apply` with JS `Any` ↔ `JsltValue` conversions via `serde-wasm-bindgen`.
 
   * **Accept:** browser demo in `examples/wasm/`.
 
-## 16) LSP (optional but nice)
+## 15) LSP (optional but nice)
 
 * [ ] `lsp`: tower-lsp; features:
 
@@ -315,14 +301,14 @@ unsafe_code = "forbid"
   * format (pretty-printer)
   * **Accept:** works in VS Code via simple client config.
 
-## 17) Docs & release hygiene
+## 16) Docs & release hygiene
 
 * [ ] Fill `docs/stdlib.md` with signatures and semantics.
 * [ ] Update `docs/spec.md` to remove OPENs as we confirm via diff tests.
 * [ ] README: quickstart, API examples, CLI usage, feature flags.
 * [ ] Tag `v0.1.0` crates; publish `engine` and `cli` (bindings optional).
 
-## 18) Add extension functions (optional)
+## 17) Add extension functions (optional)
 
 * [ ] Add the possibility for users to define their own functions.
   * [ ] Make sure this works as with original JSLT language.

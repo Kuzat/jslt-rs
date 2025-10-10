@@ -27,7 +27,7 @@ jobs:
       - name: Setup rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknow
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo
         uses: actions/cache@v4

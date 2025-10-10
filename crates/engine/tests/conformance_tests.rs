@@ -131,6 +131,38 @@ fn run_differential_test(test_case: &TestCase) -> TestResult {
 }
 
 #[test]
+fn test_conformance_rust_only() {
+    let test_cases = load_test_cases().expect("Failed to load test cases");
+
+    if test_cases.is_empty() {
+        panic!("No test cases found in conformance/cases/");
+    }
+
+    let mut failed: Vec<(String, String)> = Vec::new();
+
+    for tc in &test_cases {
+        let rust_res = run_rust_jslt(&tc.program, &tc.input);
+        match rust_res {
+            Ok(out) if out == tc.expected => {
+                // ok
+            }
+            Ok(out) => failed
+                .push((tc.name.clone(), format!("Expected: '{}', Got: '{}'", tc.expected, out))),
+            Err(e) => failed.push((tc.name.clone(), format!("Error: {}", e))),
+        }
+    }
+
+    if !failed.is_empty() {
+        eprintln!("❌ Rust-only conformance failures:");
+        for (name, msg) in &failed {
+            eprintln!("  - {}: {}", name, msg);
+        }
+        panic!("Some Rust-only conformance tests failed");
+    }
+}
+
+#[ignore = "Run manually to verify conformance against Java JSLT"]
+#[test]
 fn test_conformance_against_java_jslt() {
     let test_cases = load_test_cases().expect("Failed to load test cases");
 

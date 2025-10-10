@@ -65,8 +65,11 @@ Each test case is a JSON file with the following structure:
 # Validate test fixture format
 ./conformance/scripts/validate_fixtures.sh
 
-# Run differential tests (requires working Rust JSLT implementation)
+# Run differential tests (requires working Rust JSLT implementation and Java JSLT setup)
 cargo test -p engine --test conformance_tests -- --ignored
+
+# Run just Rust JSLT tests (no Java and Java JSLT submodule needed)
+cargo test -p engine --test conformance_tests
 
 # Update expected outputs from Java JSLT
 ./conformance/scripts/regenerate_expected.sh

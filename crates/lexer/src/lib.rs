@@ -185,7 +185,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_ident_continue(ch: char) -> bool {
-        ch == '_' || ch == '-' || ch.is_ascii_alphanumeric()
+        // We allow ':' in identifiers for namespacing (e.g. fn names)
+        ch == '_' || ch == '-' || ch == ':' || ch.is_ascii_alphanumeric()
     }
 
     fn scan_ident_or_keyword(&mut self) -> (Token, Span) {

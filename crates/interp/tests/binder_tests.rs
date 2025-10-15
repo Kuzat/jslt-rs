@@ -36,12 +36,13 @@ fn call(name: &str, args: Vec<Expr>) -> Expr {
 fn let_binding_and_variable_resolution() {
     // let x = 1;  $x
     let program = Program {
+        imports: vec![],
         defs: vec![],
         lets: vec![Let {
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
         }],
-        body: var("x"),
+        body: Some(var("x")),
         span: s(),
     };
 
@@ -76,8 +77,13 @@ fn function_definition_and_call() {
         span: s(),
     };
 
-    let program =
-        Program { defs: vec![def], lets: vec![], body: call("inc", vec![num("41")]), span: s() };
+    let program = Program {
+        imports: vec![],
+        defs: vec![def],
+        lets: vec![],
+        body: Some(call("inc", vec![num("41")])),
+        span: s(),
+    };
 
     let bound = bind(&program).expect("bind ok");
 
@@ -125,6 +131,7 @@ fn function_definition_and_call() {
 fn closure_captures_outer_let() {
     // let x = 1; def g() $x; g()
     let program = Program {
+        imports: vec![],
         defs: vec![Def {
             name: ident("g"),
             params: vec![],
@@ -135,7 +142,7 @@ fn closure_captures_outer_let() {
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
         }],
-        body: call("g", vec![]),
+        body: Some(call("g", vec![])),
         span: s(),
     };
     // Setup registry to get number of builtin functions
@@ -171,12 +178,13 @@ fn closure_captures_outer_let() {
 fn param_shadows_outer_let() {
     // let x = 1; def id(x) $x; id(2)
     let program = Program {
+        imports: vec![],
         defs: vec![Def { name: ident("id"), params: vec![ident("x")], body: var("x"), span: s() }],
         lets: vec![Let {
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
         }],
-        body: call("id", vec![num("2")]),
+        body: Some(call("id", vec![num("2")])),
         span: s(),
     };
 
@@ -195,7 +203,8 @@ fn param_shadows_outer_let() {
 #[test]
 fn unknown_variable_yields_error_with_span() {
     // $nope
-    let program = Program { defs: vec![], lets: vec![], body: var("nope"), span: s() };
+    let program =
+        Program { imports: vec![], defs: vec![], lets: vec![], body: Some(var("nope")), span: s() };
     let err = bind(&program).unwrap_err();
     let msg = format!("{}", err);
     assert!(msg.contains("unknown variable"), "msg={}", msg);
@@ -206,9 +215,10 @@ fn unknown_variable_yields_error_with_span() {
 fn unknown_function_yields_error_with_suggestions() {
     // nope()
     let program = Program {
+        imports: vec![],
         defs: vec![Def { name: ident("near"), params: vec![], body: Expr::Null(s()), span: s() }],
         lets: vec![],
-        body: call("nope", vec![]),
+        body: Some(call("nope", vec![])),
         span: s(),
     };
     let err = bind(&program).unwrap_err();
@@ -223,9 +233,14 @@ fn unknown_function_yields_error_with_suggestions() {
 fn non_function_callee_is_rejected() {
     // (.)(1) — callee is `.` which is not a bare function identifier
     let program = Program {
+        imports: vec![],
         defs: vec![],
         lets: vec![],
-        body: Expr::Call { callee: Box::new(Expr::This(s())), args: vec![num("1")], span: s() },
+        body: Some(Expr::Call {
+            callee: Box::new(Expr::This(s())),
+            args: vec![num("1")],
+            span: s(),
+        }),
         span: s(),
     };
     let err = bind(&program).unwrap_err();

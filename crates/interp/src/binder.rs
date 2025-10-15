@@ -24,6 +24,23 @@ pub struct BoundProgram {
     pub builtin_count: usize,
 }
 
+// Synthetic function kinds for imports
+#[derive(Debug, Clone)]
+pub(crate) enum SyntheticFun {
+    // Namespace-local function inside imported module
+    ImportedLocal {
+        module_key: String,
+        target_id: FunctionId,
+        name: String,
+    },
+    // Callable module - call runs imported module's body with arg as '.'
+    ImportedCallable {
+        module_key: String,
+        name: String,
+        // The module's body is a function with a single argument '.'
+    },
+}
+
 // Bound function holds closure metadata and the bound body
 #[derive(Debug, Clone)]
 pub struct BoundFunction {
@@ -32,8 +49,14 @@ pub struct BoundFunction {
     pub params: Vec<String>,
     // Captures in deterministic order the evaluator can materialize (e.g., Vec<ResolvedVarPlan>)
     // We store a stable list of (from_depth, slot) pairs in the order of first encounter.
+    // e.g., for "let y = 10; def f(x) $x + $y; f(1)" we will have captures [(1,0)] for 'y' and [(0,0)] for 'x'"
+    // the order is important for the evaluator to build the closure environment correctly.
+    // so in the above exmaple, the closure will have 'y' in slot 0 and 'x' in slot 1.
     pub captures: Vec<CaptureSpec>,
     pub body: BoundExpr,
+    // Synthetic callable? For imported functions we don't use body directly.
+    // Keep Option to avoid changing existing code paths
+    pub(crate) _synthetic: Option<SyntheticFun>,
 }
 
 // A capture is always from some outer scope; depth >= 1
@@ -179,7 +202,7 @@ pub enum BindError {
     NonFunctionCallee { span: Span },
 }
 
-fn suggest<'a>(name: &str, pool: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+fn suggest<'a>(name: &str, pool: impl IntoIterator<Item=&'a str>) -> Vec<String> {
     let mut scored: Vec<(usize, String)> =
         pool.into_iter().map(|cand| (edit_distance(name, cand), cand.to_string())).collect();
     scored.sort_by_key(|(d, s)| (*d, s.clone()));
@@ -240,6 +263,14 @@ impl VarFrame {
     }
 }
 
+#[derive(Debug)]
+struct LoadedModule {
+    // Bound program of the imported module
+    bound: BoundProgram,
+    // Whether it had a final expression
+    callable: bool,
+}
+
 /// Two namespaces per spec: variables (let/params) and functions (def)
 #[derive(Debug)]
 struct Env<'a> {
@@ -258,6 +289,9 @@ struct Env<'a> {
     // For each function being bound, a set of (depth, slot) captures discovered
     fun_captures: HashMap<FunctionId, BTreeSet<CaptureSpec>>,
 
+    // Map for qualified imported function names: "alias:name" -> FunctionId"
+    imported_fun_ns: HashMap<String, FunctionId>,
+
     // Span resolver needs original program info
     // Pass them through visit methods. Kept here as a marker for design; not used directly.
     _phantom: std::marker::PhantomData<&'a ()>,
@@ -271,6 +305,7 @@ impl<'a> Env<'a> {
             fun_names_sorted: BTreeSet::new(),
             current_fun: None,
             fun_captures: HashMap::new(),
+            imported_fun_ns: HashMap::new(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -347,6 +382,19 @@ impl<'a> Env<'a> {
     fn fun_suggestions(&self, miss: &str) -> Vec<String> {
         suggest(miss, self.fun_names_sorted.iter().map(|s| s.as_str()))
     }
+
+    fn define_imported_fun(&mut self, qual: &str, id: FunctionId) {
+        self.imported_fun_ns.insert(qual.to_string(), id);
+        self.fun_names_sorted.insert(qual.to_string());
+    }
+
+    fn lookup_fun_any(&self, name: &str) -> Option<FunctionId> {
+        if let Some(fid) = self.lookup_fun(name) {
+            Some(fid)
+        } else {
+            self.imported_fun_ns.get(name).copied()
+        }
+    }
 }
 
 pub struct Binder {
@@ -354,6 +402,9 @@ pub struct Binder {
     functions: Vec<BoundFunction>,
     next_fun_id: usize,
     builtin_count: usize,
+
+    // Imported modules table
+    modules: HashMap<String, LoadedModule>,
 }
 
 impl Default for Binder {
@@ -379,6 +430,7 @@ impl Binder {
             functions: Vec::new(),
             next_fun_id: registry.len(), // reserve space for builtins
             builtin_count: registry.len(),
+            modules: HashMap::new(),
         }
     }
 
@@ -388,12 +440,85 @@ impl Binder {
         id
     }
 
+    // Load/resolve module path into BoundProgram once; detect cycles via external driver (ModuleLoader)
+    // Here we expect the driver to call into bind_program for submodules as needed;  for simplicity
+    // we provide a public "register_imported_module" used by the driver/compiler
+    pub fn register_imported_module(
+        &mut self,
+        key: &str,
+        bound: BoundProgram,
+        callable: bool,
+    ) {
+        self.modules.insert(
+            key.to_string(),
+            LoadedModule {
+                bound,
+                callable,
+            },
+        );
+    }
+
+    // Wire import alias:
+    // - namespace (not callable): provide alias:name -> target function ids (resuing the imported module function ids offset)
+    // - callable: create a new synthetic function id bound to ImportedCallable
+    pub fn wire_import_alias(&mut self, alias: &str, module_key: &str) {
+        let lm = match self.modules.get(module_key) {
+            Some(m) => m,
+            None => return,
+        };
+
+        if lm.callable {
+            // callable module -> create a synthetic function alias
+            let fid = self.alloc_fun_id();
+            let bf = BoundFunction {
+                id: fid,
+                name: alias.to_string(),
+                params: vec!["dot".to_string()], // arity 1 by convention
+                captures: vec![],
+                // body unused for synthetic
+                body: BoundExpr::Null(Span { start: 0, end: 0, line: 1, column: 1 }),
+                _synthetic: Some(SyntheticFun::ImportedCallable {
+                    module_key: module_key.to_string(),
+                    name: alias.to_string(),
+                }),
+            };
+            self.functions.push(bf);
+            self.env.define_imported_fun(alias, fid);
+        } else {
+            // namespace -> re-export each function under "alias:name"
+            // we reassign fresh ids and map them as synthetic proxies that call imported function ids
+            // Collect necessary information before mutating self
+            let functions_to_add: Vec<_> = lm.bound.functions.iter().map(|f| {
+                let qual = format!("{}:{}", alias, f.name);
+                (qual, f.params.clone(), f.id, f.name.clone())
+            }).collect();
+
+            // Now we can modify self without borrowing lm
+            for (qual, params, target_id, name) in functions_to_add {
+                let fid = self.alloc_fun_id();
+                let proxy = BoundFunction {
+                    id: fid,
+                    name: qual.clone(),
+                    params,
+                    captures: vec![],
+                    body: BoundExpr::Null(Span::zero()),
+                    _synthetic: Some(SyntheticFun::ImportedLocal {
+                        module_key: module_key.to_string(),
+                        target_id,
+                        name,
+                    }),
+                };
+                self.functions.push(proxy);
+                self.env.define_imported_fun(&qual, fid);
+            }
+        }
+    }
+
     // Entry point
     pub fn bind_program(&mut self, p: &ast::Program) -> Result<BoundProgram, BindError> {
         // 1) Pre-declare all top-level functions so they are visible after their decl point only.
         //    we choose "visible after declaration": We fill as we go through defs in order.
         //    If you want "all defs visible everywhere" semantics, first pass could collect names.
-
         for d in &p.defs {
             let id = self.alloc_fun_id();
             self.env.define_fun(&d.name.name, id);
@@ -428,6 +553,7 @@ impl Binder {
                 params: d.params.iter().map(|p| p.name.clone()).collect(),
                 captures,
                 body,
+                _synthetic: None,
             });
         }
 
@@ -440,8 +566,12 @@ impl Binder {
             }
         }
 
-        // 4) bind program body
-        let body = self.bind_expr(&p.body)?;
+        // 4) bind program body (optional)
+        let body = if let Some(body) = &p.body {
+            self.bind_expr(body)?
+        } else {
+            BoundExpr::Null(Span::zero())
+        };
 
         Ok(BoundProgram {
             functions: self.functions.clone(),
@@ -569,7 +699,7 @@ impl Binder {
             Expr::Call { callee, args, span } => {
                 // Only bare identifiers are functions; they parse as FunctionRef
                 if let Expr::FunctionRef { name, span } = callee.as_ref() {
-                    if let Some(fid) = self.env.lookup_fun(name) {
+                    if let Some(fid) = self.env.lookup_fun_any(name) {
                         let mut bargs = Vec::with_capacity(args.len());
                         for a in args {
                             bargs.push(self.bind_expr(a)?);

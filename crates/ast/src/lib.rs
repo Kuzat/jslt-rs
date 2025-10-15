@@ -28,6 +28,11 @@ impl Span {
         }
     }
 
+    // A span that is always empty at the start of the file
+    pub fn zero() -> Span {
+        Span { start: 0, end: 0, line: 1, column: 1 }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.start == self.end
     }
@@ -803,9 +808,10 @@ mod tests {
             span: sp(),
         };
         let prog = Program {
+            imports: vec![],
             defs: vec![def],
             lets: vec![let_stmt],
-            body: bin(BinaryOp::Mul, var("a"), num("10")),
+            body: Some(bin(BinaryOp::Mul, var("a"), num("10"))),
             span: sp(),
         };
         let rendered = format!("{}", prog);

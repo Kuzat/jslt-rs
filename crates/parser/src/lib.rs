@@ -111,6 +111,7 @@ impl<'a> Parser<'a> {
     fn parse_import_stmt(&mut self) -> ParseResult<Import> {
         let start = self.cur.span;
 
+        self.expect(Token::Import, "'import'")?;
         // expect string path
         let (path, path_span) = match &self.cur.tok {
             Token::String(s) => {

@@ -5,7 +5,6 @@ use crate::binder::{
 use ast::{Program, Span};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::fmt::format;
 use stdlib::Registry;
 use thiserror::Error;
 use value::JsltValue;
@@ -75,6 +74,8 @@ struct Frame {
 struct ModuleRuntime {
     top_frame: Frame,
     closures: HashMap<FunctionId, Closure>,
+    // Body of the module program (used when the module is imported as a callable)
+    body: BoundExpr,
 }
 
 struct Evaluator<'p> {
@@ -147,11 +148,7 @@ impl<'p> Evaluator<'p> {
         r
     }
 
-    fn init_module_runtime(
-        &mut self,
-        key: &str,
-        child: &BoundProgram,
-    ) -> Result<ModuleRuntime, RuntimeError> {
+    fn init_module_runtime(&mut self, child: &BoundProgram) -> Result<ModuleRuntime, RuntimeError> {
         // Local evaluator context: reuse this Evaluator's helper but run on a temporary stack
 
         let mut top = Frame { locals: Vec::new(), this_val: JsltValue::null(), active_fun: None };
@@ -175,7 +172,7 @@ impl<'p> Evaluator<'p> {
 
         debug_assert_eq!(self.stack.len(), saved_len);
 
-        Ok(ModuleRuntime { top_frame: module_top, closures })
+        Ok(ModuleRuntime { top_frame: module_top, closures, body: child.body.clone() })
     }
 
     fn build_closures_for(
@@ -586,17 +583,17 @@ impl<'p> Evaluator<'p> {
 
                     // synthetic import dispatch
                     if let Some(syn) = &fun_obj._synthetic {
-                        match syn {
+                        return match syn {
                             SyntheticFun::ImportedLocal { module_key, target_id, name: _ } => {
                                 // Proxy call: redirect to imported module's function by id
-                                return self.call_imported_local_function(
+                                self.call_imported_local_function(
                                     module_key,
                                     target_id,
                                     evaluated_args,
                                     *span,
-                                );
+                                )
                             }
-                            SyntheticFun::ImportedCallable { module_key: _, name: _ } => {
+                            SyntheticFun::ImportedCallable { module_key, name: _ } => {
                                 // Callable module: arity must be 1; its argument becomes '.'
                                 let do_val = match evaluated_args.first() {
                                     Some(v) => v.clone(),
@@ -609,40 +606,9 @@ impl<'p> Evaluator<'p> {
                                         })
                                     }
                                 };
-
-                                // TODO:
-                                // The imported module's program is embedded as a regular function set
-                                // We need a handle to that program: we stored only closures for functions
-                                // Here, the synthetic body does not carry module; instead, we assume
-                                // the imported module's BoundProgram functions were appended at compile time
-                                // and are part of closures. Evaluate its "body" expression: by convention,
-                                // for callable modules we use their program.body.
-                                // For simplicity we assume the proxy's "captures" include a special mapping,
-                                // but since we didn't persist modules into evaluator, we fallback:
-                                // The simplest approach: reuse this program's body for callable (binder stored Null).
-                                // Instead, we require binder to have appended the imported module's body as
-                                // a dedicated hidden function. To keep the current minimal edit,
-                                // we accept evaluating the current program's body with dot=arg if 'id' equals the synthetic.
-                                // We'll do a simple behavior: call current program body with new '.'.
-                                // In a real split-program environment, you would store module BoundProgram(s) on Evaluator.
-
-                                // Minimal workable behavior: use synthetic fun_obj.name as regular user function that sets '.'
-                                let caller_this = self.current_frame().this_val.clone();
-                                let _saved = caller_this; // not used, kept to illustrate resotration
-
-                                // Evaluate this program's body with overridden '.'
-                                let old_frame = self.current_frame().clone();
-                                let new_frame = Frame {
-                                    locals: old_frame.locals.clone(),
-                                    this_val: do_val,
-                                    active_fun: old_frame.active_fun,
-                                };
-                                self.push_frame(new_frame);
-                                let result = self.eval_expr(&self.prog.body)?;
-                                self.pop_frame();
-                                return Ok(result);
+                                self.call_imported_callable_function(module_key, do_val)
                             }
-                        }
+                        };
                     }
 
                     // user defined function
@@ -811,6 +777,35 @@ impl<'p> Evaluator<'p> {
 
         result
     }
+
+    fn call_imported_callable_function(
+        &mut self,
+        module_key: &str,
+        arg: JsltValue,
+    ) -> Result<JsltValue, RuntimeError> {
+        // 1) find  module runtime
+        let mr = self.modules.get(module_key).ok_or_else(|| {
+            RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
+        })?;
+
+        // Build call
+        // Call frame will be top frame of module with caller_this as this_val
+        let call_frame = Frame { this_val: arg, ..mr.top_frame.clone() };
+
+        // Push module top-frame context + the call frame onto stack
+        self.stack.push(call_frame);
+
+        let fun_body = mr.body.clone();
+        let result = self.with_call_depth(|me| {
+            let v = me.eval_expr(&fun_body)?;
+            Ok(v)
+        });
+
+        // Pop both frames from stack
+        self.stack.pop();
+
+        result
+    }
 }
 
 // Member access with null propagation
@@ -848,7 +843,9 @@ pub fn apply_with_modules(
     let mut ev = Evaluator::new(bound, cfg);
 
     for (key, (child, _callable)) in modules {
-        let mr = ev.init_module_runtime(key, child)?;
+        // If the module is a synthetic import, we need to create a ModuleRuntime
+        let mr = ev.init_module_runtime(child)?;
+
         ev.modules.insert(key.clone(), mr);
     }
 

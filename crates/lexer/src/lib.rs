@@ -166,7 +166,7 @@ impl<'a> Lexer<'a> {
                 // consume // then until newline or EOF
                 self.bump_char();
                 self.bump_char();
-                while let Some(ch) = self.bump_char() {
+                while let Some(ch) = self.peek_char() {
                     if ch == '\n' {
                         break;
                     }

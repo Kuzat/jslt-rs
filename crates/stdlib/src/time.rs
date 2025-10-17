@@ -33,8 +33,6 @@ pub fn parse_time_utc_seconds(text: &str, fmt_java: &str) -> Result<f64, ParseTi
     let fmt = java_to_chrono_format(fmt_java);
     let text_norm = normalize_z_for_offset(text, &fmt);
 
-    println!("parse_time_utc_seconds: text={}, fmt={}", text, fmt);
-
     // 1) Offset-aware
     match DateTime::parse_from_str(&text_norm, &fmt) {
         Ok(dt_fixed) => {

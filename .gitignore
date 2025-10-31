@@ -2,3 +2,5 @@
 .idea
 
 examples/wasm/pkg
+
+*.DS_Store

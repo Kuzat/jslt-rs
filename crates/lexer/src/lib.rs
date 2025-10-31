@@ -55,6 +55,8 @@ pub enum Token {
     And,
     Or,
     Not,
+    Import,
+    As,
 
     Eof,
 }
@@ -165,7 +167,7 @@ impl<'a> Lexer<'a> {
                 // consume // then until newline or EOF
                 self.bump_char();
                 self.bump_char();
-                while let Some(ch) = self.bump_char() {
+                while let Some(ch) = self.peek_char() {
                     if ch == '\n' {
                         break;
                     }
@@ -184,6 +186,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_ident_continue(ch: char) -> bool {
+        // We allow ':' in identifiers for namespacing (e.g. fn names)
         ch == '_' || ch == '-' || ch.is_ascii_alphanumeric()
     }
 
@@ -219,6 +222,8 @@ impl<'a> Lexer<'a> {
             "true" => Token::True,
             "false" => Token::False,
             "null" => Token::Null,
+            "import" => Token::Import,
+            "as" => Token::As,
             _ => Token::Ident(s),
         };
         (tok, self.make_span(start))
@@ -897,5 +902,26 @@ mod tests {
         assert_eq!(t4, Token::RParen);
         let (t5, _) = lx.next_token().unwrap();
         assert_eq!(t5, Token::Eof);
+    }
+
+    #[test]
+    fn import_keyword_and_namespace_with_colon() {
+        let mut lx = Lexer::new("import \"module.jslt\" as ns\nns:foo");
+        let (t1, _) = lx.next_token().unwrap();
+        assert_eq!(t1, Token::Import);
+        let (t2, _) = lx.next_token().unwrap();
+        assert_eq!(t2, Token::String("module.jslt".into()));
+        let (t3, _) = lx.next_token().unwrap();
+        assert_eq!(t3, Token::As);
+        let (t4, _) = lx.next_token().unwrap();
+        assert_eq!(t4, Token::Ident("ns".into()));
+        let (t5, _) = lx.next_token().unwrap();
+        assert_eq!(t5, Token::Ident("ns".into()));
+        let (t6, _) = lx.next_token().unwrap();
+        assert_eq!(t6, Token::Colon);
+        let (t7, _) = lx.next_token().unwrap();
+        assert_eq!(t7, Token::Ident("foo".into()));
+        let (t8, _) = lx.next_token().unwrap();
+        assert_eq!(t8, Token::Eof);
     }
 }

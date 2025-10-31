@@ -1,6 +1,6 @@
 use crate::binder::{
     BindError, Binder, BoundExpr, BoundFunction, BoundProgram, CaptureSpec, FunctionId, ObjectKey,
-    ResolvedVar,
+    ResolvedVar, SyntheticFun,
 };
 use ast::{Program, Span};
 use serde_json::{json, Map, Value};
@@ -71,6 +71,16 @@ struct Frame {
     active_fun: Option<FunctionId>,
 }
 
+#[derive(Debug, Clone)]
+struct ModuleRuntime {
+    top_frame: Frame,
+    closures: HashMap<FunctionId, Closure>,
+    // Body of the module program (used when the module is imported as a callable)
+    body: BoundExpr,
+    // Sub-modules imported by this module (preserves hierarchy)
+    sub_modules: HashMap<String, ModuleRuntime>,
+}
+
 struct Evaluator<'p> {
     prog: &'p BoundProgram,
     closures: HashMap<FunctionId, Closure>,
@@ -80,6 +90,7 @@ struct Evaluator<'p> {
     stack: Vec<Frame>,
     registry: Registry,
     builtin_count: usize,
+    modules: HashMap<String, ModuleRuntime>,
 }
 
 impl<'p> Evaluator<'p> {
@@ -97,6 +108,7 @@ impl<'p> Evaluator<'p> {
             stack: Vec::new(),
             registry,
             builtin_count,
+            modules: HashMap::new(),
         }
     }
 
@@ -137,6 +149,63 @@ impl<'p> Evaluator<'p> {
         let r = f(self);
         self.call_depth -= 1;
         r
+    }
+
+    fn init_module_runtime(&mut self, child: &BoundProgram) -> Result<ModuleRuntime, RuntimeError> {
+        // Local evaluator context: reuse this Evaluator's helper but run on a temporary stack
+
+        let mut top = Frame { locals: Vec::new(), this_val: JsltValue::null(), active_fun: None };
+        top.locals.resize(child.lets.len(), JsltValue::null());
+
+        // Push a temporary stack, evaluate module lets
+        // Save current stack length to restore after init
+        let saved_len = self.stack.len();
+        self.stack.push(top);
+
+        for (i, (_name, expr)) in child.lets.iter().enumerate() {
+            let v = self.eval_expr(expr)?;
+            self.current_frame_mut().locals[i] = v;
+        }
+
+        // Materialize closure for the child program using the module frame on top
+        let closures = self.build_closures_for(child)?;
+
+        // Pop the module frame, but keep clone for runtime top_frame
+        let module_top = self.stack.pop().expect("module frame present");
+
+        debug_assert_eq!(self.stack.len(), saved_len);
+
+        Ok(ModuleRuntime {
+            top_frame: module_top,
+            closures,
+            body: child.body.clone(),
+            sub_modules: {
+                let mut m = HashMap::new();
+                for (k, (sub_prog, _callable)) in &child.imported_modules {
+                    let sub_rt = self.init_module_runtime(sub_prog)?;
+                    m.insert(k.clone(), sub_rt);
+                }
+                m
+            },
+        })
+    }
+
+    fn build_closures_for(
+        &mut self,
+        child: &BoundProgram,
+    ) -> Result<HashMap<FunctionId, Closure>, RuntimeError> {
+        let mut out = HashMap::new();
+        for f in &child.functions {
+            let mut captures = Vec::with_capacity(f.captures.len());
+            let mut capture_map = HashMap::new();
+            for (i, cap) in f.captures.iter().enumerate() {
+                let val = self.lookup_captures_from_stack(*cap)?;
+                capture_map.insert((cap.depth, cap.slot), i);
+                captures.push(val);
+            }
+            out.insert(f.id, Closure { fun: f.clone(), captures, capture_map });
+        }
+        Ok(out)
     }
 
     fn materialize_closures_from_top(&mut self) -> Result<(), RuntimeError> {
@@ -186,7 +255,7 @@ impl<'p> Evaluator<'p> {
         top.locals.resize(self.prog.lets.len(), JsltValue::null());
         self.push_frame(top);
 
-        // Evaluate lets in order (binder assigned slots in the same order we pushed here
+        // Evaluate lets in order (binder assigned slots in the same order we pushed here)
         for (i, (_name, expr)) in self.prog.lets.iter().enumerate() {
             let v = self.eval_expr(expr)?;
             self.current_frame_mut().locals[i] = v;
@@ -520,11 +589,48 @@ impl<'p> Evaluator<'p> {
                         }
                     }
                 } else {
-                    // user defined function
-                    let (fun_id, fun_body, expected_params) = {
+                    // user or synthetic imported
+                    let (fun_id, fun_obj) = {
                         let clo =
                             self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
-                        (clo.fun.id, clo.fun.body.clone(), clo.fun.params.len())
+                        (clo.fun.id, clo.fun.clone())
+                    };
+
+                    // synthetic import dispatch
+                    if let Some(syn) = &fun_obj._synthetic {
+                        return match syn {
+                            SyntheticFun::ImportedLocal { module_key, target_id } => {
+                                // Proxy call: redirect to imported module's function by id
+                                self.call_imported_local_function(
+                                    module_key,
+                                    target_id,
+                                    evaluated_args,
+                                    *span,
+                                )
+                            }
+                            SyntheticFun::ImportedCallable { module_key } => {
+                                // Callable module: arity must be 1; its argument becomes '.'
+                                let do_val = match evaluated_args.first() {
+                                    Some(v) => v.clone(),
+                                    None => {
+                                        return Err(RuntimeError::ArityMismatch {
+                                            name: fun_obj.name.clone(),
+                                            expected: 1,
+                                            got: 0,
+                                            span: *span,
+                                        })
+                                    }
+                                };
+                                self.call_imported_callable_function(module_key, do_val)
+                            }
+                        };
+                    }
+
+                    // user defined function
+                    let (expected_params, fun_body) = {
+                        let clo =
+                            self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
+                        (clo.fun.params.len(), clo.fun.body.clone())
                     };
 
                     if evaluated_args.len() != expected_params {
@@ -572,7 +678,7 @@ impl<'p> Evaluator<'p> {
                 if !res.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span });
                 }
-                Ok(JsltValue::from_json(json!(res)))
+                Ok(JsltValue::number(res))
             }
             (Value::String(a), Value::String(b)) => {
                 let mut s = String::with_capacity(a.len() + b.len());
@@ -635,6 +741,107 @@ impl<'p> Evaluator<'p> {
         };
         Ok(JsltValue::from_json(Value::Bool(res)))
     }
+
+    // Helper to call a function inside a ModuleRuntime (ImportedLocal)
+    fn call_imported_local_function(
+        &mut self,
+        module_key: &str,
+        target_id: &FunctionId,
+        evaluated_args: Vec<JsltValue>,
+        span: Span,
+    ) -> Result<JsltValue, RuntimeError> {
+        // 1) find module runtime and clone needed parts to avoid borrowing issues
+        let (mr_top, mr_closures, mr_submods, target_fun) = {
+            let mr = self.modules.get(module_key).ok_or_else(|| {
+                RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
+            })?;
+            let target = mr
+                .closures
+                .get(target_id)
+                .ok_or(RuntimeError::UnknownFunction(*target_id))?
+                .fun
+                .clone();
+            (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), target)
+        };
+
+        // 3) arity check
+        let expected = target_fun.params.len();
+        if evaluated_args.len() != expected {
+            return Err(RuntimeError::ArityMismatch {
+                name: target_fun.name.clone(),
+                expected,
+                got: evaluated_args.len(),
+                span,
+            });
+        }
+
+        // 4) build call frame
+        let caller_this = self.current_frame().this_val.clone();
+        let call_frame =
+            Frame { locals: evaluated_args, this_val: caller_this, active_fun: Some(*target_id) };
+
+        // 5) push module top-frame context + the call frame onto stack
+        self.stack.push(mr_top);
+        self.stack.push(call_frame);
+
+        // 6) eval body within module context: swap closures and sub-modules
+        let fun_body = &target_fun.body.clone();
+        let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
+        let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
+        let result = self.with_call_depth(|me| {
+            let v = me.eval_expr(fun_body)?;
+            Ok(v)
+        });
+        // restore evaluator context
+        self.closures = saved_closures;
+        self.modules = saved_modules;
+
+        // 7) pop both frames from stack
+        self.stack.pop();
+        self.stack.pop();
+
+        // Normalize numeric representation for module calls (prefer integer if integral)
+        // result.map(|v| if let Some(f) = v.as_f64_checked() { JsltValue::number(f) } else { v })
+        result
+    }
+
+    fn call_imported_callable_function(
+        &mut self,
+        module_key: &str,
+        arg: JsltValue,
+    ) -> Result<JsltValue, RuntimeError> {
+        // 1) find module runtime and clone needed parts to avoid borrowing issues
+        let (mut mr_top, mr_closures, mr_submods, fun_body) = {
+            let mr = self.modules.get(module_key).ok_or_else(|| {
+                RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
+            })?;
+            (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), mr.body.clone())
+        };
+
+        // Build call
+        // Call frame will be top frame of module with caller_this as this_val
+        mr_top.this_val = arg;
+        let call_frame = mr_top;
+
+        // Push module top-frame context + the call frame onto stack
+        self.stack.push(call_frame);
+
+        // swap into module context for duration of evaluation
+        let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
+        let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
+        let result = self.with_call_depth(|me| {
+            let v = me.eval_expr(&fun_body)?;
+            Ok(v)
+        });
+        // restore
+        self.closures = saved_closures;
+        self.modules = saved_modules;
+
+        // Pop both frames from stack
+        self.stack.pop();
+
+        result
+    }
 }
 
 // Member access with null propagation
@@ -662,14 +869,23 @@ pub fn apply(
     ev.eval_program(input)
 }
 
-// Convenience: bind + apply from AST program
-pub fn eval(
-    program: &Program,
+pub fn apply_with_modules(
+    bound: &BoundProgram,
+    modules: &HashMap<String, (BoundProgram, bool)>,
     input: &Value,
     cfg: Option<EvalConfig>,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    let bound = bind(program)?;
-    Ok(apply(&bound, input, cfg)?)
+) -> Result<Value, RuntimeError> {
+    let cfg = cfg.unwrap_or_default();
+    let mut ev = Evaluator::new(bound, cfg);
+
+    for (key, (child, _callable)) in modules {
+        // If the module is a synthetic import, we need to create a ModuleRuntime
+        let mr = ev.init_module_runtime(child)?;
+
+        ev.modules.insert(key.clone(), mr);
+    }
+
+    ev.eval_program(input)
 }
 
 fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> RuntimeError {
@@ -705,6 +921,7 @@ mod tests {
             lets: lets.into_iter().map(|(n, e)| (n.to_string(), e)).collect(),
             body,
             builtin_count: 0,
+            imported_modules: HashMap::new(),
         }
     }
 
@@ -775,7 +992,7 @@ mod tests {
             B::Add(Box::new(B::NumberInt(1, sp())), Box::new(B::NumberInt(2, sp())), sp());
         let p_add = prog_with(vec![], body_add, vec![]);
         let out_add = apply(&p_add, &json!(null), None).unwrap();
-        assert_eq!(out_add, json!(3.0));
+        assert_eq!(out_add, json!(3));
 
         // "a" + "b" -> "ab"
         let body_cat = B::Add(
@@ -917,6 +1134,7 @@ mod tests {
                 Box::new(B::Var(RV::Local(0), sp())),
                 sp(),
             ),
+            _synthetic: None,
         };
 
         // Call addx(3)
@@ -924,7 +1142,7 @@ mod tests {
         let p = prog_with(lets, body, vec![fun]);
 
         let out = apply(&p, &json!(null), None).unwrap();
-        assert_eq!(out, json!(5.0));
+        assert_eq!(out, json!(5));
     }
 
     #[test]
@@ -980,6 +1198,7 @@ mod tests {
             params: vec![],
             captures: vec![],
             body: self_call,
+            _synthetic: None,
         };
         let body = B::Call { id: fid, args: vec![], span: sp() };
         let p2 = prog_with(vec![], body, vec![fun]);

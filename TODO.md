@@ -134,7 +134,7 @@ unsafe_code = "forbid"
 
 ## 5) Import statements
 
-* [ ] Implement module import system:
+* [x] Implement module import system:
   * `import "module.jslt" as name` — imports module and binds to namespace prefix.
     * This means that if the `module.jslt` does not end with an expression then it should be treated as a namespace.
   * `import "module.jslt" as func` — imports module with final expression as callable function.

@@ -198,3 +198,54 @@ fn namespace_and_callable_in_one_program() {
     let out = prog.apply(&json!({}), None).unwrap();
     assert_eq!(out, json!(40));
 }
+
+
+#[test]
+fn imported_grandchild_function() {
+    // Deep transitive import: main -> a.jslt -> b.jslt -> c.jslt
+    // c.jslt provides a function; b.jslt calls it; a.jslt calls b; main calls a:top
+    let td = TempDir::new().unwrap();
+
+    // c.jslt: base function add3
+    write_file(
+        &td,
+        "c.jslt",
+        r#"
+                def add3(x) $x + 3
+            "#,
+    );
+
+    // b.jslt: imports c and defines a function that uses c:add3
+    write_file(
+        &td,
+        "b.jslt",
+        r#"
+                import "c.jslt" as c
+                def via_c(x) c:add3($x)
+            "#,
+    );
+
+    // a.jslt: imports b and defines top that calls b:via_c
+    write_file(
+        &td,
+        "a.jslt",
+        r#"
+                import "b.jslt" as b
+                def top(x) b:via_c($x)
+            "#,
+    );
+
+    // main imports a and calls a:top(39) expecting 42
+    let main_path = write_file(
+        &td,
+        "main.jslt",
+        r#"
+                import "a.jslt" as a
+                a:top(39)
+            "#,
+    );
+
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    let out = prog.apply(&json!({}), None).unwrap();
+    assert_eq!(out, json!(42));
+}

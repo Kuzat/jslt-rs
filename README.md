@@ -210,14 +210,14 @@ This project is in active development with most core features completed:
 - Conformance test suite with reference implementation comparison
 - WASM bindings with live browser demo deployed to GitHub Pages
 - CI/CD pipeline with automated builds and deployments
+- Module import system design 
+- CLI improvements (pretty printing, eval mode)
 
 🚧 **In Progress:**
-- Module import system design (see `TODO.md`)
-- CLI improvements (pretty printing, eval mode)
 - Error message polish and code frame display
+- Language Server Protocol (LSP) support
 
 📋 **Planned:**
-- Language Server Protocol (LSP) support
 - Node.js, JVM, Python bindings
 - Extension function system
 

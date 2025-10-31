@@ -56,6 +56,7 @@ pub enum Token {
     Or,
     Not,
     Import,
+    As,
 
     Eof,
 }
@@ -186,7 +187,7 @@ impl<'a> Lexer<'a> {
 
     fn is_ident_continue(ch: char) -> bool {
         // We allow ':' in identifiers for namespacing (e.g. fn names)
-        ch == '_' || ch == '-' || ch == ':' || ch.is_ascii_alphanumeric()
+        ch == '_' || ch == '-' || ch.is_ascii_alphanumeric()
     }
 
     fn scan_ident_or_keyword(&mut self) -> (Token, Span) {
@@ -222,6 +223,7 @@ impl<'a> Lexer<'a> {
             "false" => Token::False,
             "null" => Token::Null,
             "import" => Token::Import,
+            "as" => Token::As,
             _ => Token::Ident(s),
         };
         (tok, self.make_span(start))
@@ -910,7 +912,7 @@ mod tests {
         let (t2, _) = lx.next_token().unwrap();
         assert_eq!(t2, Token::String("module.jslt".into()));
         let (t3, _) = lx.next_token().unwrap();
-        assert_eq!(t3, Token::Ident("as".into()));
+        assert_eq!(t3, Token::As);
         let (t4, _) = lx.next_token().unwrap();
         assert_eq!(t4, Token::Ident("ns".into()));
         let (t5, _) = lx.next_token().unwrap();

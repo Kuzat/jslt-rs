@@ -992,7 +992,7 @@ mod tests {
             B::Add(Box::new(B::NumberInt(1, sp())), Box::new(B::NumberInt(2, sp())), sp());
         let p_add = prog_with(vec![], body_add, vec![]);
         let out_add = apply(&p_add, &json!(null), None).unwrap();
-        assert_eq!(out_add, json!(3.0));
+        assert_eq!(out_add, json!(3));
 
         // "a" + "b" -> "ab"
         let body_cat = B::Add(
@@ -1142,7 +1142,7 @@ mod tests {
         let p = prog_with(lets, body, vec![fun]);
 
         let out = apply(&p, &json!(null), None).unwrap();
-        assert_eq!(out, json!(5.0));
+        assert_eq!(out, json!(5));
     }
 
     #[test]

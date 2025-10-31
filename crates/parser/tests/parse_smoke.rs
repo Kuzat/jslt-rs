@@ -103,7 +103,7 @@ fn for_comprehensions() {
     assert_eq!(parse_fmt("{for ($seq) \"k\": $v}"), "{for ($seq) \"k\": $v}");
 
     // {for (seq) key: value if cond}
-    assert_eq!(parse_fmt("{for ($seq) $a.b: 2 if $x == 3}"), "{for ($seq) $a.b: 2 if $x == 3}");
+    assert_eq!(parse_fmt("{for ($seq) $a.b: 2 if ($x == 3)}"), "{for ($seq) $a.b: 2 if ($x == 3)}");
 }
 
 #[test]

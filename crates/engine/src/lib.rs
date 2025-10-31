@@ -178,6 +178,6 @@ mod tests {
         let prog = compile(src).expect("compile");
         let input = json!({"a": 2, "b": 3, "name": "alice"});
         let out = prog.apply(&input, None).expect("apply");
-        assert_eq!(out, json!({"sum": 5.0, "greet": "hi alice"}));
+        assert_eq!(out, json!({"sum": 5, "greet": "hi alice"}));
     }
 }

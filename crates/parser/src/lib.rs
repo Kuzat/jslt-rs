@@ -130,10 +130,8 @@ impl<'a> Parser<'a> {
         };
 
         // expect "as"
-        // we don't have an 'as' token/keyword; reuse ident 'as'
-        // TODO: Should we add a 'as' keyword?
         match &self.cur.tok {
-            Token::Ident(ref s) if s == "as" => {
+            Token::As => {
                 self.bump();
             }
             _ => {
@@ -145,8 +143,16 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // alias must be an identifier
-        let alias_ident = self.expect_ident()?;
+        // create alias ident. It can be multiple ident seprated by colon token. So we need to parse
+        // until no more colon tokens
+        let mut alias_ident = self.expect_ident()?;
+        while self.eat(&Token::Colon) {
+            alias_ident.name.push(':');
+            let ident = self.expect_ident()?;
+            alias_ident.name.push_str(&ident.name);
+            alias_ident.span = Span::join(alias_ident.span, ident.span);
+        }
+
         let end = alias_ident.span;
 
         Ok(Import {
@@ -531,8 +537,16 @@ impl<'a> Parser<'a> {
                 // We still allow bare ident as "function refernce" primary so call can follow.
                 if let Token::Ident(name) = &self.cur.tok {
                     let s = self.cur.span;
-                    let v = name.clone();
+                    let mut v = name.clone();
                     self.bump();
+
+                    // if is namespace call we need to check for colon too
+                    if self.eat(&Token::Colon) {
+                        v.push(':');
+                        let ident = self.expect_ident()?;
+                        v.push_str(&ident.name);
+                    }
+
                     Ok(Expr::FunctionRef { name: v, span: s })
                 } else {
                     Err(ParseError::expected_expr(self.cur.span))

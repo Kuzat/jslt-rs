@@ -1,8 +1,8 @@
+use engine::{compile_with_import_path, CompiledProgram, EngineError};
 use serde_json::json;
 use std::fs;
 use std::io::Write;
 use tempfile::TempDir;
-use engine::{compile_with_import_path, CompiledProgram, EngineError};
 
 // Helper: write a file relative to dir
 fn write_file(dir: &TempDir, rel: &str, content: &str) -> std::path::PathBuf {

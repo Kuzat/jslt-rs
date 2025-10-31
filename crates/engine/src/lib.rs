@@ -1,11 +1,10 @@
 use ast::Program;
 use interp::binder::{BindError, Binder, BoundProgram};
-use interp::{apply, apply_with_modules, bind, EvalConfig, RuntimeError};
+use interp::{apply_with_modules, EvalConfig, RuntimeError};
 use parser::Parser;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::fs::write;
 use std::path::Path;
 use thiserror::Error;
 

@@ -71,11 +71,14 @@ struct Frame {
     active_fun: Option<FunctionId>,
 }
 
+#[derive(Debug, Clone)]
 struct ModuleRuntime {
     top_frame: Frame,
     closures: HashMap<FunctionId, Closure>,
     // Body of the module program (used when the module is imported as a callable)
     body: BoundExpr,
+    // Sub-modules imported by this module (preserves hierarchy)
+    sub_modules: HashMap<String, ModuleRuntime>,
 }
 
 struct Evaluator<'p> {
@@ -172,7 +175,19 @@ impl<'p> Evaluator<'p> {
 
         debug_assert_eq!(self.stack.len(), saved_len);
 
-        Ok(ModuleRuntime { top_frame: module_top, closures, body: child.body.clone() })
+        Ok(ModuleRuntime {
+            top_frame: module_top,
+            closures,
+            body: child.body.clone(),
+            sub_modules: {
+                let mut m = HashMap::new();
+                for (k, (sub_prog, _callable)) in &child.imported_modules {
+                    let sub_rt = self.init_module_runtime(sub_prog)?;
+                    m.insert(k.clone(), sub_rt);
+                }
+                m
+            },
+        })
     }
 
     fn build_closures_for(
@@ -584,7 +599,7 @@ impl<'p> Evaluator<'p> {
                     // synthetic import dispatch
                     if let Some(syn) = &fun_obj._synthetic {
                         return match syn {
-                            SyntheticFun::ImportedLocal { module_key, target_id, name: _ } => {
+                            SyntheticFun::ImportedLocal { module_key, target_id } => {
                                 // Proxy call: redirect to imported module's function by id
                                 self.call_imported_local_function(
                                     module_key,
@@ -593,7 +608,7 @@ impl<'p> Evaluator<'p> {
                                     *span,
                                 )
                             }
-                            SyntheticFun::ImportedCallable { module_key, name: _ } => {
+                            SyntheticFun::ImportedCallable { module_key } => {
                                 // Callable module: arity must be 1; its argument becomes '.'
                                 let do_val = match evaluated_args.first() {
                                     Some(v) => v.clone(),
@@ -735,20 +750,25 @@ impl<'p> Evaluator<'p> {
         evaluated_args: Vec<JsltValue>,
         span: Span,
     ) -> Result<JsltValue, RuntimeError> {
-        // 1) find  module runtime
-        let mr = self.modules.get(module_key).ok_or_else(|| {
-            RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
-        })?;
-
-        // 2) get the target closure
-        let target_clo =
-            mr.closures.get(target_id).ok_or(RuntimeError::UnknownFunction(*target_id))?;
+        // 1) find module runtime and clone needed parts to avoid borrowing issues
+        let (mr_top, mr_closures, mr_submods, target_fun) = {
+            let mr = self.modules.get(module_key).ok_or_else(|| {
+                RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
+            })?;
+            let target = mr
+                .closures
+                .get(target_id)
+                .ok_or(RuntimeError::UnknownFunction(*target_id))?
+                .fun
+                .clone();
+            (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), target)
+        };
 
         // 3) arity check
-        let expected = target_clo.fun.params.len();
+        let expected = target_fun.params.len();
         if evaluated_args.len() != expected {
             return Err(RuntimeError::ArityMismatch {
-                name: target_clo.fun.name.clone(),
+                name: target_fun.name.clone(),
                 expected,
                 got: evaluated_args.len(),
                 span,
@@ -761,20 +781,27 @@ impl<'p> Evaluator<'p> {
             Frame { locals: evaluated_args, this_val: caller_this, active_fun: Some(*target_id) };
 
         // 5) push module top-frame context + the call frame onto stack
-        self.stack.push(mr.top_frame.clone());
+        self.stack.push(mr_top);
         self.stack.push(call_frame);
 
-        // 6) eval body
-        let fun_body = &target_clo.fun.body.clone();
+        // 6) eval body within module context: swap closures and sub-modules
+        let fun_body = &target_fun.body.clone();
+        let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
+        let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
         let result = self.with_call_depth(|me| {
             let v = me.eval_expr(fun_body)?;
             Ok(v)
         });
+        // restore evaluator context
+        self.closures = saved_closures;
+        self.modules = saved_modules;
 
         // 7) pop both frames from stack
         self.stack.pop();
         self.stack.pop();
 
+        // Normalize numeric representation for module calls (prefer integer if integral)
+        // result.map(|v| if let Some(f) = v.as_f64_checked() { JsltValue::number(f) } else { v })
         result
     }
 
@@ -783,23 +810,32 @@ impl<'p> Evaluator<'p> {
         module_key: &str,
         arg: JsltValue,
     ) -> Result<JsltValue, RuntimeError> {
-        // 1) find  module runtime
-        let mr = self.modules.get(module_key).ok_or_else(|| {
-            RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
-        })?;
+        // 1) find module runtime and clone needed parts to avoid borrowing issues
+        let (mut mr_top, mr_closures, mr_submods, fun_body) = {
+            let mr = self.modules.get(module_key).ok_or_else(|| {
+                RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
+            })?;
+            (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), mr.body.clone())
+        };
 
         // Build call
         // Call frame will be top frame of module with caller_this as this_val
-        let call_frame = Frame { this_val: arg, ..mr.top_frame.clone() };
+        mr_top.this_val = arg;
+        let call_frame = mr_top;
 
         // Push module top-frame context + the call frame onto stack
         self.stack.push(call_frame);
 
-        let fun_body = mr.body.clone();
+        // swap into module context for duration of evaluation
+        let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
+        let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
         let result = self.with_call_depth(|me| {
             let v = me.eval_expr(&fun_body)?;
             Ok(v)
         });
+        // restore
+        self.closures = saved_closures;
+        self.modules = saved_modules;
 
         // Pop both frames from stack
         self.stack.pop();
@@ -885,6 +921,7 @@ mod tests {
             lets: lets.into_iter().map(|(n, e)| (n.to_string(), e)).collect(),
             body,
             builtin_count: 0,
+            imported_modules: HashMap::new(),
         }
     }
 

@@ -22,6 +22,8 @@ pub struct BoundProgram {
     pub lets: Vec<(String, BoundExpr)>,
     pub body: BoundExpr,
     pub builtin_count: usize,
+    // Track imported modules for this program: key -> (bound program, callable)
+    pub imported_modules: HashMap<String, (BoundProgram, bool)>,
 }
 
 // Synthetic function kinds for imports
@@ -31,12 +33,10 @@ pub(crate) enum SyntheticFun {
     ImportedLocal {
         module_key: String,
         target_id: FunctionId,
-        name: String,
     },
     // Callable module - call runs imported module's body with arg as '.'
     ImportedCallable {
         module_key: String,
-        name: String,
         // The module's body is a function with a single argument '.'
     },
 }
@@ -202,7 +202,7 @@ pub enum BindError {
     NonFunctionCallee { span: Span },
 }
 
-fn suggest<'a>(name: &str, pool: impl IntoIterator<Item=&'a str>) -> Vec<String> {
+fn suggest<'a>(name: &str, pool: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut scored: Vec<(usize, String)> =
         pool.into_iter().map(|cand| (edit_distance(name, cand), cand.to_string())).collect();
     scored.sort_by_key(|(d, s)| (*d, s.clone()));
@@ -443,19 +443,8 @@ impl Binder {
     // Load/resolve module path into BoundProgram once; detect cycles via external driver (ModuleLoader)
     // Here we expect the driver to call into bind_program for submodules as needed;  for simplicity
     // we provide a public "register_imported_module" used by the driver/compiler
-    pub fn register_imported_module(
-        &mut self,
-        key: &str,
-        bound: BoundProgram,
-        callable: bool,
-    ) {
-        self.modules.insert(
-            key.to_string(),
-            LoadedModule {
-                bound,
-                callable,
-            },
-        );
+    pub fn register_imported_module(&mut self, key: &str, bound: BoundProgram, callable: bool) {
+        self.modules.insert(key.to_string(), LoadedModule { bound, callable });
     }
 
     // Wire import alias:
@@ -479,7 +468,6 @@ impl Binder {
                 body: BoundExpr::Null(Span { start: 0, end: 0, line: 1, column: 1 }),
                 _synthetic: Some(SyntheticFun::ImportedCallable {
                     module_key: module_key.to_string(),
-                    name: alias.to_string(),
                 }),
             };
             self.functions.push(bf);
@@ -488,13 +476,18 @@ impl Binder {
             // namespace -> re-export each function under "alias:name"
             // we reassign fresh ids and map them as synthetic proxies that call imported function ids
             // Collect necessary information before mutating self
-            let functions_to_add: Vec<_> = lm.bound.functions.iter().map(|f| {
-                let qual = format!("{}:{}", alias, f.name);
-                (qual, f.params.clone(), f.id, f.name.clone())
-            }).collect();
+            let functions_to_add: Vec<_> = lm
+                .bound
+                .functions
+                .iter()
+                .map(|f| {
+                    let qual = format!("{}:{}", alias, f.name);
+                    (qual, f.params.clone(), f.id, f.name.clone())
+                })
+                .collect();
 
             // Now we can modify self without borrowing lm
-            for (qual, params, target_id, name) in functions_to_add {
+            for (qual, params, target_id, _name) in functions_to_add {
                 let fid = self.alloc_fun_id();
                 let proxy = BoundFunction {
                     id: fid,
@@ -505,7 +498,6 @@ impl Binder {
                     _synthetic: Some(SyntheticFun::ImportedLocal {
                         module_key: module_key.to_string(),
                         target_id,
-                        name,
                     }),
                 };
                 self.functions.push(proxy);
@@ -578,6 +570,11 @@ impl Binder {
             lets,
             body,
             builtin_count: self.builtin_count,
+            imported_modules: self
+                .modules
+                .iter()
+                .map(|(k, lm)| (k.clone(), (lm.bound.clone(), lm.callable)))
+                .collect(),
         })
     }
 

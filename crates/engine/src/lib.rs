@@ -20,9 +20,23 @@ pub enum EngineError {
     ModuleError(String),
 }
 
+#[derive(Clone)]
+pub struct LoadedModule {
+    pub key: String,
+    pub program: BoundProgram,
+    pub callable: bool,
+    pub imports: Vec<(String, String)>,
+}
+
 pub struct ModuleLoader {
     stack: Vec<String>,
     seen: HashMap<String, BoundProgram>,
+}
+
+impl Default for ModuleLoader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ModuleLoader {
@@ -60,7 +74,7 @@ impl ModuleLoader {
         &mut self,
         base_dir: &Path,
         import_path: &str,
-    ) -> Result<(String, BoundProgram, bool, Vec<(String, String)>), EngineError> {
+    ) -> Result<LoadedModule, EngineError> {
         let key = Self::canonical_key(base_dir, import_path);
 
         if let Some(bp) = self.seen.get(&key) {
@@ -76,7 +90,7 @@ impl ModuleLoader {
             let callable = ast.body.is_some();
             let imports: Vec<(String, String)> =
                 ast.imports.iter().map(|i| (i.alias.clone(), i.path.clone())).collect();
-            return Ok((key, bp.clone(), callable, imports));
+            return Ok(LoadedModule { key, program: bp.clone(), callable, imports });
         }
 
         self.push(&key).map_err(|e| EngineError::ModuleError(format!("{:?}", e)))?;
@@ -92,13 +106,16 @@ impl ModuleLoader {
         let mut child_binder = Binder::new();
         for imp in &ast.imports {
             let child_base = Path::new(&key).parent().unwrap_or(Path::new("."));
-            let (child_key, child_bound, child_callable, grandkids) =
-                self.load_module(child_base, &imp.path)?;
-            child_binder.register_imported_module(&child_key, child_bound, child_callable);
+            let loaded_module = self.load_module(child_base, &imp.path)?;
+            child_binder.register_imported_module(
+                &loaded_module.key,
+                loaded_module.program.clone(),
+                loaded_module.callable,
+            );
             // Wire the alias in the child binder
-            child_binder.wire_import_alias(&imp.alias, &child_key);
+            child_binder.wire_import_alias(&imp.alias, &loaded_module.key);
             // The grandkids are already folded into child_bound; nothing else to do here.
-            let _ = grandkids; // silence warning; kept for clarity.
+            let _ = loaded_module.imports; // silence warning; kept for clarity.
         }
 
         // Bind the child module itself (its imports are in child_binder)
@@ -110,7 +127,7 @@ impl ModuleLoader {
         self.seen.insert(key.clone(), bound.clone());
         self.pop();
 
-        Ok((key, bound, callable, imports))
+        Ok(LoadedModule { key, program: bound, callable, imports })
     }
 }
 
@@ -150,10 +167,17 @@ pub fn compile_with_import_path(
     // Load and register each import (recursive)
     let base_dir = Path::new(main_path).parent().unwrap_or(Path::new("."));
     for imp in &ast.imports {
-        let (key, bound_child, callable, _children) = loader.load_module(base_dir, &imp.path)?;
-        all_children.insert(key.clone(), (bound_child.clone(), callable));
-        binder.register_imported_module(&key, bound_child, callable);
-        binder.wire_import_alias(&imp.alias, &key);
+        let loaded_module = loader.load_module(base_dir, &imp.path)?;
+        all_children.insert(
+            loaded_module.key.clone(),
+            (loaded_module.program.clone(), loaded_module.callable),
+        );
+        binder.register_imported_module(
+            &loaded_module.key,
+            loaded_module.program.clone(),
+            loaded_module.callable,
+        );
+        binder.wire_import_alias(&imp.alias, &loaded_module.key);
     }
 
     // Bind main

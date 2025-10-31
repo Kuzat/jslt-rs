@@ -199,7 +199,6 @@ fn namespace_and_callable_in_one_program() {
     assert_eq!(out, json!(40));
 }
 
-
 #[test]
 fn imported_grandchild_function() {
     // Deep transitive import: main -> a.jslt -> b.jslt -> c.jslt

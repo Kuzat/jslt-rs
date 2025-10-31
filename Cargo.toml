@@ -1,17 +1,17 @@
 [workspace]
 members = [
-  "crates/ast",
-  "crates/lexer", 
-  "crates/parser",
-  "crates/value",
-  "crates/interp",
-  "crates/stdlib",
-  "crates/engine",
-  "crates/cli",
-  "crates/wasm",
-  # optional bindings:
-  # "crates/capi", "crates/node", "crates/python", "crates/wasm", "crates/lsp",
-  # "xtask",
+    "crates/ast",
+    "crates/lexer",
+    "crates/parser",
+    "crates/value",
+    "crates/interp",
+    "crates/stdlib",
+    "crates/engine",
+    "crates/cli",
+    "crates/wasm",
+    # optional bindings:
+    # "crates/capi", "crates/node", "crates/python", "crates/wasm", "crates/lsp",
+    # "xtask",
 ]
 resolver = "2"
 
@@ -24,6 +24,7 @@ sha2 = "0.10.9"
 regex = "1"  # gate under feature at crate level
 chrono = "0.4.42"
 js-sys = "0.3.81"
+clap = { version = "4.5.51", features = ["derive"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

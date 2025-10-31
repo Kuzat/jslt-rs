@@ -21,8 +21,84 @@ cargo test --workspace
 # Build specific crate
 cargo build -p engine
 
+# Build CLI tool
+cargo build -p cli --release
+
 # Run CLI tool
 cargo run -p cli -- <args>
+```
+
+## CLI Usage
+
+The CLI tool allows you to transform JSON data using JSLT programs.
+
+### Basic Usage
+
+```bash
+# Transform JSON using a JSLT program file and JSON input file
+cargo run -p cli -- -p <program.jslt> -i <input.json>
+
+# Use inline expressions with --eval
+cargo run -p cli -- -e '.name' -i <input.json>
+
+# Read input from stdin
+echo '{"name": "alice"}' | cargo run -p cli -- -e '.name'
+
+# Pretty-print output
+cargo run -p cli -- -p <program.jslt> -i <input.json> --pretty
+```
+
+### CLI Options
+
+- `-p, --program <FILE>` - Path to a JSLT program file (use `-` to read from stdin)
+- `-e, --eval <EXPR>` - Inline JSLT expression to evaluate (conflicts with `--program`)
+- `-i, --input <FILE>` - JSON input file (use `-` to read from stdin, or omit to read from stdin)
+- `--pretty` - Pretty-print the output JSON
+
+### Examples with Sample Files
+
+The repository includes example programs and inputs in the `examples/files/` directory:
+
+```
+examples/files/
+├── inputs/
+│   ├── a-b-numbers.json    # {"a": 1, "b": 2}
+│   └── empty.json          # {}
+└── programs/
+    ├── add-a-b.jslt        # {"sum": .a + .b}
+    └── hello.jslt          # {"hello": "world"}
+```
+
+**Example 1: Add two numbers**
+```bash
+cargo run -p cli -- -p examples/files/programs/add-a-b.jslt -i examples/files/inputs/a-b-numbers.json
+# Output: {"sum":3}
+```
+
+**Example 2: Simple hello world transformation**
+```bash
+cargo run -p cli -- -p examples/files/programs/hello.jslt -i examples/files/inputs/empty.json
+# Output: {"hello":"world"}
+```
+
+**Example 3: Using inline expressions**
+```bash
+# Extract a field
+echo '{"name": "alice", "age": 30}' | cargo run -p cli -- -e '.name'
+# Output: "alice"
+
+# Transform with object construction
+echo '{"a": 2, "b": 3}' | cargo run -p cli -- -e '{"sum": .a + .b, "product": .a * .b}'
+# Output: {"sum":5,"product":6}
+```
+
+**Example 4: Pretty-printed output**
+```bash
+cargo run -p cli -- -p examples/files/programs/add-a-b.jslt -i examples/files/inputs/a-b-numbers.json --pretty
+# Output:
+# {
+#   "sum": 3
+# }
 ```
 
 ## Browser/WASM Quickstart

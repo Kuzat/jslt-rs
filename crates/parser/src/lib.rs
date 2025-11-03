@@ -177,9 +177,15 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(Token::RParen, "')' after parameters")?;
+        // Optional let block inside def: zero or more let statements before body expr
+        let mut lets = Vec::new();
+        while self.at(&Token::Let) {
+            let l = self.parse_let_stmt()?;
+            lets.push(l);
+        }
         let body = self.parse_if_or_expr()?;
         let end = body.span();
-        Ok(Def { name, params, body, span: Span::join(start, end) })
+        Ok(Def { name, params, lets, body, span: Span::join(start, end) })
     }
 
     fn parse_let_stmt(&mut self) -> ParseResult<Let> {

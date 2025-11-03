@@ -627,10 +627,10 @@ impl<'p> Evaluator<'p> {
                     }
 
                     // user defined function
-                    let (expected_params, fun_body) = {
+                    let (expected_params, fun_body, fun_lets) = {
                         let clo =
                             self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
-                        (clo.fun.params.len(), clo.fun.body.clone())
+                        (clo.fun.params.len(), clo.fun.body.clone(), clo.fun.lets.clone())
                     };
 
                     if evaluated_args.len() != expected_params {
@@ -647,13 +647,20 @@ impl<'p> Evaluator<'p> {
                     }
                     // New frame: '.' carries through from caller
                     let caller_this = self.current_frame().this_val.clone();
-                    let new_frame = Frame {
-                        locals: evaluated_args,
-                        this_val: caller_this,
-                        active_fun: Some(fun_id),
-                    };
+                    // Allocate locals for params + function-local lets
+                    let mut locals = evaluated_args;
+                    locals.resize(expected_params + fun_lets.len(), JsltValue::null());
+                    let new_frame = Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
                     self.with_call_depth(|me| {
                         me.push_frame(new_frame);
+                        // Evaluate function-local lets in order into their slots
+                        for (i, (_name, expr)) in fun_lets.iter().enumerate() {
+                            let v = me.eval_expr(expr)?;
+                            let idx = expected_params + i;
+                            if let Some(slot) = me.current_frame_mut().locals.get_mut(idx) {
+                                *slot = v;
+                            }
+                        }
                         let result = me.eval_expr(&fun_body)?;
                         me.pop_frame();
                         Ok(result)
@@ -1128,6 +1135,7 @@ mod tests {
             id: fid,
             name: "addx".to_string(),
             params: vec!["y".into()],
+            lets: vec![],
             captures: vec![CaptureSpec { depth: 1, slot: 0 }],
             body: B::Add(
                 Box::new(B::Var(RV::Captured { depth: 1, slot: 0 }, sp())),
@@ -1196,6 +1204,7 @@ mod tests {
             id: fid,
             name: "recur".into(),
             params: vec![],
+            lets: vec![],
             captures: vec![],
             body: self_call,
             _synthetic: None,

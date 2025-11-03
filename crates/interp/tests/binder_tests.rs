@@ -68,6 +68,7 @@ fn function_definition_and_call() {
     let def = Def {
         name: ident("inc"),
         params: vec![ident("x")],
+        lets: vec![],
         body: Expr::Binary {
             op: ast::BinaryOp::Add,
             left: Box::new(var("x")),
@@ -135,6 +136,7 @@ fn closure_captures_outer_let() {
         defs: vec![Def {
             name: ident("g"),
             params: vec![],
+            lets: vec![],
             body: var("x"), // references top-level let
             span: s(),
         }],
@@ -179,7 +181,7 @@ fn param_shadows_outer_let() {
     // let x = 1; def id(x) $x; id(2)
     let program = Program {
         imports: vec![],
-        defs: vec![Def { name: ident("id"), params: vec![ident("x")], body: var("x"), span: s() }],
+        defs: vec![Def { name: ident("id"), params: vec![ident("x")], lets: vec![], body: var("x"), span: s() }],
         lets: vec![Let {
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
@@ -216,7 +218,7 @@ fn unknown_function_yields_error_with_suggestions() {
     // nope()
     let program = Program {
         imports: vec![],
-        defs: vec![Def { name: ident("near"), params: vec![], body: Expr::Null(s()), span: s() }],
+        defs: vec![Def { name: ident("near"), params: vec![], lets: vec![], body: Expr::Null(s()), span: s() }],
         lets: vec![],
         body: Some(call("nope", vec![])),
         span: s(),

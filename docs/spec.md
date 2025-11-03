@@ -67,65 +67,76 @@ JSLT operates on a JSON‑like value lattice:
 The grammar below is **authoritative**. Formatting and examples later clarify intent. Ambiguities are resolved here in favor of unambiguous parsing.
 
 ```ebnf
-program   = ws, { def_expr | let_stmt }, expr, ws, eof ;
+program      = ws, [ stmt_block, nl+ ], expr, ws, eof ;
+stmt_block   = stmt, { nl+, stmt } ;
+stmt         = def_expr | let_stmt ;
 
-def_expr  = "def", ws1, ident, ws, "(", [ params ], ")", ws, def_body, ws ;
-params    = ident, { ws, ",", ws, ident } ;
-def_body  = { let_stmt }, expr ;
+def_expr     = "def", ws1, ident, ws, "(", [ params ], ")", ws, def_body, ws ;
+params       = ident, { ws, ",", ws, ident } ;
 
-let_stmt  = "let", ws1, binding, { ws, ";", ws, binding }, [ ws, ";" ], ws ;
-binding   = ident, ws, "=", ws, expr ;
+# 0+ let statements (each a single binding), then a newline, then the body expr
+def_body     = [ let_block, nl+ ], expr ;
+let_block    = let_stmt, { nl+, let_stmt } ;
 
-expr      = if_expr | or_expr ;
+# SINGLE binding only
+let_stmt     = "let", ws1, ident, ws, "=", ws, expr ;
 
-if_expr   = "if", ws1, "(", expr, ")", ws, expr, ws1, "else", ws1, expr ;
+expr         = if_expr | or_expr ;
 
-or_expr   = and_expr, { ws1, "or", ws1, and_expr } ;
-and_expr  = cmp_expr, { ws1, "and", ws1, cmp_expr } ;
-cmp_expr  = add_expr, { ws, ("==" | "!=" | "<" | "<=" | ">" | ">="), ws, add_expr } ;
-add_expr  = mul_expr, { ws, ("+" | "-"), ws, mul_expr } ;
-mul_expr  = unary,    { ws, ("*" | "/" | "%"), ws, unary } ;
-unary     = [ ("not" | "-"), ws1 ], postfix ;
+if_expr      = "if", ws1, "(", expr, ")", ws, expr, ws1, "else", ws1, expr ;
 
-postfix   = primary, { member | index_or_slice | call } ;
-member    = ws, ".", ws, ( ident | string ) ;
+or_expr      = and_expr, { ws1, "or", ws1, and_expr } ;
+and_expr     = cmp_expr, { ws1, "and", ws1, cmp_expr } ;
+cmp_expr     = add_expr, { ws, ("==" | "!=" | "<" | "<=" | ">" | ">="), ws, add_expr } ;
+add_expr     = mul_expr, { ws, ("+" | "-"), ws, mul_expr } ;
+mul_expr     = unary,    { ws, ("*" | "/" | "%"), ws, unary } ;
+unary        = [ ("not" | "-"), ws1 ], postfix ;
+
+postfix      = primary, { member | index_or_slice | call } ;
+member       = ws, ".", ws, ( ident | string ) ;
 index_or_slice
-          = ws, "[", ws, [ expr ], ws, [ ":", ws, [ expr ] ], ws, "]" ;
-call      = ws, "(", ws, [ args ], ws, ")" ;
-args      = expr, { ws, ",", ws, expr } ;
+             = ws, "[", ws, [ expr ], ws, [ ":", ws, [ expr ] ], ws, "]" ;
+call         = ws, "(", ws, [ args ], ws, ")" ;
+args         = expr, { ws, ",", ws, expr } ;
 
-primary   = literal | variable | this | array | object | "(", ws, expr, ws, ")" ;
-literal   = "null" | "true" | "false" | number | string ;
-this      = "." ;
-variable  = "$", ident ;
+primary      = literal | variable | this | array | object | "(", ws, expr, ws, ")" ;
+literal      = "null" | "true" | "false" | number | string ;
+this         = "." ;
+variable     = "$", ident ;
 
-array     = "[", ws,
-              ( "for", ws, "(", expr, ")", ws, expr, [ ws1, "if", ws1, expr ]
-              | [ expr, { ws, ",", ws, expr } ] ),
-            ws, "]" ;
+array        = "[", ws,
+                 ( "for", ws, "(", expr, ")", ws, expr, [ ws1, "if", ws1, expr ]
+                 | [ expr, { ws, ",", ws, expr } ] ),
+               ws, "]" ;
 
-object    = "{", ws,
-              ( "for", ws, "(", expr, ")", ws, expr, ws, ":", ws, expr, [ ws1, "if", ws1, expr ]
-              | [ object_entry, { ws, ",", ws, object_entry } ] ),
-            ws, "}" ;
+object       = "{", ws,
+                 ( "for", ws, "(", expr, ")", ws, expr, ws, ":", ws, expr, [ ws1, "if", ws1, expr ]
+                 | [ object_entry, { ws, ",", ws, object_entry } ] ),
+               ws, "}" ;
 
 object_entry = ( object_key, ws, ":", ws, expr ) | ( "*", ws, ":", ws, expr ) ;
 object_key   = string | ident ;
 
-ident     = ident_start, { ident_continue } ;
-ident_start    = letter | "_" ;
+ident        = ident_start, { ident_continue } ;
+ident_start  = letter | "_" ;
 ident_continue = letter | "_" | digit | "-" ;
 
-number    = ( "0" | nonzero, { digit } ), [ ".", digit, { digit } ], [ exponent ]
-          | ".", digit, { digit }, [ exponent ] ;
-exponent  = ("e" | "E"), [ "+" | "-" ], digit, { digit } ;
-string    = '"', { string_char }, '"' ;
+number       = ( "0" | nonzero, { digit } ), [ ".", digit, { digit } ], [ exponent ]
+             | ".", digit, { digit }, [ exponent ] ;
+exponent     = ("e" | "E"), [ "+" | "-" ], digit, { digit } ;
+string       = '"', { string_char }, '"' ;
 
-ws        = { whitespace | comment } ;
-ws1       = whitespace, ws ;
-whitespace = " " | "\t" | "\r" | "\n" ;
-comment   = "//", { not_newline }, ( "\n" | eof ) ;
-eof       = /* end of input */ ;
+# --- Whitespace & newlines ---
+space       = " " | "\t" | "\r" ;
+ws          = { space } ;
+ws1         = space, ws ;
+
+eol_comment = "//", { not_newline }, "\n" ;
+linebreak   = "\n" | eol_comment ;
+nl          = ws, linebreak, ws ;
+nl+         = nl, { nl } ;
+
+eof         = /* end of input */ ;
 ```
 
 **Notes**

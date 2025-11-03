@@ -1,0 +1,7 @@
+{
+  "name": "201_lets_in_defs",
+  "description": "Test that lets in defs are allowed",
+  "program": "def add(a,b)\n  let x = $a + $b\n  $x\n\nadd(1,1)\n",
+  "input": {},
+  "expected": 2
+}

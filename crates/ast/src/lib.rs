@@ -65,6 +65,7 @@ pub struct Import {
 pub struct Def {
     pub name: Ident,
     pub params: Vec<Ident>,
+    pub lets: Vec<Let>,
     pub body: Expr,
     pub span: Span,
 }
@@ -299,6 +300,11 @@ impl fmt::Display for Def {
             write!(f, "{p}")?;
         }
         write!(f, ") ")?;
+        if !self.lets.is_empty() {
+            for l in &self.lets {
+                writeln!(f, "{l}")?;
+            }
+        }
         write!(f, "{}", self.body)
     }
 }
@@ -797,6 +803,7 @@ mod tests {
         let def = Def {
             name: id("f"),
             params: vec![id("x"), id("y")],
+            lets: vec![],
             body: bin(BinaryOp::Add, var("x"), var("y")),
             span: sp(),
         };

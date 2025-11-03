@@ -47,6 +47,8 @@ pub struct BoundFunction {
     pub id: FunctionId,
     pub name: String,
     pub params: Vec<String>,
+    // function-local lets: evaluated at call time after args are in place
+    pub lets: Vec<(String, BoundExpr)>,
     // Captures in deterministic order the evaluator can materialize (e.g., Vec<ResolvedVarPlan>)
     // We store a stable list of (from_depth, slot) pairs in the order of first encounter.
     // e.g., for "let y = 10; def f(x) $x + $y; f(1)" we will have captures [(1,0)] for 'y' and [(0,0)] for 'x'"
@@ -463,6 +465,7 @@ impl Binder {
                 id: fid,
                 name: alias.to_string(),
                 params: vec!["dot".to_string()], // arity 1 by convention
+                lets: vec![],
                 captures: vec![],
                 // body unused for synthetic
                 body: BoundExpr::Null(Span { start: 0, end: 0, line: 1, column: 1 }),
@@ -493,6 +496,7 @@ impl Binder {
                     id: fid,
                     name: qual.clone(),
                     params,
+                    lets: vec![],
                     captures: vec![],
                     body: BoundExpr::Null(Span::zero()),
                     _synthetic: Some(SyntheticFun::ImportedLocal {
@@ -532,9 +536,25 @@ impl Binder {
             // New var scope for function params; track captures into outer frames
             self.env.begin_fun(fid);
             self.env.push_vars();
+            // define parameters first
             for param in &d.params {
                 self.env.define_var(&param.name);
             }
+            // predeclare let names in order so their slots follow params
+            for l in &d.lets {
+                for b in &l.bindings {
+                    self.env.define_var(&b.name.name);
+                }
+            }
+            // bind let values in order
+            let mut def_lets = Vec::new();
+            for l in &d.lets {
+                for b in &l.bindings {
+                    let val = self.bind_expr(&b.value)?;
+                    def_lets.push((b.name.name.clone(), val));
+                }
+            }
+            // bind body
             let body = self.bind_expr(&d.body)?;
             let captures = self.env.end_fun(fid);
             self.env.pop_vars();
@@ -543,6 +563,7 @@ impl Binder {
                 id: fid,
                 name: d.name.name.clone(),
                 params: d.params.iter().map(|p| p.name.clone()).collect(),
+                lets: def_lets,
                 captures,
                 body,
                 _synthetic: None,

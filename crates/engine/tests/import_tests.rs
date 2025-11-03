@@ -278,3 +278,84 @@ fn imported_function_with_lets_in_def() {
     let out = prog.apply(&json!({}), None).unwrap();
     assert_eq!(out, json!(49));
 }
+
+#[test]
+fn import_callable_module_with_let_in_def() {
+    let td = TempDir::new().unwrap();
+
+    // a.jslt: defines `add` with a let statement in the def, then calls it so it will be a callable module
+    write_file(
+        &td,
+        "a.jslt",
+        r#"
+                def add(x)
+                    let y = 10
+                    $x + $y
+                add(.)
+            "#,
+    );
+
+    // main.jslt import a and calls it as callable module a(10)
+    let main_path = write_file(
+        &td,
+        "main.jslt",
+        r#"
+                import "a.jslt" as a
+                a(10)
+            "#,
+    );
+
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    let out = prog.apply(&json!({}), None).unwrap();
+    assert_eq!(out, json!(20));
+}
+
+#[test]
+fn import_grandchild_function_with_let_in_def() {
+    let td = TempDir::new().unwrap();
+
+    // c.jslt: base function add3
+    write_file(
+        &td,
+        "c.jslt",
+        r#"
+                def add3(x)
+                    let y = 3
+                    $x + $y
+            "#,
+    );
+
+    // b.jslt: imports c and defines a function that uses c:add3
+    write_file(
+        &td,
+        "b.jslt",
+        r#"
+                import "c.jslt" as c
+                def via_c(x) c:add3($x)
+            "#,
+    );
+
+    // a.jslt: imports b and defines top that calls b:via_c
+    write_file(
+        &td,
+        "a.jslt",
+        r#"
+                import "b.jslt" as b
+                def top(x) b:via_c($x)
+            "#,
+    );
+
+    // main imports a and calls a:top(39) expecting 42
+    let main_path = write_file(
+        &td,
+        "main.jslt",
+        r#"
+                import "a.jslt" as a
+                a:top(39)
+            "#,
+    );
+
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    let out = prog.apply(&json!({}), None).unwrap();
+    assert_eq!(out, json!(42));
+}

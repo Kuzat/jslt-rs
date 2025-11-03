@@ -67,20 +67,33 @@ JSLT operates on a JSON‑like value lattice:
 The grammar below is **authoritative**. Formatting and examples later clarify intent. Ambiguities are resolved here in favor of unambiguous parsing.
 
 ```ebnf
-program      = ws, [ stmt_block, nl+ ], expr, ws, eof ;
+# ---------- Top level ----------
+file         = ws,
+               [ import_block, nl+ ],
+               [ stmt_block ],
+               [ nl+, expr ],
+               ws, eof ;
+# - If expr is present ⇒ "program" (runnable).
+# - If expr is absent  ⇒ "module" (namespace-only).
+
+import_block = import_stmt, { nl+, import_stmt } ;
+import_stmt  = "import", ws1, string, ws1, "as", ws1, ident ;
+
 stmt_block   = stmt, { nl+, stmt } ;
 stmt         = def_expr | let_stmt ;
 
+# ---------- Definitions & lets ----------
 def_expr     = "def", ws1, ident, ws, "(", [ params ], ")", ws, def_body, ws ;
 params       = ident, { ws, ",", ws, ident } ;
 
-# 0+ let statements (each a single binding), then a newline, then the body expr
+# 0+ let statements (single-binding each), then a newline, then the body expr
 def_body     = [ let_block, nl+ ], expr ;
 let_block    = let_stmt, { nl+, let_stmt } ;
 
 # SINGLE binding only
 let_stmt     = "let", ws1, ident, ws, "=", ws, expr ;
 
+# ---------- Expressions ----------
 expr         = if_expr | or_expr ;
 
 if_expr      = "if", ws1, "(", expr, ")", ws, expr, ws1, "else", ws1, expr ;
@@ -99,7 +112,22 @@ index_or_slice
 call         = ws, "(", ws, [ args ], ws, ")" ;
 args         = expr, { ws, ",", ws, expr } ;
 
-primary      = literal | variable | this | array | object | "(", ws, expr, ws, ")" ;
+# Allow:
+# - named calls:         add(1,1)
+# - namespace functions: ns:add(1,1)
+# - module-as-function:  ns("test")
+primary      = literal
+             | variable
+             | this
+             | name_ref
+             | ns_qualified
+             | array
+             | object
+             | "(", ws, expr, ws, ")" ;
+
+name_ref     = ident ;
+ns_qualified = ident, ws, ":", ws, ident ;
+
 literal      = "null" | "true" | "false" | number | string ;
 this         = "." ;
 variable     = "$", ident ;
@@ -126,7 +154,7 @@ number       = ( "0" | nonzero, { digit } ), [ ".", digit, { digit } ], [ expone
 exponent     = ("e" | "E"), [ "+" | "-" ], digit, { digit } ;
 string       = '"', { string_char }, '"' ;
 
-# --- Whitespace & newlines ---
+# ---------- Whitespace & newlines ----------
 space       = " " | "\t" | "\r" ;
 ws          = { space } ;
 ws1         = space, ws ;

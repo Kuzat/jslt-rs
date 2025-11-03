@@ -248,3 +248,33 @@ fn imported_grandchild_function() {
     let out = prog.apply(&json!({}), None).unwrap();
     assert_eq!(out, json!(42));
 }
+
+#[test]
+fn imported_function_with_lets_in_def() {
+    let td = TempDir::new().unwrap();
+
+    // a.jslt: defines `add` with a let statement in the def
+    write_file(
+        &td,
+        "a.jslt",
+        r#"
+                def add(x)
+                    let y = 10
+                    $x + $y
+            "#,
+    );
+
+    // main imports a and calls a:add(39) expecting 49
+    let main_path = write_file(
+        &td,
+        "main.jslt",
+        r#"
+                import "a.jslt" as a
+                a:add(39)
+            "#,
+    );
+
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    let out = prog.apply(&json!({}), None).unwrap();
+    assert_eq!(out, json!(49));
+}

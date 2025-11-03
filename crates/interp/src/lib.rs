@@ -754,7 +754,7 @@ impl<'p> Evaluator<'p> {
         &mut self,
         module_key: &str,
         target_id: &FunctionId,
-        evaluated_args: Vec<JsltValue>,
+        mut evaluated_args: Vec<JsltValue>,
         span: Span,
     ) -> Result<JsltValue, RuntimeError> {
         // 1) find module runtime and clone needed parts to avoid borrowing issues
@@ -772,31 +772,45 @@ impl<'p> Evaluator<'p> {
         };
 
         // 3) arity check
-        let expected = target_fun.params.len();
-        if evaluated_args.len() != expected {
+        let expected_params = target_fun.params.len();
+        if evaluated_args.len() != expected_params {
             return Err(RuntimeError::ArityMismatch {
                 name: target_fun.name.clone(),
-                expected,
+                expected: expected_params,
                 got: evaluated_args.len(),
                 span,
             });
         }
 
-        // 4) build call frame
+        // 4) build call frame with space for params + function-local lets
         let caller_this = self.current_frame().this_val.clone();
-        let call_frame =
-            Frame { locals: evaluated_args, this_val: caller_this, active_fun: Some(*target_id) };
+        let fun_lets_len = target_fun.lets.len();
+        evaluated_args.resize(expected_params + fun_lets_len, JsltValue::null());
+        let call_frame = Frame {
+            locals: evaluated_args,
+            this_val: caller_this,
+            active_fun: Some(*target_id),
+        };
 
         // 5) push module top-frame context + the call frame onto stack
         self.stack.push(mr_top);
         self.stack.push(call_frame);
 
         // 6) eval body within module context: swap closures and sub-modules
-        let fun_body = &target_fun.body.clone();
+        let fun_body = target_fun.body.clone();
+        let fun_lets = target_fun.lets.clone();
         let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
         let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
         let result = self.with_call_depth(|me| {
-            let v = me.eval_expr(fun_body)?;
+            // Evaluate function-local lets into their slots before running the body
+            for (i, (_name, expr)) in fun_lets.iter().enumerate() {
+                let v = me.eval_expr(expr)?;
+                let idx = expected_params + i;
+                if let Some(slot) = me.current_frame_mut().locals.get_mut(idx) {
+                    *slot = v;
+                }
+            }
+            let v = me.eval_expr(&fun_body)?;
             Ok(v)
         });
         // restore evaluator context
@@ -807,8 +821,6 @@ impl<'p> Evaluator<'p> {
         self.stack.pop();
         self.stack.pop();
 
-        // Normalize numeric representation for module calls (prefer integer if integral)
-        // result.map(|v| if let Some(f) = v.as_f64_checked() { JsltValue::number(f) } else { v })
         result
     }
 

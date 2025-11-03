@@ -69,7 +69,10 @@ The grammar below is **authoritative**. Formatting and examples later clarify in
 ```ebnf
 program   = ws, { def_expr | let_stmt }, expr, ws, eof ;
 
-def_expr  = "def", ws1, ident, ws, "(", [ ident, { ws, ",", ws, ident } ], ")", ws, expr, ws ;
+def_expr  = "def", ws1, ident, ws, "(", [ params ], ")", ws, def_body, ws ;
+params    = ident, { ws, ",", ws, ident } ;
+def_body  = { let_stmt }, expr ;
+
 let_stmt  = "let", ws1, binding, { ws, ";", ws, binding }, [ ws, ";" ], ws ;
 binding   = ident, ws, "=", ws, expr ;
 

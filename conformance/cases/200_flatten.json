@@ -1,0 +1,13 @@
+{
+  "name": "200_flatten",
+  "description": "Test that flatten nested objects into flat objects",
+  "program": "// JSLT transform which flattens nested objects into flat objects\n//   {\"a\" : {\"b\" : 1}} => {\"a_b\" : 1}\n\ndef flatten-object(obj)\n  let flat = {for ($obj) .key : .value if (not(is-object(.value)))}\n\n  let nested = [for ($obj)\n     let outerkey = (.key)\n       [for (flatten-object(array(.value))) {\n         \"key\" : $outerkey + \"_\" + .key,\n         \"value\" : if (is-object(.value)) flatten-object(.value) else .value\n       }]\n     if (is-object(.value))]\n\n  let flattened = (flatten($nested))\n\n  $flat + {for ($flattened) .key : .value}\n\nflatten-object(.)\n",
+  "input": {
+    "a": {
+      "b": 1
+    }
+  },
+  "expected": {
+    "a_b": 1
+  }
+}

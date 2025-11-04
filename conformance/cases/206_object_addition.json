@@ -1,0 +1,10 @@
+{
+  "name": "206_object_addition",
+  "description": "Test that we are able to add two objects together",
+  "program": "{\"a\": 1} + {\"b\": 2, \"a\": 2}",
+  "input": {},
+  "expected": {
+    "b": 2,
+    "a": 1
+  }
+}

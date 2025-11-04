@@ -745,8 +745,14 @@ impl<'p> Evaluator<'p> {
                 s.push_str(b);
                 Ok(JsltValue::from_json(Value::String(s)))
             }
+            (Value::Object(a), Value::Object(b)) => {
+                // Object addition: merge with left operand winning on key conflicts
+                let mut merged = b.clone();
+                merged.extend(a.clone());
+                Ok(JsltValue::from_json(Value::Object(merged)))
+            }
             _ => Err(RuntimeError::TypeError {
-                msg: "addition expects number+number, string+string, or string+number".into(),
+                msg: "addition expects number+number, string+string, string+number, or object+object".into(),
                 span,
             }),
         }

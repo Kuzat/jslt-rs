@@ -211,9 +211,9 @@ impl<'a> Parser<'a> {
             self.expect(Token::LParen, "'(' after if")?;
             let cond = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after if condition")?;
-            let then_expr = self.parse_if_or_expr()?;
+            let then_expr = self.parse_lets_then_expr()?;
             self.expect(Token::Else, "'else'")?;
-            let else_expr = self.parse_if_or_expr()?;
+            let else_expr = self.parse_lets_then_expr()?;
             let span = Span::join(start, else_expr.span());
             Ok(Expr::If {
                 cond: Box::new(cond),
@@ -223,6 +223,23 @@ impl<'a> Parser<'a> {
             })
         } else {
             self.parse_or_expr()
+        }
+    }
+
+    // Parse zero or more leading let-statements followed by an expression. If no lets,
+    // returns the expression directly; otherwise returns a LetBlock.
+    fn parse_lets_then_expr(&mut self) -> ParseResult<Expr> {
+        let mut lets = Vec::new();
+        while self.at(&Token::Let) {
+            let l = self.parse_let_stmt()?;
+            lets.push(l);
+        }
+        let body = self.parse_or_expr()?;
+        if lets.is_empty() {
+            Ok(body)
+        } else {
+            let span = Span::join(lets.first().unwrap().span, body.span());
+            Ok(Expr::LetBlock { lets, body: Box::new(body), span })
         }
     }
 
@@ -409,6 +426,14 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Token::LBracket => {
+                    // If the current expr is a complete literal (array/object),
+                    // do NOT treat the following '[' as an index/slice; it's the next expression.
+                    match expr {
+                        Expr::ArrayLiteral { .. } | Expr::ObjectLiteral { .. } => {
+                            break;
+                        }
+                        _ => {}
+                    }
                     // index_or_slice: '[' [expr] [':' [expr] ']'
                     let start = self.cur.span;
                     self.bump(); // '['
@@ -571,7 +596,7 @@ impl<'a> Parser<'a> {
             self.expect(Token::LParen, "'(' after for")?;
             let seq = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after sequence")?;
-            let body = self.parse_if_or_expr()?;
+            let body = self.parse_lets_then_expr()?;
             let filter = if self.at(&Token::If) {
                 self.bump(); // 'if'
                 Some(Box::new(self.parse_if_or_expr()?))
@@ -604,9 +629,27 @@ impl<'a> Parser<'a> {
             self.expect(Token::LParen, "'(' after 'for'")?;
             let seq = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after sequence")?;
-            let key = self.parse_if_or_expr()?;
-            self.expect(Token::Colon, "':' after object comp key")?;
-            let value = self.parse_if_or_expr()?;
+            // zero or more lets usable in both key and value
+            let mut shared_lets = Vec::new();
+            while self.at(&Token::Let) {
+                let l = self.parse_let_stmt()?;
+                shared_lets.push(l);
+            }
+            let key_inner = self.parse_if_or_expr()?;
+            let key = if shared_lets.is_empty() {
+                key_inner
+            } else {
+                let span = Span::join(shared_lets.first().unwrap().span, key_inner.span());
+                Expr::LetBlock { lets: shared_lets.clone(), body: Box::new(key_inner), span }
+            };
+            self.expect(Token::Colon, ":' after object comp key")?;
+            let value_inner = self.parse_if_or_expr()?;
+            let value = if shared_lets.is_empty() {
+                value_inner
+            } else {
+                let span = Span::join(shared_lets.first().unwrap().span, value_inner.span());
+                Expr::LetBlock { lets: shared_lets, body: Box::new(value_inner), span }
+            };
             let filter = if self.at(&Token::If) {
                 self.bump(); // 'if'
                 Some(Box::new(self.parse_if_or_expr()?))
@@ -623,6 +666,13 @@ impl<'a> Parser<'a> {
                 span,
             })
         } else {
+            // Optional let-block inside object literal before entries
+            let mut leading_lets = Vec::new();
+            while self.at(&Token::Let) {
+                let l = self.parse_let_stmt()?;
+                leading_lets.push(l);
+            }
+
             let mut entries = Vec::new();
             if !self.at(&Token::RBrace) {
                 loop {
@@ -674,7 +724,14 @@ impl<'a> Parser<'a> {
             }
             let end_span = self.expect(Token::RBrace, "'}' to close object")?;
             let span = Span::join(start, end_span);
-            Ok(Expr::ObjectLiteral { entries, span })
+            let obj = Expr::ObjectLiteral { entries, span };
+            if leading_lets.is_empty() {
+                Ok(obj)
+            } else {
+                let lspan = leading_lets.first().unwrap().span;
+                let span2 = Span::join(lspan, obj.span());
+                Ok(Expr::LetBlock { lets: leading_lets, body: Box::new(obj), span: span2 })
+            }
         }
     }
 

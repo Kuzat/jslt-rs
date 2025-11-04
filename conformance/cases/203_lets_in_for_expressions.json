@@ -1,0 +1,11 @@
+{
+  "name": "203_lets_in_for_expressions",
+  "description": "Test that lets in for expressions are allowed",
+  "program": "let x = [1, 2, 3]\n[for ($x)\n  let s = string(.)\n  $s]",
+  "input": {},
+  "expected": [
+    "1",
+    "2",
+    "3"
+  ]
+}

@@ -76,6 +76,9 @@ pub enum BoundExpr {
     NumberInt(i64, Span),
     String(String, Span),
 
+    // Let block within expressions: (slot, bound-expr) pairs in order
+    LetBlock(Vec<(usize, BoundExpr)>, Box<BoundExpr>, Span),
+
     // Context '.'
     This(Span),
 
@@ -158,6 +161,7 @@ impl BoundExpr {
             NumberFloat(_, s) => *s,
             NumberInt(_, s) => *s,
             String(_, s) => *s,
+            LetBlock(_, _, s) => *s,
             This(s) => *s,
             Var(_, s) => *s,
             Call { span, .. } => *span,
@@ -262,6 +266,19 @@ impl VarFrame {
     }
     fn lookup(&self, name: &str) -> Option<usize> {
         self.slots.get(name).copied()
+    }
+    fn len(&self) -> usize {
+        self.order.len()
+    }
+    fn truncate(&mut self, len: usize) {
+        if len >= self.order.len() {
+            return;
+        }
+        // Remove slots beyond len
+        for name in self.order[len..].iter() {
+            self.slots.remove(name);
+        }
+        self.order.truncate(len);
     }
 }
 
@@ -635,6 +652,36 @@ impl Binder {
                 }
             }
             Expr::String { value, span } => Ok(BoundExpr::String(value.clone(), *span)),
+            Expr::LetBlock { lets, body, span } => {
+                // Snapshot current frame length to restore after binding
+                let base_len = self.env.var_stack.last().map(|f| f.len()).unwrap_or(0);
+                // Predeclare all names and record slots
+                let mut slots: Vec<usize> = Vec::new();
+                for l in lets {
+                    for b in &l.bindings {
+                        let slot = self.env.define_var(&b.name.name);
+                        slots.push(slot);
+                    }
+                }
+                // Bind let values in order, pairing with their slots
+                let mut blets: Vec<(usize, BoundExpr)> = Vec::new();
+                let mut i = 0usize;
+                for l in lets {
+                    for b in &l.bindings {
+                        let val = self.bind_expr(&b.value)?;
+                        let slot = slots[i];
+                        i += 1;
+                        blets.push((slot, val));
+                    }
+                }
+                // Bind body with lets visible
+                let bbody = Box::new(self.bind_expr(body)?);
+                // Truncate frame to base_len to avoid leakage
+                if let Some(frame) = self.env.var_stack.last_mut() {
+                    frame.truncate(base_len);
+                }
+                Ok(BoundExpr::LetBlock(blets, bbody, *span))
+            },
             Expr::This(span) => Ok(BoundExpr::This(*span)),
 
             Expr::Variable { name } => {

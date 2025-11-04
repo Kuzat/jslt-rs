@@ -1,0 +1,7 @@
+{
+  "name": "205_lets_in_if_else_stmts",
+  "description": "Test that lets in if else statements are allowed",
+  "program": "let y = 100 let x = 1\nif ($x == 1) \n  let y = 2\n  $y\n else \n  let y = 3\n  $y\n",
+  "input": {},
+  "expected": 2
+}

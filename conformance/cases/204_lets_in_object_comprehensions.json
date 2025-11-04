@@ -1,0 +1,10 @@
+{
+  "name": "204_lets_in_object_comprehensions",
+  "description": "Test that lets in object comprehensions are allowed",
+  "program": "let x = {\"foo\": 1, \"bar\": 2}\n{for ($x)\n  let s = string(.value)\n  \"custom_\" + $s: .key}",
+  "input": {},
+  "expected": {
+    "custom_1": "foo",
+    "custom_2": "bar"
+  }
+}

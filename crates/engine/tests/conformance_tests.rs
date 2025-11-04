@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::env;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TestCase {
@@ -42,6 +43,33 @@ fn get_java_jslt_script() -> PathBuf {
 
 fn load_test_cases() -> Result<Vec<TestCase>, Box<dyn std::error::Error>> {
     let cases_dir = get_conformance_cases_dir();
+
+    // If an explicit file is provided via env var, load only that test file
+    if let Ok(file_spec) = env::var("CONFORMANCE_TEST_FILE") {
+        let mut candidate_paths: Vec<PathBuf> = Vec::new();
+        let p = PathBuf::from(&file_spec);
+        if p.is_absolute() {
+            candidate_paths.push(p);
+        } else {
+            // try relative to current dir first, then within conformance/cases
+            candidate_paths.push(p.clone());
+            candidate_paths.push(cases_dir.join(&p));
+            // if only a bare filename was provided, also try within cases
+            if p.extension().is_none() {
+                candidate_paths.push(cases_dir.join(format!("{}.json", p.display())));
+            }
+        }
+
+        let existing = candidate_paths.into_iter().find(|x| x.exists())
+            .ok_or_else(|| format!("Specified CONFORMANCE_TEST_FILE not found: {}", file_spec))?;
+
+        let content = fs::read_to_string(&existing)?;
+        let test_case: TestCase = serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {}: {}", existing.display(), e))?;
+        return Ok(vec![test_case]);
+    }
+
+    // Otherwise, load all test files from the directory
     let mut test_cases = Vec::new();
 
     for entry in fs::read_dir(&cases_dir)? {

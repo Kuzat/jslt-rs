@@ -187,6 +187,13 @@ pub enum Expr {
         span: Span,
     },
 
+    // Let block: zero or more lets followed by an expression, scoped to the body
+    LetBlock {
+        lets: Vec<Let>,
+        body: Box<Expr>,
+        span: Span,
+    },
+
     // Parenthesized
     Group {
         expr: Box<Expr>,
@@ -197,7 +204,7 @@ pub enum Expr {
     FunctionRef {
         name: String,
         span: Span,
-    },
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +271,7 @@ impl Expr {
             ArrayFor { span, .. } => *span,
             ObjectLiteral { span, .. } => *span,
             ObjectFor { span, .. } => *span,
+            LetBlock { span, .. } => *span,
             Group { span, .. } => *span,
             FunctionRef { span, .. } => *span,
         }
@@ -395,6 +403,19 @@ impl<'a, 'b> Pretty<'a, 'b> {
                     write!(self.f, ")")?;
                 }
                 Ok(())
+            }
+
+            LetBlock { lets, body, .. } => {
+                for l in lets {
+                    write!(self.f, "let ")?;
+                    for (i, b) in l.bindings.iter().enumerate() {
+                        if i > 0 { write!(self.f, "; ")?; }
+                        write!(self.f, "{} = ", b.name.name)?;
+                        self.expr(&b.value, Prec::Lowest)?;
+                    }
+                    write!(self.f, " ")?;
+                }
+                self.expr(body, Prec::Lowest)
             }
 
             Unary { op, expr, .. } => {

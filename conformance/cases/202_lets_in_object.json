@@ -1,0 +1,9 @@
+{
+  "name": "202_lets_in_object",
+  "description": "Test that lets in objects are allowed",
+  "program": "{ let x = 1\n \"test\": $x }",
+  "input": {},
+  "expected": {
+    "test": 1
+  }
+}

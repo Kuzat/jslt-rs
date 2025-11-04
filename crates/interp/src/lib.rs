@@ -285,6 +285,36 @@ impl<'p> Evaluator<'p> {
             }
             NumberInt(n, _) => Ok(JsltValue::number_i64(*n)),
             String(s, _) => Ok(JsltValue::from_json(Value::String(s.clone()))),
+            LetBlock(bindings, body, _) => {
+                // Create a temporary frame cloning current locals to support shadowing and new lets
+                let cur = self.current_frame().clone();
+                let mut temp = Frame {
+                    locals: cur.locals.clone(),
+                    this_val: cur.this_val.clone(),
+                    active_fun: cur.active_fun,
+                };
+                // Ensure capacity for highest slot
+                let mut max_slot = temp.locals.len().saturating_sub(1);
+                for (slot, _expr) in bindings.iter() {
+                    if *slot > max_slot { max_slot = *slot; }
+                }
+                if temp.locals.len() <= max_slot { temp.locals.resize(max_slot + 1, JsltValue::null()); }
+                // Push temp frame
+                self.push_frame(temp);
+                // Evaluate lets in order, assigning to their slots
+                for (slot, expr) in bindings.iter() {
+                    let v = self.eval_expr(expr)?;
+                    if *slot >= self.current_frame().locals.len() {
+                        self.current_frame_mut().locals.resize(*slot + 1, JsltValue::null());
+                    }
+                    self.current_frame_mut().locals[*slot] = v;
+                }
+                // Evaluate body in this extended scope
+                let result = self.eval_expr(body)?;
+                // Pop temp frame
+                self.pop_frame();
+                Ok(result)
+            }
             This(_) => Ok(self.current_frame().this_val.clone()),
 
             Var(ResolvedVar::This, _) => Ok(self.current_frame().this_val.clone()),
@@ -463,6 +493,10 @@ impl<'p> Evaluator<'p> {
                 let seq_val = self.eval_expr(seq)?;
                 let arr: Vec<Value> = match seq_val.as_json() {
                     Value::Array(a) => a.clone(),
+                    Value::Object(m) => m
+                        .iter()
+                        .map(|(k, v)| json!({ "key": k, "value": v }))
+                        .collect(),
                     _ => Vec::new(),
                 };
                 let mut out = Vec::with_capacity(arr.len());
@@ -487,6 +521,10 @@ impl<'p> Evaluator<'p> {
                 let seq_val = self.eval_expr(seq)?;
                 let arr: Vec<Value> = match seq_val.as_json() {
                     Value::Array(a) => a.clone(),
+                    Value::Object(m) => m
+                        .iter()
+                        .map(|(k, v)| json!({ "key": k, "value": v }))
+                        .collect(),
                     _ => Vec::new(),
                 };
                 let mut out = Map::new();

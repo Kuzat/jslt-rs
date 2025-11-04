@@ -426,10 +426,12 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Token::LBracket => {
-                    // If the current expr is a complete literal (array/object),
+                    // If the current expr is a complete literal (array/object), or following Group expr,
                     // do NOT treat the following '[' as an index/slice; it's the next expression.
                     match expr {
-                        Expr::ArrayLiteral { .. } | Expr::ObjectLiteral { .. } => {
+                        Expr::ArrayLiteral { .. }
+                        | Expr::ObjectLiteral { .. }
+                        | Expr::Group { .. } => {
                             break;
                         }
                         _ => {}
@@ -790,5 +792,30 @@ fn next_token(lx: &mut Lexer<'_>) -> Result<Tok, ParseError> {
     match lx.next_token() {
         Ok((t, s)) => Ok(Tok { tok: t, span: s }),
         Err(le) => Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_nested_let_statement_succeeds() {
+        let input = r#"
+let nested = [for ($obj)
+     let outerkey = (.key)
+     [for ($x) $outerkey]
+       // [for (flatten-object(array(.value))) {
+       //   "key" : $outerkey + "_" + .key,
+       //   "value" : if (is-object(.value)) flatten-object(.value) else .value
+       // }]
+     if (is-object(.value))]
+"#;
+        let mut parser = Parser::new(input).expect("lexer should initialize");
+        let res = parser.parse_program();
+        if let Err(e) = &res {
+            eprintln!("Parse error: {:?}", e);
+        }
+        assert!(res.is_ok(), "expected parsing to succeed");
     }
 }

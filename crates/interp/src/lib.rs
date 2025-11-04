@@ -731,8 +731,22 @@ impl<'p> Evaluator<'p> {
                 s.push_str(b);
                 Ok(JsltValue::from_json(Value::String(s)))
             }
+            (Value::String(a), Value::Number(b)) => {
+                let bs = b.to_string();
+                let mut s = String::with_capacity(a.len() + bs.len());
+                s.push_str(a);
+                s.push_str(&bs);
+                Ok(JsltValue::from_json(Value::String(s)))
+            }
+            (Value::Number(a), Value::String(b)) => {
+                let as_ = a.to_string();
+                let mut s = String::with_capacity(as_.len() + b.len());
+                s.push_str(&as_);
+                s.push_str(b);
+                Ok(JsltValue::from_json(Value::String(s)))
+            }
             _ => Err(RuntimeError::TypeError {
-                msg: "addition expects number+number or string+string".into(),
+                msg: "addition expects number+number, string+string, or string+number".into(),
                 span,
             }),
         }
@@ -1061,15 +1075,19 @@ mod tests {
         let out_cat = apply(&p_cat, &json!(null), None).unwrap();
         assert_eq!(out_cat, json!("ab"));
 
-        // "a" + 1 -> type error
-        let body_bad =
+        // "a" + 1 -> "a1"
+        let body_mix =
             B::Add(Box::new(B::String("a".into(), sp())), Box::new(B::NumberInt(1, sp())), sp());
-        let p_bad = prog_with(vec![], body_bad, vec![]);
-        let err = apply(&p_bad, &json!(null), None).unwrap_err();
-        match err {
-            RuntimeError::TypeError { .. } => {}
-            _ => panic!("expected TypeError, got {err:?}"),
-        }
+        let p_mix = prog_with(vec![], body_mix, vec![]);
+        let out_mix = apply(&p_mix, &json!(null), None).unwrap();
+        assert_eq!(out_mix, json!("a1"));
+
+        // 1 + "b" -> "1b"
+        let body_mix2 =
+            B::Add(Box::new(B::NumberInt(1, sp())), Box::new(B::String("b".into(), sp())), sp());
+        let p_mix2 = prog_with(vec![], body_mix2, vec![]);
+        let out_mix2 = apply(&p_mix2, &json!(null), None).unwrap();
+        assert_eq!(out_mix2, json!("1b"));
     }
 
     #[test]

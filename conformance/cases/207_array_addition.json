@@ -1,0 +1,12 @@
+{
+  "name": "206_array_addition",
+  "description": "Test that we are able to add two array together",
+  "program": "[1,2] + [3,4]",
+  "input": {},
+  "expected": [
+    1,
+    2,
+    3,
+    4
+  ]
+}

@@ -751,8 +751,15 @@ impl<'p> Evaluator<'p> {
                 merged.extend(a.clone());
                 Ok(JsltValue::from_json(Value::Object(merged)))
             }
+            (Value::Array(a), Value::Array(b)) => {
+                // Array addition: concatenate arrays in order (left then right)
+                let mut out = Vec::with_capacity(a.len() + b.len());
+                out.extend(a.clone());
+                out.extend(b.clone());
+                Ok(JsltValue::from_json(Value::Array(out)))
+            }
             _ => Err(RuntimeError::TypeError {
-                msg: "addition expects number+number, string+string, string+number, or object+object".into(),
+                msg: "addition expects number+number, string+string, string+number, object+object, or array+array".into(),
                 span,
             }),
         }

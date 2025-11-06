@@ -49,4 +49,10 @@ impl Program {
             .map_err(|e| JsValue::from_str(&format!("Output JSON serialization error: {}", e)))?;
         Ok(js_out)
     }
+
+    /// Returns the version of the JSLT engine.
+    #[wasm_bindgen(js_name = version)]
+    pub fn version() -> String {
+        env!("CARGO_PKG_VERSION").to_string()
+    }
 }

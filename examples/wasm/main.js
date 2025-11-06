@@ -6,6 +6,7 @@ const inputEl = document.getElementById("input");
 const outputEl = document.getElementById("output");
 const errorEl = document.getElementById("error");
 const runBtn = document.getElementById("run");
+const headerEl = document.getElementById("header");
 
 let ready = false;
 
@@ -14,6 +15,9 @@ async function bootstrap() {
     await init(); // initializes the wasm module
     ready = true;
     status.textContent = "Ready";
+
+    // Add the version number next to the header
+   headerEl.textContent += ` (v${Program.version()})`;
 }
 
 runBtn.addEventListener("click", () => {

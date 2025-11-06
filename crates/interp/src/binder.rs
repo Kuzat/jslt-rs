@@ -681,7 +681,7 @@ impl Binder {
                     frame.truncate(base_len);
                 }
                 Ok(BoundExpr::LetBlock(blets, bbody, *span))
-            },
+            }
             Expr::This(span) => Ok(BoundExpr::This(*span)),
 
             Expr::Variable { name } => {

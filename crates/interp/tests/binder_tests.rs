@@ -181,7 +181,13 @@ fn param_shadows_outer_let() {
     // let x = 1; def id(x) $x; id(2)
     let program = Program {
         imports: vec![],
-        defs: vec![Def { name: ident("id"), params: vec![ident("x")], lets: vec![], body: var("x"), span: s() }],
+        defs: vec![Def {
+            name: ident("id"),
+            params: vec![ident("x")],
+            lets: vec![],
+            body: var("x"),
+            span: s(),
+        }],
         lets: vec![Let {
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
@@ -218,7 +224,13 @@ fn unknown_function_yields_error_with_suggestions() {
     // nope()
     let program = Program {
         imports: vec![],
-        defs: vec![Def { name: ident("near"), params: vec![], lets: vec![], body: Expr::Null(s()), span: s() }],
+        defs: vec![Def {
+            name: ident("near"),
+            params: vec![],
+            lets: vec![],
+            body: Expr::Null(s()),
+            span: s(),
+        }],
         lets: vec![],
         body: Some(call("nope", vec![])),
         span: s(),

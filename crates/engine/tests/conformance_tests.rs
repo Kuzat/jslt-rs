@@ -1,11 +1,11 @@
 use engine::compile;
+use interp::EvalConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::env;
-use interp::EvalConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TestCase {
@@ -61,7 +61,9 @@ fn load_test_cases() -> Result<Vec<TestCase>, Box<dyn std::error::Error>> {
             }
         }
 
-        let existing = candidate_paths.into_iter().find(|x| x.exists())
+        let existing = candidate_paths
+            .into_iter()
+            .find(|x| x.exists())
             .ok_or_else(|| format!("Specified CONFORMANCE_TEST_FILE not found: {}", file_spec))?;
 
         let content = fs::read_to_string(&existing)?;
@@ -111,10 +113,7 @@ fn run_java_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::err
 
 fn run_rust_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::error::Error>> {
     let compiled = compile(program)?;
-    let config = EvalConfig {
-        max_steps: Some(1_000_000_000),
-        ..Default::default()
-    };
+    let config = EvalConfig { max_steps: Some(1_000_000_000), ..Default::default() };
     let result: Value = compiled.apply(input, Some(config))?;
     Ok(result)
 }
@@ -182,8 +181,10 @@ fn test_conformance_rust_only() {
                     Ok(out) if out == tc.expected => {
                         // ok
                     }
-                    Ok(out) => failed
-                        .push((tc.name.clone(), format!("Expected: '{}', Got: '{}'", tc.expected, out))),
+                    Ok(out) => failed.push((
+                        tc.name.clone(),
+                        format!("Expected: '{}', Got: '{}'", tc.expected, out),
+                    )),
                     Err(e) => failed.push((tc.name.clone(), format!("Error: {}", e))),
                 }
             }

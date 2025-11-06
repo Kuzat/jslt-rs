@@ -204,7 +204,7 @@ pub enum Expr {
     FunctionRef {
         name: String,
         span: Span,
-    }
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -409,7 +409,9 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 for l in lets {
                     write!(self.f, "let ")?;
                     for (i, b) in l.bindings.iter().enumerate() {
-                        if i > 0 { write!(self.f, "; ")?; }
+                        if i > 0 {
+                            write!(self.f, "; ")?;
+                        }
                         write!(self.f, "{} = ", b.name.name)?;
                         self.expr(&b.value, Prec::Lowest)?;
                     }

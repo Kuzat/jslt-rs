@@ -296,9 +296,13 @@ impl<'p> Evaluator<'p> {
                 // Ensure capacity for highest slot
                 let mut max_slot = temp.locals.len().saturating_sub(1);
                 for (slot, _expr) in bindings.iter() {
-                    if *slot > max_slot { max_slot = *slot; }
+                    if *slot > max_slot {
+                        max_slot = *slot;
+                    }
                 }
-                if temp.locals.len() <= max_slot { temp.locals.resize(max_slot + 1, JsltValue::null()); }
+                if temp.locals.len() <= max_slot {
+                    temp.locals.resize(max_slot + 1, JsltValue::null());
+                }
                 // Push temp frame
                 self.push_frame(temp);
                 // Evaluate lets in order, assigning to their slots
@@ -493,10 +497,9 @@ impl<'p> Evaluator<'p> {
                 let seq_val = self.eval_expr(seq)?;
                 let arr: Vec<Value> = match seq_val.as_json() {
                     Value::Array(a) => a.clone(),
-                    Value::Object(m) => m
-                        .iter()
-                        .map(|(k, v)| json!({ "key": k, "value": v }))
-                        .collect(),
+                    Value::Object(m) => {
+                        m.iter().map(|(k, v)| json!({ "key": k, "value": v })).collect()
+                    }
                     _ => Vec::new(),
                 };
                 let mut out = Vec::with_capacity(arr.len());
@@ -521,10 +524,9 @@ impl<'p> Evaluator<'p> {
                 let seq_val = self.eval_expr(seq)?;
                 let arr: Vec<Value> = match seq_val.as_json() {
                     Value::Array(a) => a.clone(),
-                    Value::Object(m) => m
-                        .iter()
-                        .map(|(k, v)| json!({ "key": k, "value": v }))
-                        .collect(),
+                    Value::Object(m) => {
+                        m.iter().map(|(k, v)| json!({ "key": k, "value": v })).collect()
+                    }
                     _ => Vec::new(),
                 };
                 let mut out = Map::new();
@@ -688,7 +690,8 @@ impl<'p> Evaluator<'p> {
                     // Allocate locals for params + function-local lets
                     let mut locals = evaluated_args;
                     locals.resize(expected_params + fun_lets.len(), JsltValue::null());
-                    let new_frame = Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
+                    let new_frame =
+                        Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
                     self.with_call_depth(|me| {
                         me.push_frame(new_frame);
                         // Evaluate function-local lets in order into their slots
@@ -851,11 +854,8 @@ impl<'p> Evaluator<'p> {
         let caller_this = self.current_frame().this_val.clone();
         let fun_lets_len = target_fun.lets.len();
         evaluated_args.resize(expected_params + fun_lets_len, JsltValue::null());
-        let call_frame = Frame {
-            locals: evaluated_args,
-            this_val: caller_this,
-            active_fun: Some(*target_id),
-        };
+        let call_frame =
+            Frame { locals: evaluated_args, this_val: caller_this, active_fun: Some(*target_id) };
 
         // 5) push module top-frame context + the call frame onto stack
         self.stack.push(mr_top);

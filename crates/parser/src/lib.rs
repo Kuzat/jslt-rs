@@ -72,6 +72,7 @@ impl<'a> Parser<'a> {
         let mut defs = Vec::new();
         let mut lets = Vec::new();
 
+        println!("Parsing program");
         // import must come first
         while let Token::Import = self.cur.tok {
             imports.push(self.parse_import_stmt()?);
@@ -206,11 +207,13 @@ impl<'a> Parser<'a> {
 
     fn parse_if_or_expr(&mut self) -> ParseResult<Expr> {
         if self.at(&Token::If) {
+            println!("Parsing if_or_expr with token {:?}", self.cur.tok);
             let start = self.cur.span;
             self.bump(); // 'if'
             self.expect(Token::LParen, "'(' after if")?;
             let cond = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after if condition")?;
+            println!("parse if_or_expr then branch at token {:?}", self.cur.tok);
             let then_expr = self.parse_lets_then_expr()?;
             self.expect(Token::Else, "'else'")?;
             let else_expr = self.parse_lets_then_expr()?;
@@ -598,6 +601,7 @@ impl<'a> Parser<'a> {
             self.expect(Token::LParen, "'(' after for")?;
             let seq = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after sequence")?;
+            println!("seq: {:?}", seq);
             let body = self.parse_lets_then_expr()?;
             let filter = if self.at(&Token::If) {
                 self.bump(); // 'if'

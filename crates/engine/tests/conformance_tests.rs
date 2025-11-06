@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::env;
+use interp::EvalConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TestCase {
@@ -110,7 +111,11 @@ fn run_java_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::err
 
 fn run_rust_jslt(program: &str, input: &Value) -> Result<Value, Box<dyn std::error::Error>> {
     let compiled = compile(program)?;
-    let result: Value = compiled.apply(input, None)?;
+    let config = EvalConfig {
+        max_steps: Some(1_000_000_000),
+        ..Default::default()
+    };
+    let result: Value = compiled.apply(input, Some(config))?;
     Ok(result)
 }
 
@@ -160,32 +165,42 @@ fn run_differential_test(test_case: &TestCase) -> TestResult {
 
 #[test]
 fn test_conformance_rust_only() {
-    let test_cases = load_test_cases().expect("Failed to load test cases");
+    let result = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let test_cases = load_test_cases().expect("Failed to load test cases");
 
-    if test_cases.is_empty() {
-        panic!("No test cases found in conformance/cases/");
-    }
-
-    let mut failed: Vec<(String, String)> = Vec::new();
-
-    for tc in &test_cases {
-        let rust_res = run_rust_jslt(&tc.program, &tc.input);
-        match rust_res {
-            Ok(out) if out == tc.expected => {
-                // ok
+            if test_cases.is_empty() {
+                panic!("No test cases found in conformance/cases/");
             }
-            Ok(out) => failed
-                .push((tc.name.clone(), format!("Expected: '{}', Got: '{}'", tc.expected, out))),
-            Err(e) => failed.push((tc.name.clone(), format!("Error: {}", e))),
-        }
-    }
 
-    if !failed.is_empty() {
-        eprintln!("❌ Rust-only conformance failures:");
-        for (name, msg) in &failed {
-            eprintln!("  - {}: {}", name, msg);
-        }
-        panic!("Some Rust-only conformance tests failed");
+            let mut failed: Vec<(String, String)> = Vec::new();
+
+            for tc in &test_cases {
+                let rust_res = run_rust_jslt(&tc.program, &tc.input);
+                match rust_res {
+                    Ok(out) if out == tc.expected => {
+                        // ok
+                    }
+                    Ok(out) => failed
+                        .push((tc.name.clone(), format!("Expected: '{}', Got: '{}'", tc.expected, out))),
+                    Err(e) => failed.push((tc.name.clone(), format!("Error: {}", e))),
+                }
+            }
+
+            if !failed.is_empty() {
+                eprintln!("❌ Rust-only conformance failures:");
+                for (name, msg) in &failed {
+                    eprintln!("  - {}: {}", name, msg);
+                }
+                panic!("Some Rust-only conformance tests failed");
+            }
+        })
+        .expect("Failed to spawn thread")
+        .join();
+
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
     }
 }
 

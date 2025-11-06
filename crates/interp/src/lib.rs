@@ -26,7 +26,7 @@ pub struct EvalConfig {
 
 impl Default for EvalConfig {
     fn default() -> Self {
-        Self { max_steps: Some(1_000_000), max_call_depth: Some(1_000) }
+        Self { max_steps: Some(100_000_000), max_call_depth: Some(10_000) }
     }
 }
 

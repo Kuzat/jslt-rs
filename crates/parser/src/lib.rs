@@ -234,7 +234,7 @@ impl<'a> Parser<'a> {
             let l = self.parse_let_stmt()?;
             lets.push(l);
         }
-        let body = self.parse_or_expr()?;
+        let body = self.parse_if_or_expr()?;
         if lets.is_empty() {
             Ok(body)
         } else {

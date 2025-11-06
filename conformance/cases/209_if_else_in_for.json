@@ -1,0 +1,11 @@
+{
+  "name": "209_if_else_in_for",
+  "description": "Test case for if-else statements within a array for",
+  "program": "let x = [1, 2, 3]\n [for ($x) if (mod(., 2) == 0) . else \"odd\"]",
+  "input": {},
+  "expected": [
+    "odd",
+    2,
+    "odd"
+  ]
+}

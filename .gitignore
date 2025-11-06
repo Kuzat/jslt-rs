@@ -2,5 +2,6 @@
 .idea
 
 examples/wasm/pkg
+test.jslt
 
 *.DS_Store

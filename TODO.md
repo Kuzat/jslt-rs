@@ -259,8 +259,8 @@ unsafe_code = "forbid"
 
 ## 10) CLI
 
-* [ ] `jslt -p program.jslt -i input.json` → prints result JSON.
-* [ ] `--eval 'expr'` shortcut; `--pretty`.
+* [x] `jslt -p program.jslt -i input.json` → prints result JSON.
+* [x] `--eval 'expr'` shortcut; `--pretty`.
 
   * **Accept:** used in README examples; handles stdin/stdout.
 
@@ -291,7 +291,7 @@ unsafe_code = "forbid"
 
   * **Accept:** browser demo in `examples/wasm/`.
 
-## 15) LSP (optional but nice)
+## 15) LSP
 
 * [ ] `lsp`: tower-lsp; features:
 

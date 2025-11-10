@@ -1,0 +1,14 @@
+# vscode
+
+To install dependencies:
+
+```bash
+bun install
+```
+
+To run:
+
+```bash
+bun run build:server
+bun run compile
+```

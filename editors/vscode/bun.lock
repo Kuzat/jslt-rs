@@ -1,0 +1,41 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "jslt-vscode",
+      "dependencies": {
+        "vscode-languageclient": "^9.0.1",
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.76.0",
+        "typescript": "^4.9.5",
+      },
+    },
+  },
+  "packages": {
+    "@types/node": ["@types/node@20.19.24", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/@types/node/-/node-20.19.24.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-FE5u0ezmi6y9OZEzlJfg37mqqf6ZDSF2V/NLjUyGrR9uTZ7Sb9F7bLNZ03S4XVUNRWGA7Ck4c1kK+YnuWjl+DA=="],
+
+    "@types/vscode": ["@types/vscode@1.105.0", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/@types/vscode/-/vscode-1.105.0.tgz", {}, ""],
+
+    "balanced-match": ["balanced-match@1.0.2", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/balanced-match/-/balanced-match-1.0.2.tgz", {}, ""],
+
+    "brace-expansion": ["brace-expansion@2.0.2", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/brace-expansion/-/brace-expansion-2.0.2.tgz", { "dependencies": { "balanced-match": "^1.0.0" } }, ""],
+
+    "minimatch": ["minimatch@5.1.6", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/minimatch/-/minimatch-5.1.6.tgz", { "dependencies": { "brace-expansion": "^2.0.1" } }, ""],
+
+    "semver": ["semver@7.7.3", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/semver/-/semver-7.7.3.tgz", { "bin": "bin/semver.js" }, ""],
+
+    "typescript": ["typescript@4.9.5", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/typescript/-/typescript-4.9.5.tgz", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, ""],
+
+    "undici-types": ["undici-types@6.21.0", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/undici-types/-/undici-types-6.21.0.tgz", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
+
+    "vscode-jsonrpc": ["vscode-jsonrpc@8.2.0", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/vscode-jsonrpc/-/vscode-jsonrpc-8.2.0.tgz", {}, ""],
+
+    "vscode-languageclient": ["vscode-languageclient@9.0.1", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/vscode-languageclient/-/vscode-languageclient-9.0.1.tgz", { "dependencies": { "minimatch": "^5.1.0", "semver": "^7.3.7", "vscode-languageserver-protocol": "3.17.5" } }, ""],
+
+    "vscode-languageserver-protocol": ["vscode-languageserver-protocol@3.17.5", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/vscode-languageserver-protocol/-/vscode-languageserver-protocol-3.17.5.tgz", { "dependencies": { "vscode-jsonrpc": "8.2.0", "vscode-languageserver-types": "3.17.5" } }, ""],
+
+    "vscode-languageserver-types": ["vscode-languageserver-types@3.17.5", "https://artifacts.schibsted.io/artifactory/api/npm/npm-virtual/vscode-languageserver-types/-/vscode-languageserver-types-3.17.5.tgz", {}, ""],
+  }
+}

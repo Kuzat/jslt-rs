@@ -72,7 +72,6 @@ impl<'a> Parser<'a> {
         let mut defs = Vec::new();
         let mut lets = Vec::new();
 
-        println!("Parsing program");
         // import must come first
         while let Token::Import = self.cur.tok {
             imports.push(self.parse_import_stmt()?);
@@ -118,7 +117,7 @@ impl<'a> Parser<'a> {
             Token::String(s) => {
                 let sp = self.cur.span;
                 let p = s.clone();
-                self.bump();
+                self.bump()?;
                 (p, sp)
             }
             _ => {
@@ -133,7 +132,7 @@ impl<'a> Parser<'a> {
         // expect "as"
         match &self.cur.tok {
             Token::As => {
-                self.bump();
+                self.bump()?;
             }
             _ => {
                 return Err(ParseError::unexpected(
@@ -207,13 +206,11 @@ impl<'a> Parser<'a> {
 
     fn parse_if_or_expr(&mut self) -> ParseResult<Expr> {
         if self.at(&Token::If) {
-            println!("Parsing if_or_expr with token {:?}", self.cur.tok);
             let start = self.cur.span;
-            self.bump(); // 'if'
+            self.bump()?; // 'if'
             self.expect(Token::LParen, "'(' after if")?;
             let cond = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after if condition")?;
-            println!("parse if_or_expr then branch at token {:?}", self.cur.tok);
             let then_expr = self.parse_lets_then_expr()?;
             self.expect(Token::Else, "'else'")?;
             let else_expr = self.parse_lets_then_expr()?;
@@ -250,7 +247,7 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_and_expr()?;
         while self.at(&Token::Or) {
             let _op_span = self.cur.span;
-            self.bump();
+            self.bump()?;
             let right = self.parse_and_expr()?;
             let span = Span::join(left.span(), right.span());
             left = Expr::Binary {
@@ -267,7 +264,7 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_cmp_expr()?;
         while self.at(&Token::And) {
             let _op_span = self.cur.span;
-            self.bump();
+            self.bump()?;
             let right = self.parse_cmp_expr()?;
             let span = Span::join(left.span(), right.span());
             left = Expr::Binary {
@@ -293,7 +290,7 @@ impl<'a> Parser<'a> {
                 _ => None,
             };
             if let Some(op) = op {
-                self.bump();
+                self.bump()?;
                 let right = self.parse_add_expr()?;
                 let span = Span::join(left.span(), right.span());
                 left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
@@ -313,7 +310,7 @@ impl<'a> Parser<'a> {
                 _ => None,
             };
             if let Some(op) = op {
-                self.bump();
+                self.bump()?;
                 let right = self.parse_mul_expr()?;
                 let span = Span::join(left.span(), right.span());
                 left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
@@ -334,7 +331,7 @@ impl<'a> Parser<'a> {
                 _ => None,
             };
             if let Some(op) = op {
-                self.bump();
+                self.bump()?;
                 let right = self.parse_unary_expr()?;
                 let span = Span::join(left.span(), right.span());
                 left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
@@ -349,7 +346,7 @@ impl<'a> Parser<'a> {
         match &self.cur.tok {
             Token::Minus => {
                 let start = self.cur.span;
-                self.bump();
+                self.bump()?;
                 let expr = self.parse_unary_expr()?;
                 Ok(Expr::Unary {
                     op: UnaryOp::Neg,
@@ -359,7 +356,7 @@ impl<'a> Parser<'a> {
             }
             Token::Not => {
                 let start = self.cur.span;
-                self.bump();
+                self.bump()?;
                 let expr = self.parse_unary_expr()?;
                 Ok(Expr::Unary {
                     op: UnaryOp::Not,
@@ -381,7 +378,7 @@ impl<'a> Parser<'a> {
                     if let Expr::This(_) = expr {
                         let key_span = self.cur.span;
                         let key = MemberKey::Ident(Ident { name: s.clone(), span: key_span });
-                        self.bump();
+                        self.bump()?;
                         let span = Span::join(expr.span(), self.cur.span);
                         expr = Expr::Member { target: Box::new(expr), key, span };
                         continue;
@@ -393,7 +390,7 @@ impl<'a> Parser<'a> {
                     if let Expr::This(_) = expr {
                         let key_span = self.cur.span;
                         let key = MemberKey::Str { value: s.clone(), span: key_span };
-                        self.bump();
+                        self.bump()?;
                         let span = Span::join(expr.span(), self.cur.span);
                         expr = Expr::Member { target: Box::new(expr), key, span };
                         continue;
@@ -403,18 +400,18 @@ impl<'a> Parser<'a> {
                 }
                 Token::Dot => {
                     // member: . ident | . "string"
-                    self.bump(); // ".'
+                    self.bump()?; // ".'
                     match &self.cur.tok {
                         Token::Ident(ref s) => {
                             let key =
                                 MemberKey::Ident(Ident { name: s.clone(), span: self.cur.span });
-                            self.bump();
+                            self.bump()?;
                             let span = Span::join(expr.span(), self.cur.span);
                             expr = Expr::Member { target: Box::new(expr), key, span };
                         }
                         Token::String(ref s) => {
                             let key = MemberKey::Str { value: s.clone(), span: self.cur.span };
-                            self.bump();
+                            self.bump()?;
                             let span = Span::join(expr.span(), self.cur.span);
                             expr = Expr::Member { target: Box::new(expr), key, span };
                         }
@@ -441,7 +438,7 @@ impl<'a> Parser<'a> {
                     }
                     // index_or_slice: '[' [expr] [':' [expr] ']'
                     let start = self.cur.span;
-                    self.bump(); // '['
+                    self.bump()?; // '['
                                  // optional first expr
                     let mut first: Option<Expr> = None;
                     if !self.at(&Token::RBracket) && !self.at(&Token::Colon) {
@@ -449,7 +446,7 @@ impl<'a> Parser<'a> {
                     }
                     if self.at(&Token::Colon) {
                         // slice: [':' [expr] ']'
-                        self.bump(); // ':'
+                        self.bump()?; // ':'
                         let mut second: Option<Expr> = None;
                         if !self.at(&Token::RBracket) {
                             second = Some(self.parse_if_or_expr()?);
@@ -482,7 +479,7 @@ impl<'a> Parser<'a> {
                 Token::LParen => {
                     // call: '(' [args] ')'
                     let start = self.cur.span;
-                    self.bump(); // '('
+                    self.bump()?; // '('
                     let mut args = Vec::new();
                     if !self.at(&Token::RParen) {
                         let arg = self.parse_if_or_expr()?;
@@ -507,46 +504,46 @@ impl<'a> Parser<'a> {
         match &self.cur.tok {
             Token::Null => {
                 let s = self.cur.span;
-                self.bump();
+                self.bump()?;
                 Ok(Expr::Null(s))
             }
             Token::True => {
                 let s = self.cur.span;
-                self.bump();
+                self.bump()?;
                 Ok(Expr::Bool { value: true, span: s })
             }
             Token::False => {
                 let s = self.cur.span;
-                self.bump();
+                self.bump()?;
                 Ok(Expr::Bool { value: false, span: s })
             }
             Token::NumberFloat(n) => {
                 let s = self.cur.span;
                 let v = *n;
-                self.bump();
+                self.bump()?;
                 Ok(Expr::Number { lexeme: v.to_string(), kind: NumericKind::Float, span: s })
             }
             Token::NumberInt(n) => {
                 let s = self.cur.span;
                 let v = *n;
-                self.bump();
+                self.bump()?;
                 Ok(Expr::Number { lexeme: v.to_string(), kind: NumericKind::Int, span: s })
             }
             Token::String(st) => {
                 let s = self.cur.span;
                 let v = st.clone();
-                self.bump();
+                self.bump()?;
                 Ok(Expr::String { value: v, span: s })
             }
             Token::Dollar => {
                 let dollar_span = self.cur.span;
-                self.bump();
+                self.bump()?;
                 match &self.cur.tok {
                     Token::Ident(name) => {
                         let name_span = self.cur.span;
                         let span = Span::join(dollar_span, name_span);
                         let v = name.clone();
-                        self.bump();
+                        self.bump()?;
                         Ok(Expr::Variable { name: Ident { name: v, span } })
                     }
                     _ => Err(ParseError::expected_ident(dollar_span)),
@@ -555,11 +552,11 @@ impl<'a> Parser<'a> {
             Token::Dot => {
                 // this
                 let s = self.cur.span;
-                self.bump();
+                self.bump()?;
                 Ok(Expr::This(s))
             }
             Token::LParen => {
-                self.bump();
+                self.bump()?;
                 let inner = self.parse_if_or_expr()?;
                 let end_span = self.expect(Token::RParen, "')' to close group")?;
                 let span = Span::join(inner.span(), end_span);
@@ -574,7 +571,7 @@ impl<'a> Parser<'a> {
                 if let Token::Ident(name) = &self.cur.tok {
                     let s = self.cur.span;
                     let mut v = name.clone();
-                    self.bump();
+                    self.bump()?;
 
                     // if is namespace call we need to check for colon too
                     if self.eat(&Token::Colon) {
@@ -593,18 +590,17 @@ impl<'a> Parser<'a> {
 
     fn parse_array_like(&mut self) -> ParseResult<Expr> {
         let start = self.cur.span;
-        self.bump(); // '['
+        self.bump()?; // '['
 
         // comprehension or literal?
         if self.at(&Token::For) {
-            self.bump(); // 'for'
+            self.bump()?; // 'for'
             self.expect(Token::LParen, "'(' after for")?;
             let seq = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after sequence")?;
-            println!("seq: {:?}", seq);
             let body = self.parse_lets_then_expr()?;
             let filter = if self.at(&Token::If) {
-                self.bump(); // 'if'
+                self.bump()?; // 'if'
                 Some(Box::new(self.parse_if_or_expr()?))
             } else {
                 None
@@ -628,10 +624,10 @@ impl<'a> Parser<'a> {
 
     fn parse_object_like(&mut self) -> ParseResult<Expr> {
         let start = self.cur.span;
-        self.bump(); // '{'
+        self.bump()?; // '{'
 
         if self.at(&Token::For) {
-            self.bump(); // 'for'
+            self.bump()?; // 'for'
             self.expect(Token::LParen, "'(' after 'for'")?;
             let seq = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after sequence")?;
@@ -657,7 +653,7 @@ impl<'a> Parser<'a> {
                 Expr::LetBlock { lets: shared_lets, body: Box::new(value_inner), span }
             };
             let filter = if self.at(&Token::If) {
-                self.bump(); // 'if'
+                self.bump()?; // 'if'
                 Some(Box::new(self.parse_if_or_expr()?))
             } else {
                 None
@@ -686,7 +682,7 @@ impl<'a> Parser<'a> {
                     let entry = match &self.cur.tok {
                         Token::Star => {
                             let star_span = self.cur.span;
-                            self.bump();
+                            self.bump()?;
                             self.expect(Token::Colon, "':' after '*'")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(star_span, v.span());
@@ -695,7 +691,7 @@ impl<'a> Parser<'a> {
                         Token::String(s) => {
                             let kspan = self.cur.span;
                             let key = ObjectKey::Str { value: s.clone(), span: self.cur.span };
-                            self.bump();
+                            self.bump()?;
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
@@ -705,7 +701,7 @@ impl<'a> Parser<'a> {
                             let kspan = self.cur.span;
                             let key =
                                 ObjectKey::Ident(Ident { name: id.clone(), span: self.cur.span });
-                            self.bump();
+                            self.bump()?;
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
@@ -748,32 +744,28 @@ impl<'a> Parser<'a> {
 
     fn eat(&mut self, t: &Token) -> bool {
         if self.at(t) {
-            let _ = self.bump();
-            true
+            // If bump fails (lexer error), we return false and let the error be caught
+            // in the next token operation.
+            self.bump().is_ok()
         } else {
             false
         }
     }
 
-    fn bump(&mut self) -> Tok {
+    fn bump(&mut self) -> ParseResult<Tok> {
         let old = if let Some(pk) = self.peeked.take() {
             mem::replace(&mut self.cur, pk)
         } else {
-            let nt = next_token(&mut self.lx).unwrap_or_else(|e| {
-                // Convert lexer error into stream of EoF + store error for later:
-                // But we reutrn error at call sites, so here we panic only if this function
-                // is used wrong. To keep Result flow, prefer not to call bump when lexer errored.
-                panic!("lexer error bubbled intp bump(): {e:?}")
-            });
+            let nt = next_token(&mut self.lx)?;
             mem::replace(&mut self.cur, nt)
         };
-        old
+        Ok(old)
     }
 
     fn expect(&mut self, t: Token, expected: &'static str) -> ParseResult<Span> {
         if mem::discriminant(&self.cur.tok) == mem::discriminant(&t) {
             let s = self.cur.span;
-            self.bump();
+            self.bump()?;
             Ok(s)
         } else {
             Err(ParseError::unexpected(self.cur.span, self.cur.tok.clone(), expected))
@@ -784,7 +776,7 @@ impl<'a> Parser<'a> {
         match &self.cur.tok {
             Token::Ident(s) => {
                 let ident = Ident { name: s.clone(), span: self.cur.span };
-                self.bump();
+                self.bump()?;
                 Ok(ident)
             }
             _ => Err(ParseError::expected_ident(self.cur.span)),

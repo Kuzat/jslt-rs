@@ -29,7 +29,7 @@ impl JsltLanguageServer {
     /// Parse a JSLT document and return diagnostics
     ///
     /// This is where we integrate with out parser to detect syntax errors
-    async fn parse_and_diagnose(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
+    async fn parse_and_diagnose(&self, _uri: &Url, text: &str) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
         // try parse the document

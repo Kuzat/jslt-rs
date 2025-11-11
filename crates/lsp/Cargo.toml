@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 
 parser = { path = "../parser" }
 engine = { path = "../engine" }
+interp = { path = "../interp" }
 ast = { path = "../ast" }
 
 tracing = "0.1.41"

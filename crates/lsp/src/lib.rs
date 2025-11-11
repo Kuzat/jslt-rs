@@ -3,6 +3,8 @@
 //! This provides IDE features like diagnostics, completions, and hover information
 //! for the JSLT files
 
+use engine::EngineError;
+use interp::binder::BindError;
 use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -29,24 +31,28 @@ impl JsltLanguageServer {
     /// Parse a JSLT document and return diagnostics
     ///
     /// This is where we integrate with out parser to detect syntax errors
-    async fn parse_and_diagnose(&self, _uri: &Url, text: &str) -> Vec<Diagnostic> {
+    async fn parse_and_diagnose(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
-        // try parse the document
-        match parser::Parser::new(text) {
-            Err(err) => {
-                // Lexer failed to parse the document, return the error as a diagnostic
-                diagnostics.push(Self::error_to_diagnostic(err, text));
+        // Extract the file path for module resolution
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| ".".to_string());
+
+        // Try to compile the document
+        match engine::compile_with_import_path(text, &file_path) {
+            Ok(_) => {
+                // Compilation succeeded, no diagnostics
             }
-            Ok(mut parser) => match parser.parse_program() {
-                Err(err) => {
-                    diagnostics.push(Self::error_to_diagnostic(err, text));
+            Err(err) => {
+                // Convert error to diagnostic
+                if let Some(diagnostic) = Self::error_to_diagnostic(err, text) {
+                    diagnostics.push(diagnostic);
                 }
-                Ok(_program) => {
-                    // Parse succeeded, no diagnostics
-                }
-            },
-        };
+            }
+        }
 
         diagnostics
     }
@@ -58,23 +64,108 @@ impl JsltLanguageServer {
     /// - range (start/end position)
     /// - message (description)
     /// - source (who generated it)
-    fn error_to_diagnostic(err: parser::ParseError, text: &str) -> Diagnostic {
-        // get the error span if available
-        let start = Self::byte_offset_to_position(text, err.span.start);
-        let end = Self::byte_offset_to_position(text, err.span.end);
+    fn error_to_diagnostic(err: EngineError, text: &str) -> Option<Diagnostic> {
+        match err {
+            EngineError::Parse(parser_err) => {
+                // get the error span if available
+                let start = Self::byte_offset_to_position(text, parser_err.span.start);
+                let end = Self::byte_offset_to_position(text, parser_err.span.end);
 
-        let range = Range { start, end };
+                Some(Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("jslt-parser".to_string()),
+                    message: format!("{}", parser_err),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                })
+            }
+            EngineError::Bind(bind_err) => Some(Self::bind_error_to_diagnostic(bind_err, text)),
+            EngineError::Runtime(_) => {
+                // Runtime errors are not reported as diagnostics since they
+                // are not detected at compile time
+                None
+            }
+            EngineError::ModuleError(_) => {
+                // Module errors do not contain a span for now so just show the start of the file
+                let start = Self::byte_offset_to_position(text, 0);
+                let end =
+                    Self::byte_offset_to_position(text, text.split_once('\n').unwrap().0.len());
 
-        Diagnostic {
-            range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: None,
-            code_description: None,
-            source: Some("JSLT Language Server".to_string()),
-            message: format!("{}", err),
-            related_information: None,
-            tags: None,
-            data: None,
+                Some(Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("jslt-parser".to_string()),
+                    message: format!("{}", err),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                })
+            }
+        }
+    }
+
+    fn bind_error_to_diagnostic(err: BindError, text: &str) -> Diagnostic {
+        match err {
+            BindError::UnknownFunction { name, span, suggestions } => {
+                let start = Self::byte_offset_to_position(text, span.start);
+                let end = Self::byte_offset_to_position(text, span.end);
+
+                Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("jslt-binder".to_string()),
+                    message: format!(
+                        "unknown function: `{}`, did you mean: {:?}",
+                        name, suggestions
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            }
+            BindError::UnknownVariable { name, span, suggestions } => {
+                let start = Self::byte_offset_to_position(text, span.start);
+                let end = Self::byte_offset_to_position(text, span.end);
+
+                Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("jslt-binder".to_string()),
+                    message: format!(
+                        "unknown variable: `{}`, did you mean: {:?}",
+                        name, suggestions
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            }
+            BindError::NonFunctionCallee { span } => {
+                let start = Self::byte_offset_to_position(text, span.start);
+                let end = Self::byte_offset_to_position(text, span.end);
+
+                Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("jslt-binder".to_string()),
+                    message: "attempted to call a non-function expression".to_string(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            }
         }
     }
 

@@ -1,36 +1,176 @@
+
 {
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "JSLT",
   "scopeName": "source.jslt",
   "patterns": [
     {
-      "name": "comment.line.double-slash.jslt",
-      "match": "//.*$"
+      "include": "#comments"
     },
     {
-      "name": "keyword.control.jslt",
-      "match": "\\b(if|else|let|def|import|as|for)\\b"
+      "include": "#keywords"
     },
     {
-      "name": "string.quoted.double.jslt",
-      "begin": "\"",
-      "end": "\"",
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
       "patterns": [
         {
-          "name": "constant.character.escape.jslt",
-          "match": "\\\\."
+          "name": "comment.line.double-slash.jslt",
+          "match": "//.*$"
         }
       ]
     },
-    {
-      "name": "constant.numeric.jslt",
-      "match": "\\b[0-9]+\\.?[0-9]*\\b"
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.jslt",
+          "match": "\\b(if|else|for)\\b"
+        },
+        {
+          "name": "keyword.other.jslt",
+          "match": "\\b(let|def|import|as)\\b"
+        }
+      ]
     },
-    {
-      "name": "variable.other.jslt",
-      "match": "\\$[a-zA-Z_][a-zA-Z0-9_-]*"
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.jslt",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.jslt",
+              "match": "\\\\([\"\\\\/bfnrt]|u[0-9a-fA-F]{4})"
+            }
+          ]
+        }
+      ]
     },
-    {
-      "name": "constant.language.jslt",
-      "match": "\\b(true|false|null)\\b"
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.decimal.jslt",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.jslt",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.null.jslt",
+          "match": "\\bnull\\b"
+        },
+        {
+          "name": "constant.language.boolean.true.jslt",
+          "match": "\\btrue\\b"
+        },
+        {
+          "name": "constant.language.boolean.false.jslt",
+          "match": "\\bfalse\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.jslt",
+          "match": "\\b(def)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.other.jslt"
+            },
+            "2": {
+              "name": "entity.name.function.jslt"
+            }
+          }
+        },
+        {
+          "name": "entity.name.function.call.jslt",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(?=\\()"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.jslt",
+          "match": "\\$[a-zA-Z_][a-zA-Z0-9_-]*"
+        },
+        {
+          "name": "variable.other.property.jslt",
+          "match": "\\.[a-zA-Z_][a-zA-Z0-9_-]*"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.jslt",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.pipe.jslt",
+          "match": "\\|"
+        },
+        {
+          "name": "keyword.operator.arithmetic.jslt",
+          "match": "(\\+|\\-|\\*|\\/|%)"
+        },
+        {
+          "name": "keyword.operator.assignment.jslt",
+          "match": "="
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.jslt",
+          "match": ","
+        },
+        {
+          "name": "punctuation.separator.colon.jslt",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.bracket.round.jslt",
+          "match": "[\\(\\)]"
+        },
+        {
+          "name": "punctuation.bracket.square.jslt",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.bracket.curly.jslt",
+          "match": "[\\{\\}]"
+        }
+      ]
     }
-  ]
+  }
 }

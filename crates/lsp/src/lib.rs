@@ -288,7 +288,7 @@ impl LanguageServer for JsltLanguageServer {
 /// This sets up the LSP service and runs it, communicating via stdin/stdout
 pub async fn run_server() {
     // Set up logging
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(std::io::stderr).with_ansi(false).init();
 
     // Create the LSP service
     let (service, socket) = LspService::new(JsltLanguageServer::new);

@@ -439,7 +439,7 @@ impl<'a> Parser<'a> {
                     // index_or_slice: '[' [expr] [':' [expr] ']'
                     let start = self.cur.span;
                     self.bump()?; // '['
-                                 // optional first expr
+                                  // optional first expr
                     let mut first: Option<Expr> = None;
                     if !self.at(&Token::RBracket) && !self.at(&Token::Colon) {
                         first = Some(self.parse_if_or_expr()?);

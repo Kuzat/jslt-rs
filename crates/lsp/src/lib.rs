@@ -105,7 +105,7 @@ impl JsltLanguageServer {
                 // Module errors do not contain a span for now so just show the start of the file
                 let start = Self::byte_offset_to_position(text, 0);
                 let end =
-                    Self::byte_offset_to_position(text, text.split_once('\n').unwrap().0.len());
+                    Self::byte_offset_to_position(text, text.find('\n').unwrap_or(text.len()));
 
                 diagnostic.push(Diagnostic {
                     range: Range { start, end },

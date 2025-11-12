@@ -187,16 +187,18 @@ impl JsltLanguageServer {
     fn byte_offset_to_position(text: &str, offset: usize) -> Position {
         let mut line = 0;
         let mut column = 0;
+        let offset = offset.min(text.len());
 
         for (i, ch) in text.char_indices() {
-            if i == offset {
+            if i >= offset {
                 break;
             }
             if ch == '\n' {
                 line += 1;
                 column = 0;
             } else {
-                column += 1;
+                // LSP uses UTF-16 code units, not Unicde chars
+                column += ch.len_utf16() as u32;
             }
         }
 

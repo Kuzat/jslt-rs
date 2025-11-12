@@ -73,13 +73,15 @@ pub struct Parser<'a> {
     cur: Tok,
     peeked: Option<Tok>,
     errors: Vec<ParseError>,
+    prev_span: Span,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
         let mut lx = Lexer::new(input);
         let first = next_token(&mut lx)?;
-        Ok(Parser { lx, cur: first, peeked: None, errors: Vec::new() })
+        let prev_span = first.span;
+        Ok(Parser { lx, cur: first, peeked: None, errors: Vec::new(), prev_span })
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParseErrors> {
@@ -140,7 +142,13 @@ impl<'a> Parser<'a> {
         // Expect EOF
         let (t, s) = (self.cur.tok.clone(), self.cur.span);
         if !matches!(t, Token::Eof) {
-            return Err(ParseErrors { errors: vec![ParseError::unexpected(s, t, "end of file")] });
+            return Err(ParseErrors { errors: vec![
+                ParseError::unexpected(
+                    self.prev_span,
+                    t,
+                    "end of file"
+                )
+            ] });
         }
 
         // Span: if body exists, use its span; otherwise use single-point at EOF
@@ -191,7 +199,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 return Err(ParseError::unexpected(
-                    self.cur.span,
+                    self.prev_span,
                     self.cur.tok.clone(),
                     "string literal",
                 ))
@@ -199,18 +207,7 @@ impl<'a> Parser<'a> {
         };
 
         // expect "as"
-        match &self.cur.tok {
-            Token::As => {
-                self.bump()?;
-            }
-            _ => {
-                return Err(ParseError::unexpected(
-                    self.cur.span,
-                    self.cur.tok.clone(),
-                    "'as' after import path",
-                ))
-            }
-        }
+        self.expect(Token::As, "'as'")?;
 
         // create alias ident. It can be multiple ident seprated by colon token. So we need to parse
         // until no more colon tokens
@@ -485,10 +482,9 @@ impl<'a> Parser<'a> {
                             expr = Expr::Member { target: Box::new(expr), key, span };
                         }
                         _ => {
-                            let (t, s) = (self.cur.tok.clone(), self.cur.span);
                             return Err(ParseError::unexpected(
-                                s,
-                                t,
+                                self.prev_span,
+                                self.cur.tok.clone(),
                                 "identifier or string after '.'",
                             ));
                         }
@@ -651,7 +647,7 @@ impl<'a> Parser<'a> {
 
                     Ok(Expr::FunctionRef { name: v, span: s })
                 } else {
-                    Err(ParseError::expected_expr(self.cur.span))
+                    Err(ParseError::expected_expr(self.prev_span))
                 }
             }
         }
@@ -778,7 +774,7 @@ impl<'a> Parser<'a> {
                         }
                         _ => {
                             return Err(ParseError::unexpected(
-                                self.cur.span,
+                                self.prev_span,
                                 self.cur.tok.clone(),
                                 "object key (identifier or string) or '*'",
                             ))
@@ -828,6 +824,7 @@ impl<'a> Parser<'a> {
             let nt = next_token(&mut self.lx)?;
             mem::replace(&mut self.cur, nt)
         };
+        self.prev_span = old.span;
         Ok(old)
     }
 
@@ -837,7 +834,7 @@ impl<'a> Parser<'a> {
             self.bump()?;
             Ok(s)
         } else {
-            Err(ParseError::unexpected(self.cur.span, self.cur.tok.clone(), expected))
+            Err(ParseError::unexpected(self.prev_span, self.cur.tok.clone(), expected))
         }
     }
 
@@ -848,7 +845,7 @@ impl<'a> Parser<'a> {
                 self.bump()?;
                 Ok(ident)
             }
-            _ => Err(ParseError::expected_ident(self.cur.span)),
+            _ => Err(ParseError::expected_ident(self.prev_span)),
         }
     }
 }

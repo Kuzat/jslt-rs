@@ -208,6 +208,31 @@ pub enum BindError {
     NonFunctionCallee { span: Span },
 }
 
+impl BindError {
+    pub fn span(&self) -> Span {
+        use BindError::*;
+        match self {
+            UnknownVariable { span, .. } => *span,
+            UnknownFunction { span, .. } => *span,
+            NonFunctionCallee { span } => *span,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub struct BindErrors {
+    pub errors: Vec<BindError>,
+}
+
+impl std::fmt::Display for BindErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for error in &self.errors {
+            writeln!(f, "{}", error)?;
+        }
+        Ok(())
+    }
+}
+
 fn suggest<'a>(name: &str, pool: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut scored: Vec<(usize, String)> =
         pool.into_iter().map(|cand| (edit_distance(name, cand), cand.to_string())).collect();
@@ -424,6 +449,8 @@ pub struct Binder {
 
     // Imported modules table
     modules: HashMap<String, LoadedModule>,
+
+    errors: Vec<BindError>,
 }
 
 impl Default for Binder {
@@ -450,6 +477,7 @@ impl Binder {
             next_fun_id: registry.len(), // reserve space for builtins
             builtin_count: registry.len(),
             modules: HashMap::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -528,7 +556,7 @@ impl Binder {
     }
 
     // Entry point
-    pub fn bind_program(&mut self, p: &ast::Program) -> Result<BoundProgram, BindError> {
+    pub fn bind_program(&mut self, p: &ast::Program) -> Result<BoundProgram, BindErrors> {
         // 1) Pre-declare all top-level functions so they are visible after their decl point only.
         //    we choose "visible after declaration": We fill as we go through defs in order.
         //    If you want "all defs visible everywhere" semantics, first pass could collect names.
@@ -567,12 +595,12 @@ impl Binder {
             let mut def_lets = Vec::new();
             for l in &d.lets {
                 for b in &l.bindings {
-                    let val = self.bind_expr(&b.value)?;
+                    let val = self.bind_expr_recovery(&b.value);
                     def_lets.push((b.name.name.clone(), val));
                 }
             }
             // bind body
-            let body = self.bind_expr(&d.body)?;
+            let body = self.bind_expr_recovery(&d.body);
             let captures = self.env.end_fun(fid);
             self.env.pop_vars();
 
@@ -591,17 +619,22 @@ impl Binder {
         let mut lets = Vec::new();
         for l in &p.lets {
             for b in &l.bindings {
-                let bound_value = self.bind_expr(&b.value)?;
+                let bound_value = self.bind_expr_recovery(&b.value);
                 lets.push((b.name.name.clone(), bound_value));
             }
         }
 
         // 4) bind program body (optional)
         let body = if let Some(body) = &p.body {
-            self.bind_expr(body)?
+            self.bind_expr_recovery(body)
         } else {
             BoundExpr::Null(Span::zero())
         };
+
+        // Check if we accumulated any errors
+        if !self.errors.is_empty() {
+            return Err(BindErrors { errors: std::mem::take(&mut self.errors) });
+        }
 
         Ok(BoundProgram {
             functions: self.functions.clone(),
@@ -614,6 +647,18 @@ impl Binder {
                 .map(|(k, lm)| (k.clone(), (lm.bound.clone(), lm.callable)))
                 .collect(),
         })
+    }
+
+    fn bind_expr_recovery(&mut self, e: &ast::Expr) -> BoundExpr {
+        match self.bind_expr(e) {
+            Ok(expr) => expr,
+            Err(err) => {
+                let span = e.span();
+                self.errors.push(err);
+                // Return a placeholder null expression at the error location
+                BoundExpr::Null(span)
+            }
+        }
     }
 
     fn bind_expr(&mut self, e: &ast::Expr) -> Result<BoundExpr, BindError> {
@@ -668,14 +713,14 @@ impl Binder {
                 let mut i = 0usize;
                 for l in lets {
                     for b in &l.bindings {
-                        let val = self.bind_expr(&b.value)?;
+                        let val = self.bind_expr_recovery(&b.value);
                         let slot = slots[i];
                         i += 1;
                         blets.push((slot, val));
                     }
                 }
                 // Bind body with lets visible
-                let bbody = Box::new(self.bind_expr(body)?);
+                let bbody = Box::new(self.bind_expr_recovery(body));
                 // Truncate frame to base_len to avoid leakage
                 if let Some(frame) = self.env.var_stack.last_mut() {
                     frame.truncate(base_len);
@@ -697,15 +742,15 @@ impl Binder {
             }
 
             Expr::If { cond, then_br, else_br, span } => Ok(BoundExpr::If {
-                cond: Box::new(self.bind_expr(cond)?),
-                then_br: Box::new(self.bind_expr(then_br)?),
-                else_br: Box::new(self.bind_expr(else_br)?),
+                cond: Box::new(self.bind_expr_recovery(cond)),
+                then_br: Box::new(self.bind_expr_recovery(then_br)),
+                else_br: Box::new(self.bind_expr_recovery(else_br)),
                 span: *span,
             }),
 
             Expr::Unary { op, expr, span } => {
                 use ast::UnaryOp;
-                let inner = Box::new(self.bind_expr(expr)?);
+                let inner = Box::new(self.bind_expr_recovery(expr));
                 Ok(match op {
                     UnaryOp::Not => BoundExpr::Not(inner, *span),
                     UnaryOp::Neg => BoundExpr::Neg(inner, *span),
@@ -714,8 +759,8 @@ impl Binder {
 
             Expr::Binary { op, left, right, span } => {
                 use ast::BinaryOp::*;
-                let l = Box::new(self.bind_expr(left)?);
-                let r = Box::new(self.bind_expr(right)?);
+                let l = Box::new(self.bind_expr_recovery(left));
+                let r = Box::new(self.bind_expr_recovery(right));
                 Ok(match op {
                     Mul => BoundExpr::Mul(l, r, *span),
                     Div => BoundExpr::Div(l, r, *span),
@@ -734,7 +779,7 @@ impl Binder {
             }
 
             Expr::Member { target, key, span } => {
-                let t = Box::new(self.bind_expr(target)?);
+                let t = Box::new(self.bind_expr_recovery(target));
                 let bk = match key {
                     ast::MemberKey::Ident(id) => ObjectKey::Ident(id.name.clone(), id.span),
                     ast::MemberKey::Str { value, span } => ObjectKey::String(value.clone(), *span),
@@ -743,21 +788,15 @@ impl Binder {
             }
 
             Expr::Index { target, index, span } => Ok(BoundExpr::Index(
-                Box::new(self.bind_expr(target)?),
-                Box::new(self.bind_expr(index)?),
+                Box::new(self.bind_expr_recovery(target)),
+                Box::new(self.bind_expr_recovery(index)),
                 *span,
             )),
 
             Expr::Slice { target, start, end, span } => Ok(BoundExpr::Slice {
-                target: Box::new(self.bind_expr(target)?),
-                start: match start {
-                    Some(s) => Some(Box::new(self.bind_expr(s)?)),
-                    None => None,
-                },
-                end: match end {
-                    Some(e) => Some(Box::new(self.bind_expr(e)?)),
-                    None => None,
-                },
+                target: Box::new(self.bind_expr_recovery(target)),
+                start: start.as_ref().map(|s| Box::new(self.bind_expr_recovery(s))),
+                end: end.as_ref().map(|e| Box::new(self.bind_expr_recovery(e))),
                 span: *span,
             }),
 
@@ -767,7 +806,7 @@ impl Binder {
                     if let Some(fid) = self.env.lookup_fun_any(name) {
                         let mut bargs = Vec::with_capacity(args.len());
                         for a in args {
-                            bargs.push(self.bind_expr(a)?);
+                            bargs.push(self.bind_expr_recovery(a));
                         }
                         Ok(BoundExpr::Call { id: fid, args: bargs, span: *span })
                     } else {
@@ -786,16 +825,15 @@ impl Binder {
             Expr::ArrayLiteral { elements, span } => {
                 let mut out = Vec::with_capacity(elements.len());
                 for e in elements {
-                    out.push(self.bind_expr(e)?);
+                    out.push(self.bind_expr_recovery(e));
                 }
                 Ok(BoundExpr::ArrayLiteral(out, *span))
             }
 
             Expr::ArrayFor { seq, body, filter, span } => {
-                let bseq = self.bind_expr(seq)?;
-                let bbody = self.bind_expr(body)?;
-                let bfilter =
-                    if let Some(f) = filter { Some(Box::new(self.bind_expr(f)?)) } else { None };
+                let bseq = self.bind_expr_recovery(seq);
+                let bbody = self.bind_expr_recovery(body);
+                let bfilter = filter.as_ref().map(|f| Box::new(self.bind_expr_recovery(f)));
                 Ok(BoundExpr::ArrayFor {
                     seq: Box::new(bseq),
                     elem: Box::new(bbody),
@@ -820,13 +858,13 @@ impl Binder {
                                     BoundExpr::String(value.clone(), *span)
                                 }
                             };
-                            let vexpr = self.bind_expr(value)?;
+                            let vexpr = self.bind_expr_recovery(value);
                             pairs.push((kexpr, vexpr));
                         }
                         ast::ObjectEntry::Spread { value, .. } => {
                             // Only one spread supported in this bound form; if multiple are allowed,
                             // convert to a list and adjust BoundExpr to carry a Vec
-                            spread = Some(Box::new(self.bind_expr(value)?));
+                            spread = Some(Box::new(self.bind_expr_recovery(value)));
                         }
                     }
                 }
@@ -834,11 +872,10 @@ impl Binder {
             }
 
             Expr::ObjectFor { seq, key, value, filter, span } => {
-                let bseq = self.bind_expr(seq)?;
-                let bkey = self.bind_expr(key)?;
-                let bvalue = self.bind_expr(value)?;
-                let bfilter =
-                    if let Some(f) = filter { Some(Box::new(self.bind_expr(f)?)) } else { None };
+                let bseq = self.bind_expr_recovery(seq);
+                let bkey = self.bind_expr_recovery(key);
+                let bvalue = self.bind_expr_recovery(value);
+                let bfilter = filter.as_ref().map(|f| Box::new(self.bind_expr_recovery(f)));
                 Ok(BoundExpr::ObjectFor {
                     seq: Box::new(bseq),
                     key: Box::new(bkey),
@@ -848,7 +885,7 @@ impl Binder {
                 })
             }
 
-            Expr::Group { expr, .. } => Ok(self.bind_expr(expr)?),
+            Expr::Group { expr, .. } => Ok(self.bind_expr_recovery(expr)),
 
             Expr::FunctionRef { name, span } => {
                 // Standalone reference appears (rare); resolve into a call-site only normally.

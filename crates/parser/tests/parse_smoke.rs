@@ -16,7 +16,7 @@ fn parse_err(src: &str) -> String {
     let mut p = Parser::new(src).expect("lexer error during Parser::new");
     match p.parse_program() {
         Ok(prog) => panic!("expected error, but parsed: {prog}"),
-        Err(e) => format!("{:?}", e.kind), // stable-ish debug string
+        Err(e) => format!("{:?}", e), // stable-ish debug string
     }
 }
 

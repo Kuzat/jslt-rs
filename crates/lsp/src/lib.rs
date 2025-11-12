@@ -32,8 +32,6 @@ impl JsltLanguageServer {
     ///
     /// This is where we integrate with out parser to detect syntax errors
     async fn parse_and_diagnose(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
         // Extract the file path for module resolution
         let file_path = uri
             .to_file_path()
@@ -43,18 +41,9 @@ impl JsltLanguageServer {
 
         // Try to compile the document
         match engine::compile_with_import_path(text, &file_path) {
-            Ok(_) => {
-                // Compilation succeeded, no diagnostics
-            }
-            Err(err) => {
-                // Convert error to diagnostic
-                if let Some(diagnostic) = Self::error_to_diagnostic(err, text) {
-                    diagnostics.push(diagnostic);
-                }
-            }
+            Ok(_) => Vec::new(),
+            Err(err) => Self::error_to_diagnostic(err, text),
         }
-
-        diagnostics
     }
 
     /// Convert a parser error into an LSP Diagnostic
@@ -64,14 +53,34 @@ impl JsltLanguageServer {
     /// - range (start/end position)
     /// - message (description)
     /// - source (who generated it)
-    fn error_to_diagnostic(err: EngineError, text: &str) -> Option<Diagnostic> {
+    fn error_to_diagnostic(err: EngineError, text: &str) -> Vec<Diagnostic> {
+        let mut diagnostic = Vec::new();
+
         match err {
+            EngineError::ParseErrors(parse_errors) => {
+                for err in parse_errors.errors {
+                    let start = Self::byte_offset_to_position(text, err.span.start);
+                    let end = Self::byte_offset_to_position(text, err.span.end);
+
+                    diagnostic.push(Diagnostic {
+                        range: Range { start, end },
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: None,
+                        code_description: None,
+                        source: Some("jslt-parser".to_string()),
+                        message: format!("{}", err),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
+                }
+            }
             EngineError::Parse(parser_err) => {
                 // get the error span if available
                 let start = Self::byte_offset_to_position(text, parser_err.span.start);
                 let end = Self::byte_offset_to_position(text, parser_err.span.end);
 
-                Some(Diagnostic {
+                diagnostic.push(Diagnostic {
                     range: Range { start, end },
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
@@ -83,11 +92,14 @@ impl JsltLanguageServer {
                     data: None,
                 })
             }
-            EngineError::Bind(bind_err) => Some(Self::bind_error_to_diagnostic(bind_err, text)),
+            EngineError::Bind(bind_errors) => {
+                for bind_err in bind_errors.errors {
+                    diagnostic.push(Self::bind_error_to_diagnostic(bind_err, text))
+                }
+            }
             EngineError::Runtime(_) => {
                 // Runtime errors are not reported as diagnostics since they
                 // are not detected at compile time
-                None
             }
             EngineError::ModuleError(_) => {
                 // Module errors do not contain a span for now so just show the start of the file
@@ -95,7 +107,7 @@ impl JsltLanguageServer {
                 let end =
                     Self::byte_offset_to_position(text, text.split_once('\n').unwrap().0.len());
 
-                Some(Diagnostic {
+                diagnostic.push(Diagnostic {
                     range: Range { start, end },
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
@@ -108,6 +120,8 @@ impl JsltLanguageServer {
                 })
             }
         }
+
+        diagnostic
     }
 
     fn bind_error_to_diagnostic(err: BindError, text: &str) -> Diagnostic {

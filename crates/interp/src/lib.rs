@@ -1,5 +1,5 @@
 use crate::binder::{
-    BindError, Binder, BoundExpr, BoundFunction, BoundProgram, CaptureSpec, FunctionId, ObjectKey,
+    BindErrors, Binder, BoundExpr, BoundFunction, BoundProgram, CaptureSpec, FunctionId, ObjectKey,
     ResolvedVar, SyntheticFun,
 };
 use ast::{Program, Span};
@@ -11,7 +11,7 @@ use value::JsltValue;
 
 pub mod binder;
 
-pub fn bind(program: &Program) -> Result<BoundProgram, BindError> {
+pub fn bind(program: &Program) -> Result<BoundProgram, BindErrors> {
     let mut b = Binder::new();
     b.bind_program(program)
 }

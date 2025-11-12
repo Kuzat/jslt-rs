@@ -1,6 +1,6 @@
 use ast::Program;
-use interp::binder::{BindError, Binder, BoundProgram};
-use interp::{apply_with_modules, EvalConfig, RuntimeError};
+use interp::binder::{Binder, BoundProgram};
+use interp::{apply_with_modules, binder, EvalConfig, RuntimeError};
 use parser::Parser;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -10,10 +10,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
+    #[error("parse errors: \n{0}")]
+    ParseErrors(#[from] parser::ParseErrors),
     #[error("parse error: {0}")]
     Parse(#[from] parser::ParseError),
     #[error("bind error: {0}")]
-    Bind(#[from] BindError),
+    Bind(#[from] binder::BindErrors),
     #[error("runtime error: {0}")]
     Runtime(#[from] RuntimeError),
     #[error("io error: {0}")]

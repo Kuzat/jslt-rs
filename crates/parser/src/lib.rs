@@ -48,6 +48,20 @@ impl ParseError {
     }
 }
 
+#[derive(Debug, Error)]
+pub struct ParseErrors {
+    pub errors: Vec<ParseError>,
+}
+
+impl std::fmt::Display for ParseErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for err in &self.errors {
+            writeln!(f, "{}", err)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 struct Tok {
     tok: Token,
@@ -58,33 +72,49 @@ pub struct Parser<'a> {
     lx: Lexer<'a>,
     cur: Tok,
     peeked: Option<Tok>,
+    errors: Vec<ParseError>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
         let mut lx = Lexer::new(input);
         let first = next_token(&mut lx)?;
-        Ok(Parser { lx, cur: first, peeked: None })
+        Ok(Parser { lx, cur: first, peeked: None, errors: Vec::new() })
     }
 
-    pub fn parse_program(&mut self) -> ParseResult<Program> {
+    pub fn parse_program(&mut self) -> Result<Program, ParseErrors> {
         let mut imports = Vec::new();
         let mut defs = Vec::new();
         let mut lets = Vec::new();
 
         // import must come first
         while let Token::Import = self.cur.tok {
-            imports.push(self.parse_import_stmt()?);
+            match self.parse_import_stmt() {
+                Ok(import) => imports.push(import),
+                Err(err) => {
+                    self.errors.push(err);
+                    self.synchronize();
+                }
+            }
         }
 
         // Consume any number of top-level def/let
         loop {
             match self.cur.tok {
-                Token::Def => defs.push(self.parse_def()?),
-                Token::Let => {
-                    let l = self.parse_let_stmt()?;
-                    lets.push(l)
-                }
+                Token::Def => match self.parse_def() {
+                    Ok(def) => defs.push(def),
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize();
+                    }
+                },
+                Token::Let => match self.parse_let_stmt() {
+                    Ok(l) => lets.push(l),
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize();
+                    }
+                },
                 _ => break,
             }
         }
@@ -92,20 +122,59 @@ impl<'a> Parser<'a> {
         // Optional final expression
         let maybe_expr = match self.cur.tok {
             Token::Eof => None,
-            _ => Some(self.parse_if_or_expr()?),
+            _ => match self.parse_if_or_expr() {
+                Ok(expr) => Some(expr),
+                Err(err) => {
+                    self.errors.push(err);
+                    self.synchronize();
+                    None
+                }
+            },
         };
+
+        // Check if we accumulated any errors
+        if !self.errors.is_empty() {
+            return Err(ParseErrors { errors: mem::take(&mut self.errors) });
+        }
 
         // Expect EOF
         let (t, s) = (self.cur.tok.clone(), self.cur.span);
         if !matches!(t, Token::Eof) {
-            return Err(ParseError::unexpected(s, t, "end of input"));
+            return Err(ParseErrors { errors: vec![ParseError::unexpected(s, t, "end of file")] });
         }
 
         // Span: if body exists, use its span; otherwise use single-point at EOF
         let span = if let Some(ref expr) = maybe_expr { expr.span() } else { s };
 
-        // Program span is the expr span (def/lets can be recorded separately in AST if needed)
         Ok(Program { imports, defs, lets, body: maybe_expr, span })
+    }
+
+    /// Synchronize after an error by skipping tokens until we reach a safe recovery point.
+    ///
+    /// Recovery points are:
+    /// - Statement boundaries (def, let, import)
+    /// - Block boundaries (}, ])
+    /// - End of file
+    fn synchronize(&mut self) {
+        // Skip tokens until we find a statement start or block end
+        loop {
+            match self.cur.tok {
+                Token::Eof => return,
+                Token::Def | Token::Let | Token::Import => return,
+                Token::RBrace | Token::RBracket | Token::RParen => {
+                    // Consume the closing bracket and continue
+                    let _ = self.bump();
+                    return;
+                }
+                _ => {
+                    // Skip token and continue
+                    if self.bump().is_err() {
+                        // If we hit a lexer error during sync just stop
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     fn parse_import_stmt(&mut self) -> ParseResult<Import> {

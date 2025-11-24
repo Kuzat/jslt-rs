@@ -75,6 +75,81 @@ cargo test -p engine --test conformance_tests
 ./conformance/scripts/regenerate_expected.sh
 ```
 
+## Performance Benchmarks
+
+This repo includes lightweight performance checks to compare the Rust implementation against the Java reference.
+
+### Rust micro-benchmarks (Criterion)
+
+We use `criterion` benches under `crates/engine/benches/` to measure hot paths:
+
+- `compile_bench.rs` — measures parse+bind compile time for small programs and the queens program.
+- `eval_bench.rs` — measures `apply()` cost for a compiled program (queens and a large identity case).
+- `comprehension_bench.rs` — synthetic map-like comprehension over arrays of different sizes.
+
+Run them with:
+
+```bash
+cargo bench -p engine
+
+# Or list without executing to confirm they build
+cargo bench -p engine --no-run
+```
+
+Notes:
+- Benches reference the `conformance/cases/208_queens.json` fixture for a realistic heavy program.
+- Results are printed to stdout and Criterion's report directory (`target/criterion`).
+
+### CLI end-to-end comparisons: Rust vs Java
+
+In `conformance/scripts/` there are helper scripts that compare the Rust CLI (`jslt`) with the Java reference CLI. They prefer `hyperfine` when available, and fall back to `/usr/bin/time`.
+
+Prereqs:
+- Rust toolchain (stable)
+- Java 11–17 (for Java JSLT)
+- `hyperfine` (recommended) and `jq` (optional but recommended)
+
+Scripts:
+
+1. `bench_transform.sh`
+   - Compare one transform end-to-end (compile + apply) for both Rust and Java.
+   - Usage examples:
+     ```bash
+     # Program file + input file
+     ./conformance/scripts/bench_transform.sh -p examples/foo.jslt -i examples/input.json
+
+     # Inline expression + input file
+     ./conformance/scripts/bench_transform.sh -e '.name' -i examples/input.json
+     ```
+
+2. `bench_queens.sh`
+   - Convenience wrapper to run the queens case from `conformance/cases/208_queens.json`:
+     ```bash
+     ./conformance/scripts/bench_queens.sh
+     ```
+   - You can point it to a different fixture: `--case conformance/cases/XXX.json`.
+
+3. `bench_batch.sh`
+   - Measures throughput over many JSON input files in a directory for a given program.
+   - Usage:
+     ```bash
+     # Using a program file
+     ./conformance/scripts/bench_batch.sh -p examples/foo.jslt -d path/to/inputs
+
+     # Using an inline expression
+     ./conformance/scripts/bench_batch.sh -e '.data | size(.)' -d path/to/inputs
+     ```
+
+Under the hood these scripts:
+- Build the Rust CLI in release mode: `cargo build -p cli --release`.
+- Build and run Java via `conformance/scripts/run_java_jslt.sh` (which builds the fat jar if needed).
+
+### What to look for
+
+- Compile time: `compile_bench` measures parser+binder; useful for LSP-like workloads.
+- Evaluation time: `eval_bench` and CLI scripts measure runtime apply cost.
+- Throughput: `bench_batch.sh` approximates a real-life scenario with one compiled program processing many inputs.
+
 ### CI/CD Testing
 
 The GitHub Actions workflow automatically:

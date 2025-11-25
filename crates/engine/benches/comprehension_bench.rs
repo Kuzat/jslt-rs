@@ -1,4 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint;
 
 // A synthetic map-like comprehension to exercise array/object comprehensions
 // Example program applies a transformation over an array field `.items`
@@ -23,8 +24,8 @@ fn bench_comprehension(c: &mut Criterion) {
         let input = build_large_input(n);
         c.bench_function(&format!("comprehension_n={}", n), |b| {
             b.iter(|| {
-                let out = compiled.apply(black_box(&input), None).expect("apply");
-                criterion::black_box(out);
+                let out = compiled.apply(hint::black_box(&input), None).expect("apply");
+                hint::black_box(out);
             })
         });
     }

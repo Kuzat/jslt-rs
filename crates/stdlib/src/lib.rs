@@ -351,7 +351,7 @@ impl JsltFunction for NumberFn {
             return Ok(v.clone());
         }
         // strings => parse (allow leading zeros)
-        if let Some(s) = v.0.as_str() {
+        if let Some(s) = v.as_json().as_str() {
             let s_trim = s.trim();
             match s_trim.parse::<f64>() {
                 Ok(n) => Ok(JsltValue::number_f64(n)),
@@ -401,11 +401,11 @@ impl JsltFunction for SizeFn {
         if v.is_null() {
             return Ok(JsltValue::null());
         }
-        let n = if let Some(s) = v.0.as_str() {
+        let n = if let Some(s) = v.as_json().as_str() {
             s.chars().count()
-        } else if let Some(a) = v.0.as_array() {
+        } else if let Some(a) = v.as_json().as_array() {
             a.len()
-        } else if let Some(o) = v.0.as_object() {
+        } else if let Some(o) = v.as_json().as_object() {
             o.len()
         } else {
             return Err(StdlibError::Type(format!("size: unsupported type {}", v.type_of())));
@@ -588,7 +588,7 @@ impl JsltFunction for ContainsFn {
         let elt = &args[0];
         let seq = &args[1];
 
-        match seq.0.clone() {
+        match seq.as_json() {
             Value::Array(a) => {
                 // deep equality
                 let found = a.iter().any(|v| elt.deep_eq(&JsltValue::from_json(v.clone())));

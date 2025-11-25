@@ -142,13 +142,9 @@ impl<'a> Parser<'a> {
         // Expect EOF
         let (t, s) = (self.cur.tok.clone(), self.cur.span);
         if !matches!(t, Token::Eof) {
-            return Err(ParseErrors { errors: vec![
-                ParseError::unexpected(
-                    self.prev_span,
-                    t,
-                    "end of file"
-                )
-            ] });
+            return Err(ParseErrors {
+                errors: vec![ParseError::unexpected(self.prev_span, t, "end of file")],
+            });
         }
 
         // Span: if body exists, use its span; otherwise use single-point at EOF

@@ -5,6 +5,7 @@ use crate::binder::{
 use ast::{Program, Span};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 use stdlib::Registry;
 use thiserror::Error;
 use value::JsltValue;
@@ -59,7 +60,7 @@ pub enum RuntimeError {
 
 #[derive(Debug, Clone)]
 struct Closure {
-    fun: BoundFunction,
+    fun: Arc<BoundFunction>,
     captures: Vec<JsltValue>,
     capture_map: HashMap<(usize, usize), usize>, // (depth, slot) -> index in captures
 }
@@ -203,7 +204,7 @@ impl<'p> Evaluator<'p> {
                 capture_map.insert((cap.depth, cap.slot), i);
                 captures.push(val);
             }
-            out.insert(f.id, Closure { fun: f.clone(), captures, capture_map });
+            out.insert(f.id, Closure { fun: Arc::new(f.clone()), captures, capture_map });
         }
         Ok(out)
     }
@@ -219,7 +220,7 @@ impl<'p> Evaluator<'p> {
                 capture_map.insert((cap.depth, cap.slot), i);
                 captures.push(val);
             }
-            closures.insert(f.id, Closure { fun: f.clone(), captures, capture_map });
+            closures.insert(f.id, Closure { fun: Arc::new(f.clone()), captures, capture_map });
         }
         self.closures = closures;
         Ok(())
@@ -504,19 +505,21 @@ impl<'p> Evaluator<'p> {
                 };
                 let mut out = Vec::with_capacity(arr.len());
                 let caller_frame = self.current_frame().clone();
+                // Reuse a single frame for all iterations to avoid cloning locals repeatedly.
+                self.push_frame(Frame {
+                    locals: caller_frame.locals.clone(),
+                    this_val: JsltValue::null(),
+                    active_fun: caller_frame.active_fun,
+                });
                 for item in arr {
-                    self.push_frame(Frame {
-                        locals: caller_frame.locals.clone(),
-                        this_val: JsltValue::from_json(item),
-                        active_fun: caller_frame.active_fun,
-                    });
+                    self.current_frame_mut().this_val = JsltValue::from_json(item);
                     let pass =
                         if let Some(f) = filter { self.eval_expr(f)?.truthy() } else { true };
                     if pass {
                         out.push(self.eval_expr(elem)?.into_json());
                     }
-                    self.pop_frame();
                 }
+                self.pop_frame();
                 Ok(JsltValue::from_json(Value::Array(out)))
             }
 
@@ -531,12 +534,13 @@ impl<'p> Evaluator<'p> {
                 };
                 let mut out = Map::new();
                 let caller_frame = self.current_frame().clone();
+                self.push_frame(Frame {
+                    locals: caller_frame.locals.clone(),
+                    this_val: JsltValue::null(),
+                    active_fun: caller_frame.active_fun,
+                });
                 for item in arr {
-                    self.push_frame(Frame {
-                        locals: caller_frame.locals.clone(),
-                        this_val: JsltValue::from_json(item),
-                        active_fun: caller_frame.active_fun,
-                    });
+                    self.current_frame_mut().this_val = JsltValue::from_json(item);
                     let pass =
                         if let Some(f) = filter { self.eval_expr(f)?.truthy() } else { true };
                     if pass {
@@ -553,8 +557,8 @@ impl<'p> Evaluator<'p> {
                         let v = self.eval_expr(value)?;
                         out.insert(kstr, v.into_json());
                     }
-                    self.pop_frame();
                 }
+                self.pop_frame();
                 Ok(JsltValue::from_json(Value::Object(out)))
             }
 
@@ -630,14 +634,15 @@ impl<'p> Evaluator<'p> {
                     }
                 } else {
                     // user or synthetic imported
-                    let (fun_id, fun_obj) = {
+                    let fun_arc = {
                         let clo =
                             self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
-                        (clo.fun.id, clo.fun.clone())
+                        clo.fun.clone()
                     };
+                    let fun_id = fun_arc.id;
 
                     // synthetic import dispatch
-                    if let Some(syn) = &fun_obj._synthetic {
+                    if let Some(syn) = &fun_arc._synthetic {
                         return match syn {
                             SyntheticFun::ImportedLocal { module_key, target_id } => {
                                 // Proxy call: redirect to imported module's function by id
@@ -654,7 +659,7 @@ impl<'p> Evaluator<'p> {
                                     Some(v) => v.clone(),
                                     None => {
                                         return Err(RuntimeError::ArityMismatch {
-                                            name: fun_obj.name.clone(),
+                                            name: fun_arc.name.clone(),
                                             expected: 1,
                                             got: 0,
                                             span: *span,
@@ -667,19 +672,11 @@ impl<'p> Evaluator<'p> {
                     }
 
                     // user defined function
-                    let (expected_params, fun_body, fun_lets) = {
-                        let clo =
-                            self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
-                        (clo.fun.params.len(), clo.fun.body.clone(), clo.fun.lets.clone())
-                    };
+                    let expected_params = fun_arc.params.len();
 
                     if evaluated_args.len() != expected_params {
                         return Err(RuntimeError::ArityMismatch {
-                            name: self
-                                .closures
-                                .get(id)
-                                .map(|c| c.fun.name.clone())
-                                .unwrap_or_else(|| "<function>".to_string()),
+                            name: fun_arc.name.clone(),
                             expected: expected_params,
                             got: evaluated_args.len(),
                             span: *span,
@@ -689,7 +686,9 @@ impl<'p> Evaluator<'p> {
                     let caller_this = self.current_frame().this_val.clone();
                     // Allocate locals for params + function-local lets
                     let mut locals = evaluated_args;
-                    locals.resize(expected_params + fun_lets.len(), JsltValue::null());
+                    locals.resize(expected_params + fun_arc.lets.len(), JsltValue::null());
+                    let fun_body = &fun_arc.body;
+                    let fun_lets = &fun_arc.lets;
                     let new_frame =
                         Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
                     self.with_call_depth(|me| {
@@ -702,7 +701,7 @@ impl<'p> Evaluator<'p> {
                                 *slot = v;
                             }
                         }
-                        let result = me.eval_expr(&fun_body)?;
+                        let result = me.eval_expr(fun_body)?;
                         me.pop_frame();
                         Ok(result)
                     })
@@ -862,8 +861,8 @@ impl<'p> Evaluator<'p> {
         self.stack.push(call_frame);
 
         // 6) eval body within module context: swap closures and sub-modules
-        let fun_body = target_fun.body.clone();
-        let fun_lets = target_fun.lets.clone();
+        let fun_body = &target_fun.body;
+        let fun_lets = &target_fun.lets;
         let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
         let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
         let result = self.with_call_depth(|me| {
@@ -875,7 +874,7 @@ impl<'p> Evaluator<'p> {
                     *slot = v;
                 }
             }
-            let v = me.eval_expr(&fun_body)?;
+            let v = me.eval_expr(fun_body)?;
             Ok(v)
         });
         // restore evaluator context

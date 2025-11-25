@@ -140,6 +140,22 @@ Scripts:
      ./conformance/scripts/bench_batch.sh -e '.data | size(.)' -d path/to/inputs
      ```
 
+4. `bench_suite.sh`
+   - One-command automated suite that runs several scenarios and produces a single consolidated Markdown report comparing Rust vs Java.
+   - Usage:
+     ```bash
+     # Quick mode (smaller datasets, fewer runs)
+     ./conformance/scripts/bench_suite.sh --quick
+
+     # Full mode with custom output directory
+     ./conformance/scripts/bench_suite.sh --out ./target/my-bench-$(date +%s)
+     ```
+   - Output: a timestamped directory under `target/bench-suite-*/` containing per-scenario Markdown files and a combined `benchmark_suite_*.md` report.
+   - Scenarios covered:
+     - Queens heavy program from `conformance/cases/208_queens.json`
+     - Micro single-transform cases (identity, small object arithmetic, small comprehension)
+     - Batch throughput across generated directories of JSON files (uses `gen_json_dir.sh`)
+
 Under the hood these scripts:
 - Build the Rust CLI in release mode: `cargo build -p cli --release`.
 - Build and run Java via `conformance/scripts/run_java_jslt.sh` (which builds the fat jar if needed).

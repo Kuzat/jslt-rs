@@ -1,0 +1,56 @@
+name: Bench on PR Comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  run-bench:
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'benchy run bench') &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bench deps (hyperfine, jq, Java)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y hyperfine jq default-jdk
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run bench suite
+        id: bench
+        run: |
+          set -eo pipefail
+          # Run the full suite; capture the emitted report path (last line of output)
+          REPORT_PATH=$(conformance/scripts/bench_suite.sh | tail -n1)
+          echo "report_path=${REPORT_PATH}" >> "$GITHUB_OUTPUT"
+          # Stash the report content for the comment step
+          echo "----------BEGIN_REPORT----------" >> /tmp/bench_report_payload.txt
+          cat "${REPORT_PATH}" >> /tmp/bench_report_payload.txt
+          echo "----------END_REPORT----------" >> /tmp/bench_report_payload.txt
+
+      - name: Comment results on PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          REPORT_CONTENT=$(sed -n '/^----------BEGIN_REPORT----------$/,/^----------END_REPORT----------$/p' /tmp/bench_report_payload.txt | sed '1d;$d')
+          gh api \
+            --method POST \
+            "/repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$(printf 'Bench suite results (trigger: "%s"):\n\n```markdown\n%s\n```' "${{ github.event.comment.body }}" "$REPORT_CONTENT")"

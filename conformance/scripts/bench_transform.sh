@@ -56,31 +56,40 @@ popd >/dev/null
 
 JSLT_BIN="$REPO_ROOT/target/release/jslt"
 
-# Prepare commands
+join_cmd() {
+  local out=""
+  for arg in "$@"; do
+    out+="$(printf '%q' "$arg") "
+  done
+  echo "${out% }"
+}
+
+# Prepare commands as strings for both hyperfine and time
 if [[ -n "$PROGRAM" ]]; then
-  RUST_CMD="${JSLT_BIN} -p ${PROGRAM} -i ${INPUT} ${PRETTY}"
-  JAVA_CMD="${JAVA_RUN_SH} ${PROGRAM} ${INPUT}"
+  RUST_CMD_STR=$(join_cmd "$JSLT_BIN" -p "$PROGRAM" -i "$INPUT" ${PRETTY:+$PRETTY})
+  JAVA_CMD_STR=$(join_cmd "$JAVA_RUN_SH" "$PROGRAM" "$INPUT")
 else
-  RUST_CMD=("$JSLT_BIN" -e "$EVAL" -i "$INPUT" $PRETTY)
   # For Java CLI we need a file; create a temp file with the expression
   TMP_PROG=$(mktemp /tmp/jslt-prog-XXXX.jslt)
   echo "$EVAL" > "$TMP_PROG"
   trap 'rm -f "$TMP_PROG"' EXIT
-  JAVA_CMD=("$JAVA_RUN_SH" "$TMP_PROG" "$INPUT")
+
+  RUST_CMD_STR=$(join_cmd "$JSLT_BIN" -e "$EVAL" -i "$INPUT" ${PRETTY:+$PRETTY})
+  JAVA_CMD_STR=$(join_cmd "$JAVA_RUN_SH" "$TMP_PROG" "$INPUT")
 fi
 
 if command -v hyperfine >/dev/null 2>&1; then
   echo "RUST hyperfine command string:"
-  printf '  %s\n' "${RUST_CMD} > /dev/null"
+  printf '  %s\n' "${RUST_CMD_STR} > /dev/null"
 
   echo "Running with hyperfine..." >&2
   hyperfine \
     --warmup 3 \
     --export-markdown benchmark_transform.md \
     --command-name "rust jslt" \
-    "${RUST_CMD} > /dev/null" \
+    "${RUST_CMD_STR} > /dev/null" \
     --command-name "java jslt" \
-    "${JAVA_CMD} > /dev/null"
+    "${JAVA_CMD_STR} > /dev/null"
   echo "Results saved to benchmark_transform.md"
 else
   echo "hyperfine not found; using /usr/bin/time for a few runs" >&2
@@ -88,9 +97,9 @@ else
     echo "=== $name ==="
     for i in {1..5}; do
       if [[ "$name" == "rust jslt" ]]; then
-        /usr/bin/time -lp "${RUST_CMD[@]}" >/dev/null
+        /usr/bin/time -lp bash -c "${RUST_CMD_STR} >/dev/null"
       else
-        /usr/bin/time -lp "${JAVA_CMD[@]}" >/dev/null
+        /usr/bin/time -lp bash -c "${JAVA_CMD_STR} >/dev/null"
       fi
     done
   done

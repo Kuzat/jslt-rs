@@ -51,16 +51,25 @@ if [[ -n "$EVAL" ]]; then
   trap 'rm -f "$TMP_PROG"' EXIT
 fi
 
-RUST_LOOP='for f in "$DIR"/*.json; do [[ -f "$f" ]] || continue; "$JSLT_BIN" ARG_PROG -i "$f" >/dev/null; done'
-JAVA_LOOP='for f in "$DIR"/*.json; do [[ -f "$f" ]] || continue; "$JAVA_RUN_SH" ARG_PROG "$f" >/dev/null; done'
+quote() { printf '%q' "$1"; }
 
 if [[ -n "$PROGRAM" ]]; then
-  RUST_LOOP=${RUST_LOOP/ARG_PROG/-p "$PROGRAM"}
-  JAVA_LOOP=${JAVA_LOOP/ARG_PROG/"$PROGRAM"}
+  PROG_ARG_RUST="-p $(quote "$PROGRAM")"
+  PROG_ARG_JAVA="$(quote "$PROGRAM")"
 else
-  RUST_LOOP=${RUST_LOOP/ARG_PROG/-e "$EVAL"}
-  JAVA_LOOP=${JAVA_LOOP/ARG_PROG/"$TMP_PROG"}
+  PROG_ARG_RUST="-e $(quote "$EVAL")"
+  PROG_ARG_JAVA="$(quote "$TMP_PROG")"
 fi
+
+PRETTY_PART=""
+if [[ -n "$PRETTY" ]]; then
+  PRETTY_PART=" $(quote "$PRETTY")"
+fi
+
+# Build fully inlined loop bodies so subshells don't depend on exported vars.
+RUST_LOOP="for f in $(quote "$DIR")/*.json; do [[ -f \"\$f\" ]] || continue; $(quote "$JSLT_BIN") $PROG_ARG_RUST -i \"\$f\"${PRETTY_PART} >/dev/null; done"
+JAVA_LOOP="for f in $(quote "$DIR")/*.json; do [[ -f \"\$f\" ]] || continue; $(quote "$JAVA_RUN_SH") $PROG_ARG_JAVA \"\$f\" >/dev/null; done"
+
 
 if command -v hyperfine >/dev/null 2>&1; then
   echo "Running batch with hyperfine over $(ls "$DIR"/*.json 2>/dev/null | wc -l | tr -d ' ') files..." >&2

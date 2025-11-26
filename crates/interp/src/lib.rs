@@ -17,17 +17,29 @@ pub fn bind(program: &Program) -> Result<BoundProgram, BindErrors> {
     b.bind_program(program)
 }
 
+/// Configuration for the interpreter.
+///
+/// max_step: Max number of expression steps (nodes) to evaluate. None = unlimited
+/// max_call_depth: Max recursion depth (function calls). None = unlimited
+/// budget_check_at: Budget check at. Delays the check until after this many steps.
+///     None = no budget check.
 #[derive(Debug, Clone)]
 pub struct EvalConfig {
     // Max number of expression steps (nodes) to evaluate. None = unlimited
     pub max_steps: Option<u64>,
     // Max recursion depth (function calls). None = unlimited
     pub max_call_depth: Option<usize>,
+    // Budget check at. Delays the check until after this many steps.
+    pub budget_check_at: Option<u64>,
 }
 
 impl Default for EvalConfig {
     fn default() -> Self {
-        Self { max_steps: Some(100_000_000), max_call_depth: Some(10_000) }
+        Self {
+            max_steps: Some(100_000_000),
+            max_call_depth: Some(10_000),
+            budget_check_at: Some(1024),
+        }
     }
 }
 
@@ -75,7 +87,7 @@ struct Frame {
 #[derive(Debug, Clone)]
 struct ModuleRuntime {
     top_frame: Frame,
-    closures: HashMap<FunctionId, Closure>,
+    closures: Vec<Option<Closure>>,
     // Body of the module program (used when the module is imported as a callable)
     body: BoundExpr,
     // Sub-modules imported by this module (preserves hierarchy)
@@ -84,9 +96,10 @@ struct ModuleRuntime {
 
 struct Evaluator<'p> {
     prog: &'p BoundProgram,
-    closures: HashMap<FunctionId, Closure>,
+    closures: Vec<Option<Closure>>,
     cfg: EvalConfig,
     steps: u64,
+    budget_check_at: u64,
     call_depth: usize,
     stack: Vec<Frame>,
     registry: Registry,
@@ -102,7 +115,8 @@ impl<'p> Evaluator<'p> {
 
         Self {
             prog,
-            closures: HashMap::new(),
+            closures: Vec::new(),
+            budget_check_at: cfg.budget_check_at.unwrap_or(u64::MAX),
             cfg,
             steps: 0,
             call_depth: 0,
@@ -114,10 +128,18 @@ impl<'p> Evaluator<'p> {
     }
 
     fn bump_steps(&mut self) -> Result<(), RuntimeError> {
-        self.steps += 1;
-        if let Some(max) = self.cfg.max_steps {
-            if self.steps > max {
-                return Err(RuntimeError::BudgetExceeded(max));
+        if self.cfg.max_steps.is_none() {
+            return Ok(());
+        }
+        self.steps = self.steps.wrapping_add(1);
+        if self.steps >= self.budget_check_at {
+            if let Some(max) = self.cfg.max_steps {
+                if self.steps > max {
+                    return Err(RuntimeError::BudgetExceeded(max));
+                }
+                // Check again after the next chunk of work
+                self.budget_check_at =
+                    self.steps.saturating_add(self.cfg.budget_check_at.unwrap_or(1024));
             }
         }
         Ok(())
@@ -137,19 +159,24 @@ impl<'p> Evaluator<'p> {
         self.stack.last_mut().expect("frame present")
     }
 
-    fn with_call_depth<T>(
-        &mut self,
-        f: impl FnOnce(&mut Self) -> Result<T, RuntimeError>,
-    ) -> Result<T, RuntimeError> {
+    #[inline]
+    fn enter_call(&mut self) -> Result<(), RuntimeError> {
         self.call_depth += 1;
         if let Some(max) = self.cfg.max_call_depth {
             if self.call_depth > max {
+                // Roll back depth before returning error
+                self.call_depth -= 1;
                 return Err(RuntimeError::RecursionExceeded(max));
             }
         }
-        let r = f(self);
-        self.call_depth -= 1;
-        r
+        Ok(())
+    }
+
+    #[inline]
+    fn exit_call(&mut self) {
+        if self.call_depth > 0 {
+            self.call_depth -= 1;
+        }
     }
 
     fn init_module_runtime(&mut self, child: &BoundProgram) -> Result<ModuleRuntime, RuntimeError> {
@@ -194,8 +221,8 @@ impl<'p> Evaluator<'p> {
     fn build_closures_for(
         &mut self,
         child: &BoundProgram,
-    ) -> Result<HashMap<FunctionId, Closure>, RuntimeError> {
-        let mut out = HashMap::new();
+    ) -> Result<Vec<Option<Closure>>, RuntimeError> {
+        let mut out = Self::closure_slots(&child.functions);
         for f in &child.functions {
             let mut captures = Vec::with_capacity(f.captures.len());
             let mut capture_map = HashMap::new();
@@ -204,14 +231,14 @@ impl<'p> Evaluator<'p> {
                 capture_map.insert((cap.depth, cap.slot), i);
                 captures.push(val);
             }
-            out.insert(f.id, Closure { fun: Arc::new(f.clone()), captures, capture_map });
+            out[f.id.0] = Some(Closure { fun: Arc::new(f.clone()), captures, capture_map });
         }
         Ok(out)
     }
 
     fn materialize_closures_from_top(&mut self) -> Result<(), RuntimeError> {
         // Build closure after top-level lets evaluated.
-        let mut closures = HashMap::new();
+        let mut closures = Self::closure_slots(&self.prog.functions);
         for f in &self.prog.functions {
             let mut captures = Vec::with_capacity(f.captures.len());
             let mut capture_map = HashMap::new();
@@ -220,10 +247,16 @@ impl<'p> Evaluator<'p> {
                 capture_map.insert((cap.depth, cap.slot), i);
                 captures.push(val);
             }
-            closures.insert(f.id, Closure { fun: Arc::new(f.clone()), captures, capture_map });
+            closures[f.id.0] = Some(Closure { fun: Arc::new(f.clone()), captures, capture_map });
         }
         self.closures = closures;
         Ok(())
+    }
+
+    // Pre-size closure slots so ids index directly.
+    fn closure_slots(functions: &[BoundFunction]) -> Vec<Option<Closure>> {
+        let max_id = functions.iter().map(|f| f.id.0).max().unwrap_or(0);
+        vec![None; max_id + 1]
     }
 
     fn lookup_captures_from_stack(&self, cap: CaptureSpec) -> Result<JsltValue, RuntimeError> {
@@ -242,6 +275,10 @@ impl<'p> Evaluator<'p> {
             .cloned()
             .ok_or_else(|| RuntimeError::Internal(format!("invalid capture slot {}", slot)))?;
         Ok(v)
+    }
+
+    fn closure(&self, id: &FunctionId) -> Option<&Closure> {
+        self.closures.get(id.0).and_then(|c| c.as_ref())
     }
 
     fn eval_program(mut self, input: &Value) -> Result<Value, RuntimeError> {
@@ -335,7 +372,7 @@ impl<'p> Evaluator<'p> {
                 let fid = self.current_frame().active_fun.ok_or_else(|| {
                     RuntimeError::Internal("captured var without active function".into())
                 })?;
-                let clo = self.closures.get(&fid).ok_or(RuntimeError::UnknownFunction(fid))?;
+                let clo = self.closure(&fid).ok_or(RuntimeError::UnknownFunction(fid))?;
                 let idx = clo.capture_map.get(&(*depth, *slot)).copied().ok_or_else(|| {
                     RuntimeError::Internal(format!(
                         "missing caputre mapping for {:?}:{:?}",
@@ -496,14 +533,7 @@ impl<'p> Evaluator<'p> {
 
             ArrayFor { seq, elem, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
-                let arr: Vec<Value> = match seq_val.as_json() {
-                    Value::Array(a) => a.clone(),
-                    Value::Object(m) => {
-                        m.iter().map(|(k, v)| json!({ "key": k, "value": v })).collect()
-                    }
-                    _ => Vec::new(),
-                };
-                let mut out = Vec::with_capacity(arr.len());
+                let mut out = Vec::new();
                 let caller_frame = self.current_frame().clone();
                 // Reuse a single frame for all iterations to avoid cloning locals repeatedly.
                 self.push_frame(Frame {
@@ -511,13 +541,37 @@ impl<'p> Evaluator<'p> {
                     this_val: JsltValue::null(),
                     active_fun: caller_frame.active_fun,
                 });
-                for item in arr {
-                    self.current_frame_mut().this_val = JsltValue::from_json(item);
-                    let pass =
-                        if let Some(f) = filter { self.eval_expr(f)?.truthy() } else { true };
-                    if pass {
-                        out.push(self.eval_expr(elem)?.into_json());
+                match seq_val.as_json() {
+                    Value::Array(items) => {
+                        out.reserve(items.len());
+                        for item in items {
+                            self.current_frame_mut().this_val = JsltValue::from_json(item.clone());
+                            let pass = if let Some(f) = filter {
+                                self.eval_expr(f)?.truthy()
+                            } else {
+                                true
+                            };
+                            if pass {
+                                out.push(self.eval_expr(elem)?.into_json());
+                            }
+                        }
                     }
+                    Value::Object(map) => {
+                        out.reserve(map.len());
+                        for (k, v) in map {
+                            self.current_frame_mut().this_val =
+                                JsltValue::from_json(json!({ "key": k, "value": v }));
+                            let pass = if let Some(f) = filter {
+                                self.eval_expr(f)?.truthy()
+                            } else {
+                                true
+                            };
+                            if pass {
+                                out.push(self.eval_expr(elem)?.into_json());
+                            }
+                        }
+                    }
+                    _ => { /* nothing */ }
                 }
                 self.pop_frame();
                 Ok(JsltValue::from_json(Value::Array(out)))
@@ -525,13 +579,6 @@ impl<'p> Evaluator<'p> {
 
             ObjectFor { seq, key, value, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
-                let arr: Vec<Value> = match seq_val.as_json() {
-                    Value::Array(a) => a.clone(),
-                    Value::Object(m) => {
-                        m.iter().map(|(k, v)| json!({ "key": k, "value": v })).collect()
-                    }
-                    _ => Vec::new(),
-                };
                 let mut out = Map::new();
                 let caller_frame = self.current_frame().clone();
                 self.push_frame(Frame {
@@ -539,24 +586,57 @@ impl<'p> Evaluator<'p> {
                     this_val: JsltValue::null(),
                     active_fun: caller_frame.active_fun,
                 });
-                for item in arr {
-                    self.current_frame_mut().this_val = JsltValue::from_json(item);
-                    let pass =
-                        if let Some(f) = filter { self.eval_expr(f)?.truthy() } else { true };
-                    if pass {
-                        let k = self.eval_expr(key)?;
-                        let kstr = match k.as_json() {
-                            Value::String(s) => s.clone(),
-                            _ => {
-                                return Err(RuntimeError::TypeError {
-                                    msg: "object key must be a  string".into(),
-                                    span: key.span(),
-                                });
+                match seq_val.as_json() {
+                    Value::Array(items) => {
+                        for item in items {
+                            self.current_frame_mut().this_val = JsltValue::from_json(item.clone());
+                            let pass = if let Some(f) = filter {
+                                self.eval_expr(f)?.truthy()
+                            } else {
+                                true
+                            };
+                            if pass {
+                                let k = self.eval_expr(key)?;
+                                let kstr = match k.as_json() {
+                                    Value::String(s) => s.clone(),
+                                    _ => {
+                                        return Err(RuntimeError::TypeError {
+                                            msg: "object key must be a  string".into(),
+                                            span: key.span(),
+                                        });
+                                    }
+                                };
+                                let v = self.eval_expr(value)?;
+                                out.insert(kstr, v.into_json());
                             }
-                        };
-                        let v = self.eval_expr(value)?;
-                        out.insert(kstr, v.into_json());
+                        }
                     }
+                    Value::Object(map) => {
+                        for (k_raw, v_raw) in map {
+                            self.current_frame_mut().this_val =
+                                JsltValue::from_json(json!({ "key": k_raw, "value": v_raw }));
+                            let pass = if let Some(f) = filter {
+                                self.eval_expr(f)?.truthy()
+                            } else {
+                                true
+                            };
+                            if pass {
+                                let k = self.eval_expr(key)?;
+                                let kstr = match k.as_json() {
+                                    Value::String(s) => s.clone(),
+                                    _ => {
+                                        return Err(RuntimeError::TypeError {
+                                            msg: "object key must be a  string".into(),
+                                            span: key.span(),
+                                        });
+                                    }
+                                };
+                                let v = self.eval_expr(value)?;
+                                out.insert(kstr, v.into_json());
+                            }
+                        }
+                    }
+                    _ => { /* nothing */ }
                 }
                 self.pop_frame();
                 Ok(JsltValue::from_json(Value::Object(out)))
@@ -634,11 +714,10 @@ impl<'p> Evaluator<'p> {
                     }
                 } else {
                     // user or synthetic imported
-                    let fun_arc = {
-                        let clo =
-                            self.closures.get(id).ok_or(RuntimeError::UnknownFunction(*id))?;
-                        clo.fun.clone()
-                    };
+                    let fun_arc = self
+                        .closure(id)
+                        .map(|c| c.fun.clone())
+                        .ok_or(RuntimeError::UnknownFunction(*id))?;
                     let fun_id = fun_arc.id;
 
                     // synthetic import dispatch
@@ -691,20 +770,23 @@ impl<'p> Evaluator<'p> {
                     let fun_lets = &fun_arc.lets;
                     let new_frame =
                         Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
-                    self.with_call_depth(|me| {
-                        me.push_frame(new_frame);
+                    self.enter_call()?;
+                    self.push_frame(new_frame);
+                    let result = (|| -> Result<JsltValue, RuntimeError> {
                         // Evaluate function-local lets in order into their slots
                         for (i, (_name, expr)) in fun_lets.iter().enumerate() {
-                            let v = me.eval_expr(expr)?;
+                            let v = self.eval_expr(expr)?;
                             let idx = expected_params + i;
-                            if let Some(slot) = me.current_frame_mut().locals.get_mut(idx) {
+                            if let Some(slot) = self.current_frame_mut().locals.get_mut(idx) {
                                 *slot = v;
                             }
                         }
-                        let result = me.eval_expr(fun_body)?;
-                        me.pop_frame();
+                        let result = self.eval_expr(fun_body)?;
                         Ok(result)
-                    })
+                    })();
+                    self.pop_frame();
+                    self.exit_call();
+                    result
                 }
             }
         }
@@ -831,7 +913,8 @@ impl<'p> Evaluator<'p> {
             })?;
             let target = mr
                 .closures
-                .get(target_id)
+                .get(target_id.0)
+                .and_then(|c| c.as_ref())
                 .ok_or(RuntimeError::UnknownFunction(*target_id))?
                 .fun
                 .clone();
@@ -865,21 +948,23 @@ impl<'p> Evaluator<'p> {
         let fun_lets = &target_fun.lets;
         let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
         let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
-        let result = self.with_call_depth(|me| {
+        self.enter_call()?;
+        let result = (|| -> Result<JsltValue, RuntimeError> {
             // Evaluate function-local lets into their slots before running the body
             for (i, (_name, expr)) in fun_lets.iter().enumerate() {
-                let v = me.eval_expr(expr)?;
+                let v = self.eval_expr(expr)?;
                 let idx = expected_params + i;
-                if let Some(slot) = me.current_frame_mut().locals.get_mut(idx) {
+                if let Some(slot) = self.current_frame_mut().locals.get_mut(idx) {
                     *slot = v;
                 }
             }
-            let v = me.eval_expr(fun_body)?;
+            let v = self.eval_expr(fun_body)?;
             Ok(v)
-        });
+        })();
         // restore evaluator context
         self.closures = saved_closures;
         self.modules = saved_modules;
+        self.exit_call();
 
         // 7) pop both frames from stack
         self.stack.pop();
@@ -912,13 +997,12 @@ impl<'p> Evaluator<'p> {
         // swap into module context for duration of evaluation
         let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
         let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
-        let result = self.with_call_depth(|me| {
-            let v = me.eval_expr(&fun_body)?;
-            Ok(v)
-        });
+        self.enter_call()?;
+        let result = self.eval_expr(&fun_body);
         // restore
         self.closures = saved_closures;
         self.modules = saved_modules;
+        self.exit_call();
 
         // Pop both frames from stack
         self.stack.pop();
@@ -1270,7 +1354,8 @@ mod tests {
             ),
             vec![],
         );
-        let cfg = EvalConfig { max_steps: Some(3), max_call_depth: Some(100) };
+        let cfg =
+            EvalConfig { max_steps: Some(3), max_call_depth: Some(100), budget_check_at: Some(1) };
         let err = apply(&p, &json!(null), Some(cfg)).unwrap_err();
         match err {
             RuntimeError::BudgetExceeded(_) => {}
@@ -1292,7 +1377,11 @@ mod tests {
         let body = B::Call { id: fid, args: vec![], span: sp() };
         let p2 = prog_with(vec![], body, vec![fun]);
 
-        let cfg2 = EvalConfig { max_steps: Some(10_000), max_call_depth: Some(8) };
+        let cfg2 = EvalConfig {
+            max_steps: Some(10_000),
+            max_call_depth: Some(8),
+            budget_check_at: Some(1),
+        };
         let err2 = apply(&p2, &json!(null), Some(cfg2)).unwrap_err();
         match err2 {
             RuntimeError::RecursionExceeded(_) => {}

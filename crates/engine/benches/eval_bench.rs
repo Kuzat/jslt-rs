@@ -14,7 +14,7 @@ fn bench_eval_queens(c: &mut Criterion) {
 
     let mut g = c.benchmark_group("eval_queens");
     g.measurement_time(std::time::Duration::from_secs(10));
-    g.sample_size(10);
+    g.sample_size(100);
     g.bench_function("apply_only", |b| {
         b.iter(|| {
             let out = compiled.apply(hint::black_box(&input), None).expect("apply");

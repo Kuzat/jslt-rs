@@ -20,3 +20,16 @@ interp = { path = "../interp" }
 
 [dev-dependencies]
 tempfile = "3.8"
+criterion = { version = "0.7.0" }
+
+[[bench]]
+name = "compile_bench"
+harness = false
+
+[[bench]]
+name = "eval_bench"
+harness = false
+
+[[bench]]
+name = "comprehension_bench"
+harness = false

@@ -8,24 +8,25 @@
 //!
 //! String index and slice by Unicode scalar values (code points), not bytes.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Number, Value};
+use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JsltValue(pub Value);
+#[derive(Debug, Clone, PartialEq)]
+pub struct JsltValue(pub Arc<Value>);
 
 impl JsltValue {
     // Constructors and type guards
     pub fn null() -> Self {
-        Self(Value::Null)
+        Self(Arc::new(Value::Null))
     }
 
     pub fn bool(b: bool) -> Self {
-        Self(Value::Bool(b))
+        Self(Arc::new(Value::Bool(b)))
     }
 
     pub fn string(s: String) -> Self {
-        Self(Value::String(s))
+        Self(Arc::new(Value::String(s)))
     }
 
     /// Constructs a numeric value from an f64, but prefer an integer
@@ -41,57 +42,58 @@ impl JsltValue {
     }
 
     pub fn number_f64(n: f64) -> Self {
-        Self(Value::Number(Number::from_f64(n).unwrap()))
+        Self(Arc::new(Value::Number(Number::from_f64(n).unwrap())))
     }
 
     pub fn number_i64(n: i64) -> Self {
-        Self(Value::Number(Number::from(n)))
+        Self(Arc::new(Value::Number(Number::from(n))))
     }
 
     pub fn array(a: Vec<JsltValue>) -> Self {
-        Self(Value::Array(a.into_iter().map(|v| v.0).collect()))
+        let items: Vec<Value> = a.into_iter().map(|v| v.into_json()).collect();
+        Self(Arc::new(Value::Array(items)))
     }
 
     pub fn is_null(&self) -> bool {
-        matches!(self.0, Value::Null)
+        matches!(self.0.as_ref(), Value::Null)
     }
 
     pub fn is_boolean(&self) -> bool {
-        matches!(self.0, Value::Bool(_))
+        matches!(self.0.as_ref(), Value::Bool(_))
     }
 
     pub fn is_number(&self) -> bool {
-        matches!(self.0, Value::Number(_))
+        matches!(self.0.as_ref(), Value::Number(_))
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(self.0, Value::String(_))
+        matches!(self.0.as_ref(), Value::String(_))
     }
 
     pub fn is_array(&self) -> bool {
-        matches!(self.0, Value::Array(_))
+        matches!(self.0.as_ref(), Value::Array(_))
     }
 
     pub fn is_object(&self) -> bool {
-        matches!(self.0, Value::Object(_))
+        matches!(self.0.as_ref(), Value::Object(_))
     }
 
     // Conversion helpers
     pub fn as_json(&self) -> &Value {
-        &self.0
+        self.0.as_ref()
     }
 
     pub fn into_json(self) -> Value {
-        self.0
+        Arc::try_unwrap(self.0).unwrap_or_else(|arc| (*arc).clone())
     }
 
     pub fn from_json(value: Value) -> Self {
-        JsltValue(value)
+        JsltValue(Arc::new(value))
     }
 
     // Numeric helper: reject NaN/Inf as per spec intent
     pub fn as_f64_checked(&self) -> Option<f64> {
-        match &self.0 {
+        match self.0.as_ref() {
             Value::Number(n) => n.as_f64().and_then(|f| if f.is_finite() { Some(f) } else { None }),
             _ => None,
         }
@@ -104,7 +106,7 @@ impl JsltValue {
     // - other same-type exact equality
     pub fn deep_eq(&self, other: &JsltValue) -> bool {
         use Value::*;
-        match (&self.0, &other.0) {
+        match (self.0.as_ref(), other.0.as_ref()) {
             (Null, Null) => true,
             (Bool(a), Bool(b)) => a == b,
             (Number(a), Number(b)) => number_eq(a, b),
@@ -113,9 +115,9 @@ impl JsltValue {
                 if a.len() != b.len() {
                     return false;
                 }
-                a.iter()
-                    .zip(b.iter())
-                    .all(|(x, y)| JsltValue(x.clone()).deep_eq(&JsltValue(y.clone())))
+                a.iter().zip(b.iter()).all(|(x, y)| {
+                    JsltValue::from_json(x.clone()).deep_eq(&JsltValue::from_json(y.clone()))
+                })
             }
             (Object(a), Object(b)) => object_deep_eq(a, b),
             // Different types are never equal
@@ -128,11 +130,11 @@ impl JsltValue {
     // - Strings: by Unicode scalar index; negativ from end; OOB -> null; result is 1-char string
     // - Other types: null propagation
     pub fn index(&self, idx: i64) -> JsltValue {
-        match &self.0 {
+        match self.0.as_ref() {
             Value::Array(arr) => {
                 let len = arr.len() as i64;
                 if let Some(i) = normalize_index(idx, len) {
-                    JsltValue(arr[i as usize].clone())
+                    JsltValue::from_json(arr[i as usize].clone())
                 } else {
                     JsltValue::null()
                 }
@@ -142,7 +144,7 @@ impl JsltValue {
                 let len = chars.len() as i64;
                 if let Some(i) = normalize_index(idx, len) {
                     let ch = chars[i as usize];
-                    JsltValue(Value::String(ch.to_string()))
+                    JsltValue::from_json(Value::String(ch.to_string()))
                 } else {
                     JsltValue::null()
                 }
@@ -158,18 +160,18 @@ impl JsltValue {
     // - If start > end, empty ([}, "")
     // - Wrong types: null propagation
     pub fn slice(&self, start: Option<i64>, end: Option<i64>) -> JsltValue {
-        match &self.0 {
+        match self.0.as_ref() {
             Value::Array(arr) => {
                 let (lo, hi) = compute_slice_bounds(start, end, arr.len());
                 let slice = if lo <= hi { arr[lo..hi].to_vec() } else { Vec::new() };
-                JsltValue(Value::Array(slice))
+                JsltValue::from_json(Value::Array(slice))
             }
             Value::String(s) => {
                 let chars: Vec<char> = s.chars().collect();
                 let (lo, hi) = compute_slice_bounds(start, end, chars.len());
                 let out: String =
                     if lo <= hi { chars[lo..hi].iter().collect() } else { String::new() };
-                JsltValue(Value::String(out))
+                JsltValue::from_json(Value::String(out))
             }
             _ => JsltValue::null(),
         }
@@ -234,6 +236,25 @@ impl JsltValue {
     }
 }
 
+impl Serialize for JsltValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.as_json().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for JsltValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v = Value::deserialize(deserializer)?;
+        Ok(JsltValue::from_json(v))
+    }
+}
+
 fn number_eq(a: &Number, b: &Number) -> bool {
     match (a.as_f64(), b.as_f64()) {
         (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
@@ -256,7 +277,7 @@ fn object_deep_eq(a: &Map<String, Value>, b: &Map<String, Value>) -> bool {
     // key order-insensitive: compare by keys
     for (ka, va) in a.iter() {
         let Some(vb) = b.get(ka) else { return false };
-        if !JsltValue(va.clone()).deep_eq(&JsltValue(vb.clone())) {
+        if !JsltValue::from_json(va.clone()).deep_eq(&JsltValue::from_json(vb.clone())) {
             return false;
         }
     }
@@ -302,13 +323,13 @@ fn compute_slice_bounds(start: Option<i64>, end: Option<i64>, len: usize) -> (us
 // Convenience From impl
 impl From<Value> for JsltValue {
     fn from(value: Value) -> Self {
-        JsltValue(value)
+        JsltValue::from_json(value)
     }
 }
 
 impl From<JsltValue> for Value {
     fn from(value: JsltValue) -> Self {
-        value.0
+        value.into_json()
     }
 }
 
@@ -319,7 +340,7 @@ mod tests {
 
     #[test]
     fn as_f64_checked_rejects_nan_inf() {
-        let v = JsltValue(json!(1.5));
+        let v = JsltValue::from_json(json!(1.5));
         assert_eq!(v.as_f64_checked(), Some(1.5));
 
         // serde_json::Number cannot represent NaN/Inf directly; this tests the positive path only.
@@ -328,21 +349,21 @@ mod tests {
 
     #[test]
     fn deep_eq_objects_ignore_key_order() {
-        let a = JsltValue(json!({"x": 1, "y": [true, null], "z": {"a": "b"}}));
-        let b = JsltValue(json!({"z": {"a": "b"}, "y": [true, null], "x": 1}));
+        let a = JsltValue::from_json(json!({"x": 1, "y": [true, null], "z": {"a": "b"}}));
+        let b = JsltValue::from_json(json!({"z": {"a": "b"}, "y": [true, null], "x": 1}));
         assert!(a.deep_eq(&b));
     }
 
     #[test]
     fn deep_eq_arrays_and_numbers() {
-        let a = JsltValue(json!([0.0, -0.0, 1, 2.5]));
-        let b = JsltValue(json!([0, 0.0, 1.0, 2.5]));
+        let a = JsltValue::from_json(json!([0.0, -0.0, 1, 2.5]));
+        let b = JsltValue::from_json(json!([0, 0.0, 1.0, 2.5]));
         assert!(a.deep_eq(&b));
     }
 
     #[test]
     fn index_array_positive_negative_and_oob() {
-        let v = JsltValue(json!([10, 20, 30]));
+        let v = JsltValue::from_json(json!([10, 20, 30]));
         assert_eq!(v.index(0).into_json(), json!(10));
         assert_eq!(v.index(2).into_json(), json!(30));
         assert!(v.index(3).is_null()); // OOB
@@ -355,7 +376,7 @@ mod tests {
     fn index_string_by_unicode_scalar() {
         // "hé𝄞" → ['h', 'é', '𝄞'] where '𝄞' is U+1D11E (two UTF-16 code units, but one scalar)
         let s = "hé\u{1D11E}";
-        let v = JsltValue(json!(s));
+        let v = JsltValue::from_json(json!(s));
 
         assert_eq!(v.index(0).into_json(), json!("h"));
         assert_eq!(v.index(1).into_json(), json!("é"));
@@ -368,7 +389,7 @@ mod tests {
 
     #[test]
     fn slice_array_defaults_and_negatives() {
-        let v = JsltValue(json!([0, 1, 2, 3, 4]));
+        let v = JsltValue::from_json(json!([0, 1, 2, 3, 4]));
         // Defaults
         assert_eq!(v.slice(None, None).into_json(), json!([0, 1, 2, 3, 4]));
         assert_eq!(v.slice(Some(2), None).into_json(), json!([2, 3, 4]));
@@ -389,7 +410,7 @@ mod tests {
     #[test]
     fn slice_string_by_unicode_scalar() {
         let s = "hé\u{1D11E}X"; // ['h','é','𝄞','X']
-        let v = JsltValue(json!(s));
+        let v = JsltValue::from_json(json!(s));
 
         assert_eq!(v.slice(None, None).into_json(), json!(s));
         assert_eq!(v.slice(Some(1), Some(3)).into_json(), json!("é\u{1D11E}"));
@@ -400,11 +421,11 @@ mod tests {
 
     #[test]
     fn index_and_slice_wrong_types_null_propagation() {
-        let v = JsltValue(json!(true));
+        let v = JsltValue::from_json(json!(true));
         assert!(v.index(0).is_null());
         assert!(v.slice(Some(0), Some(1)).is_null());
 
-        let v = JsltValue(json!({"a": 1}));
+        let v = JsltValue::from_json(json!({"a": 1}));
         assert!(v.index(0).is_null());
         assert!(v.slice(None, None).is_null());
     }

@@ -58,6 +58,9 @@ pub enum Token {
     Import,
     As,
 
+    // Trivia (for formatter)
+    Comment(String), // Line comment: // ...
+
     Eof,
 }
 
@@ -149,36 +152,32 @@ impl<'a> Lexer<'a> {
         self.src[self.idx..].starts_with(s)
     }
 
-    fn skip_whitespace_and_comments(&mut self) {
-        loop {
-            let mut did_skip = false;
-            while let Some(ch) = self.peek_char() {
-                if ch.is_whitespace() {
-                    self.bump_char();
-                    did_skip = true;
-                } else {
-                    break;
-                }
-            }
-
-            // skip comment: //
-            if self.starts_with("//") {
-                did_skip = true;
-                // consume // then until newline or EOF
+    fn skip_whitespace(&mut self) {
+        while let Some(ch) = self.peek_char() {
+            if ch.is_whitespace() {
                 self.bump_char();
-                self.bump_char();
-                while let Some(ch) = self.peek_char() {
-                    if ch == '\n' {
-                        break;
-                    }
-                    self.bump_char();
-                }
-            }
-
-            if !did_skip {
+            } else {
                 break;
             }
         }
+    }
+
+    fn scan_comment(&mut self) -> (Token, Span) {
+        let start = self.cur_pos();
+        // Consume //
+        self.bump_char();
+        self.bump_char();
+
+        let mut content = String::new();
+        while let Some(ch) = self.peek_char() {
+            if ch == '\n' {
+                break;
+            }
+            content.push(ch);
+            self.bump_char();
+        }
+
+        (Token::Comment(content), self.make_span(start))
     }
 
     fn is_ident_start(ch: char) -> bool {
@@ -549,7 +548,12 @@ impl<'a> Lexer<'a> {
             return Ok((Token::Eof, Span::single_point(p.byte, p.line, p.column)));
         }
 
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace();
+
+        // Check for comment
+        if self.starts_with("//") {
+            return Ok(self.scan_comment());
+        }
 
         let start = self.cur_pos();
         let ch = match self.peek_char() {
@@ -687,6 +691,22 @@ mod tests {
         toks
     }
 
+    // Helper to collect tokens while skipping comments (for backward compatibility with tests)
+    fn collect_tokens_no_comments(mut lx: Lexer) -> Vec<Token> {
+        let mut toks = Vec::new();
+        while let Ok((t, _)) = lx.next_token() {
+            let is_eof = matches!(t, Token::Eof);
+            let is_comment = matches!(t, Token::Comment(_));
+            if !is_comment {
+                toks.push(t);
+            }
+            if is_eof {
+                break;
+            }
+        }
+        toks
+    }
+
     #[test]
     fn test_fractional_number() {
         let mut lx = Lexer::new("0.5");
@@ -738,7 +758,7 @@ mod tests {
 
     #[test]
     fn number_exponent_valid() {
-        let toks = collect_tokens(Lexer::new("1e10 -2.5E-3"));
+        let toks = collect_tokens_no_comments(Lexer::new("1e10 -2.5E-3"));
         assert_eq!(toks, vec![Token::NumberFloat(1e10), Token::NumberFloat(-2.5e-3), Token::Eof]);
     }
 
@@ -753,7 +773,7 @@ mod tests {
 
     #[test]
     fn dot_then_number_and_trailing_dot() {
-        let toks = collect_tokens(Lexer::new(".5 1."));
+        let toks = collect_tokens_no_comments(Lexer::new(".5 1."));
         assert_eq!(
             toks,
             vec![Token::Dot, Token::NumberInt(5), Token::NumberInt(1), Token::Dot, Token::Eof]
@@ -762,7 +782,7 @@ mod tests {
 
     #[test]
     fn minus_as_operator_and_number() {
-        let toks = collect_tokens(Lexer::new("1-2 - x"));
+        let toks = collect_tokens_no_comments(Lexer::new("1-2 - x"));
         // Current lexer treats a '-' immediately followed by a digit as part of the number token
         assert_eq!(
             toks,
@@ -831,19 +851,31 @@ mod tests {
     // Comments & whitespace
     #[test]
     fn comments_until_newline_and_eof() {
-        let toks = collect_tokens(Lexer::new("1 // comment\n 2 // next"));
+        let toks = collect_tokens_no_comments(Lexer::new("1 // comment\n 2 // next"));
         assert_eq!(toks, vec![Token::NumberInt(1), Token::NumberInt(2), Token::Eof]);
 
-        let toks2 = collect_tokens(Lexer::new("1 // tail"));
+        let toks2 = collect_tokens_no_comments(Lexer::new("1 // tail"));
         assert_eq!(toks2, vec![Token::NumberInt(1), Token::Eof]);
 
-        // Ensure explicit Eof still produced if we pull again
-        let mut lx = Lexer::new("1 // tail");
+        // Ensure comment tokens are emitted
+        let toks_with_comments = collect_tokens(Lexer::new("1 // tail"));
+        assert_eq!(
+            toks_with_comments,
+            vec![Token::NumberInt(1), Token::Comment(" tail".to_string()), Token::Eof]
+        );
+    }
+
+    #[test]
+    fn comment_tokens_emitted() {
+        let mut lx = Lexer::new("// Header\n1 // Inline");
         let (t1, _) = lx.next_token().unwrap();
-        assert_eq!(t1, Token::NumberInt(1));
-        // next_token on EOF after skipping comment yields Eof
+        assert_eq!(t1, Token::Comment(" Header".to_string()));
         let (t2, _) = lx.next_token().unwrap();
-        assert_eq!(t2, Token::Eof);
+        assert_eq!(t2, Token::NumberInt(1));
+        let (t3, _) = lx.next_token().unwrap();
+        assert_eq!(t3, Token::Comment(" Inline".to_string()));
+        let (t4, _) = lx.next_token().unwrap();
+        assert_eq!(t4, Token::Eof);
     }
 
     // Operators & punctuation
@@ -885,7 +917,7 @@ mod tests {
 
     #[test]
     fn dollar_and_ident_vs_keyword() {
-        let toks = collect_tokens(Lexer::new("$ let letx"));
+        let toks = collect_tokens_no_comments(Lexer::new("$ let letx"));
         assert_eq!(toks, vec![Token::Dollar, Token::Let, Token::Ident("letx".into()), Token::Eof]);
     }
 

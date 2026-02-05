@@ -8,7 +8,9 @@ members = [
     "crates/stdlib",
     "crates/engine",
     "crates/cli",
-    "crates/wasm", "crates/lsp",
+    "crates/wasm",
+    "crates/lsp",
+    "crates/formatter",
     # optional bindings:
     # "crates/capi", "crates/node", "crates/python", "crates/wasm", "crates/lsp",
     # "xtask",

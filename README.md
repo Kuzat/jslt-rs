@@ -2,7 +2,7 @@
 
 A Rust implementation of the [JSLT](https://github.com/schibsted/jslt) (JSON Selection and Transformation Language) with a small engine API and a browser WASM demo.
 
-**Current status:** Full parser, binder, and evaluator with comprehensive stdlib support. All core JSLT features are implemented, including expressions, functions, comprehensions, and 45+ built-in functions. A live WASM demo is available at [GitHub Pages](https://kuzat.github.io/jslt-rs/).
+**Current status:** Full parser, binder, and evaluator with comprehensive stdlib support. All core JSLT features are implemented, including expressions, functions, comprehensions, and 45+ built-in functions. Includes a built-in code formatter and LSP server. A live WASM demo is available at [GitHub Pages](https://kuzat.github.io/jslt-rs/).
 
 ## Building
 
@@ -30,7 +30,12 @@ cargo run -p cli -- <args>
 
 ## CLI Usage
 
-The CLI tool allows you to transform JSON data using JSLT programs.
+The CLI tool allows you to transform JSON data using JSLT programs and format JSLT code.
+
+### Commands
+
+- `jslt run` (or just `jslt` for backward compatibility) - Execute JSLT transformations
+- `jslt format` - Format JSLT source code
 
 ### Basic Usage
 
@@ -99,6 +104,67 @@ cargo run -p cli -- -p examples/files/programs/add-a-b.jslt -i examples/files/in
 # {
 #   "sum": 3
 # }
+```
+
+## Code Formatting
+
+The CLI includes a built-in formatter for JSLT code. The formatter ensures consistent style and spacing across your JSLT files.
+
+### Formatter Usage
+
+```bash
+# Format to stdout
+jslt format <file.jslt>
+
+# Format from stdin
+cat program.jslt | jslt format -
+
+# Format in-place
+jslt format --write <file.jslt>
+
+# Check if files are formatted (CI mode)
+jslt format --check <file.jslt>
+
+# Use custom configuration file
+jslt format --config .jsltfmt <file.jslt>
+```
+
+### Configuration
+
+Create a `.jsltfmt` file in your project root to customize formatting:
+
+```toml
+indent_width = 2
+max_width = 100
+indent_style = "spaces"  # or "tabs"
+trailing_comma = "never"  # or "always"
+```
+
+The formatter will automatically search for `.jsltfmt` in the current directory and parent directories.
+
+### Features
+
+- **Consistent spacing**: Proper spacing around operators, commas, and keywords
+- **Smart line breaking**: Arrays and objects break to multi-line when exceeding `max_width`
+- **Idempotent**: Running the formatter multiple times produces the same output
+- **Configurable indentation**: Choose between spaces/tabs and set indent width
+
+### Examples
+
+**Before formatting:**
+```jslt
+def  add(x,y)    x+y
+let   foo=1
+{"result":.data}
+```
+
+**After formatting:**
+```jslt
+def add(x, y) x + y
+
+let foo = 1
+
+{"result": .data}
 ```
 
 ## Browser/WASM Quickstart

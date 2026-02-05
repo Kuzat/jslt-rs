@@ -1,0 +1,13 @@
+[package]
+name = "formatter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ast = { path = "../ast" }
+lexer = { path = "../lexer" }
+parser = { path = "../parser" }
+
+# Configuration
+toml = "0.8"
+serde = { workspace = true, features = ["derive"] }

@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
         // Span: if body exists, use its span; otherwise use single-point at EOF
         let span = if let Some(ref expr) = maybe_expr { expr.span() } else { s };
 
-        Ok(Program { imports, defs, lets, body: maybe_expr, span })
+        Ok(Program { imports, defs, lets, body: maybe_expr, span, trivia: None })
     }
 
     /// Synchronize after an error by skipping tokens until we reach a safe recovery point.
@@ -221,6 +221,7 @@ impl<'a> Parser<'a> {
             path,
             alias: alias_ident.name,
             span: Span::join(start, Span::join(path_span, end)),
+            trivia: None,
         })
     }
 
@@ -247,7 +248,7 @@ impl<'a> Parser<'a> {
         }
         let body = self.parse_if_or_expr()?;
         let end = body.span();
-        Ok(Def { name, params, lets, body, span: Span::join(start, end) })
+        Ok(Def { name, params, lets, body, span: Span::join(start, end), trivia: None })
     }
 
     fn parse_let_stmt(&mut self) -> ParseResult<Let> {
@@ -263,7 +264,7 @@ impl<'a> Parser<'a> {
         bindings.push(Binding { name, value: expr, span: Span::join(name_span, expr_span) });
 
         let span = Span::join(start, bindings.last().unwrap().span);
-        Ok(Let { bindings, span })
+        Ok(Let { bindings, span, trivia: None })
     }
 
     fn parse_if_or_expr(&mut self) -> ParseResult<Expr> {
@@ -847,9 +848,15 @@ impl<'a> Parser<'a> {
 }
 
 fn next_token(lx: &mut Lexer<'_>) -> Result<Tok, ParseError> {
-    match lx.next_token() {
-        Ok((t, s)) => Ok(Tok { tok: t, span: s }),
-        Err(le) => Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
+    loop {
+        match lx.next_token() {
+            Ok((Token::Comment(_), _)) => {
+                // Skip comments for now (TODO: collect them for formatter)
+                continue;
+            }
+            Ok((t, s)) => return Ok(Tok { tok: t, span: s }),
+            Err(le) => return Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
+        }
     }
 }
 

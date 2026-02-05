@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 mod args;
+mod format;
 mod run;
 
 fn main() -> ExitCode {

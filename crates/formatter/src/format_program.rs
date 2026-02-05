@@ -2,11 +2,20 @@
 
 use crate::format_expr::format_expr;
 use crate::format_stmt::{format_def, format_import, format_let};
+use crate::format_trivia::format_leading_trivia;
 use crate::writer::Writer;
 use ast::Program;
 
 /// Format a complete JSLT program
 pub fn format_program(writer: &mut Writer, program: &Program) {
+    // Format file header comments
+    if let Some(ref trivia) = program.trivia {
+        format_leading_trivia(writer, trivia);
+        if !trivia.leading.is_empty() {
+            writer.newline();
+        }
+    }
+
     // Format imports (one per line)
     for import in &program.imports {
         format_import(writer, import);

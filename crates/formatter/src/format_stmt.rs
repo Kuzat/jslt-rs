@@ -1,11 +1,15 @@
 //! Statement formatting (imports, defs, lets)
 
 use crate::format_expr::format_expr;
+use crate::format_trivia::format_leading_trivia;
 use crate::writer::Writer;
 use ast::{Binding, Def, Import, Let};
 
 /// Format an import statement
 pub fn format_import(writer: &mut Writer, import: &Import) {
+    if let Some(ref trivia) = import.trivia {
+        format_leading_trivia(writer, trivia);
+    }
     writer.write("import \"");
     writer.write(&import.path);
     writer.write("\" as ");
@@ -14,6 +18,9 @@ pub fn format_import(writer: &mut Writer, import: &Import) {
 
 /// Format a function definition
 pub fn format_def(writer: &mut Writer, def: &Def) {
+    if let Some(ref trivia) = def.trivia {
+        format_leading_trivia(writer, trivia);
+    }
     writer.write("def ");
     writer.write(&def.name.name);
     writer.write("(");
@@ -45,6 +52,9 @@ pub fn format_def(writer: &mut Writer, def: &Def) {
 
 /// Format a let statement
 pub fn format_let(writer: &mut Writer, let_stmt: &Let) {
+    if let Some(ref trivia) = let_stmt.trivia {
+        format_leading_trivia(writer, trivia);
+    }
     writer.write("let ");
 
     for (i, binding) in let_stmt.bindings.iter().enumerate() {

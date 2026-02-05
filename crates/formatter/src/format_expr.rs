@@ -1,6 +1,7 @@
 //! Expression formatting
 
 use crate::format_stmt::format_let;
+use crate::format_trivia::format_leading_trivia;
 use crate::writer::Writer;
 use ast::{BinaryOp, Expr, MemberKey, ObjectEntry, ObjectKey, UnaryOp};
 
@@ -175,9 +176,14 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
         return;
     }
 
-    // Try single-line first
+    // Check if any entry has comments - if so, force multi-line
+    let has_comments = entries.iter().any(|entry| match entry {
+        ObjectEntry::Pair { trivia, .. } | ObjectEntry::Spread { trivia, .. } => trivia.is_some(),
+    });
+
+    // Try single-line first (but not if there are comments)
     let single_line = format_object_single_line(entries);
-    if writer.fits_on_line(&single_line) {
+    if !has_comments && writer.fits_on_line(&single_line) {
         writer.write(&single_line);
     } else {
         // Multi-line format
@@ -186,12 +192,20 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
         writer.increase_indent();
         for (i, entry) in entries.iter().enumerate() {
             match entry {
-                ObjectEntry::Pair { key, value, .. } => {
+                ObjectEntry::Pair { key, value, trivia, .. } => {
+                    // Format leading comments
+                    if let Some(t) = trivia {
+                        format_leading_trivia(writer, t);
+                    }
                     format_object_key(writer, key);
                     writer.write(": ");
                     format_expr(writer, value);
                 }
-                ObjectEntry::Spread { value, .. } => {
+                ObjectEntry::Spread { value, trivia, .. } => {
+                    // Format leading comments
+                    if let Some(t) = trivia {
+                        format_leading_trivia(writer, t);
+                    }
                     writer.write("*: ");
                     format_expr(writer, value);
                 }

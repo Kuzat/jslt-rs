@@ -74,17 +74,29 @@ pub struct Parser<'a> {
     peeked: Option<Tok>,
     errors: Vec<ParseError>,
     prev_span: Span,
+    /// Buffer for comments that haven't been attached to a node yet
+    pending_comments: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
         let mut lx = Lexer::new(input);
-        let first = next_token(&mut lx)?;
+        let (first, initial_comments) = next_token_with_comments(&mut lx)?;
         let prev_span = first.span;
-        Ok(Parser { lx, cur: first, peeked: None, errors: Vec::new(), prev_span })
+        Ok(Parser {
+            lx,
+            cur: first,
+            peeked: None,
+            errors: Vec::new(),
+            prev_span,
+            pending_comments: initial_comments,
+        })
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParseErrors> {
+        // Collect file header comments
+        let program_trivia = self.take_leading_trivia();
+
         let mut imports = Vec::new();
         let mut defs = Vec::new();
         let mut lets = Vec::new();
@@ -150,7 +162,7 @@ impl<'a> Parser<'a> {
         // Span: if body exists, use its span; otherwise use single-point at EOF
         let span = if let Some(ref expr) = maybe_expr { expr.span() } else { s };
 
-        Ok(Program { imports, defs, lets, body: maybe_expr, span, trivia: None })
+        Ok(Program { imports, defs, lets, body: maybe_expr, span, trivia: program_trivia })
     }
 
     /// Synchronize after an error by skipping tokens until we reach a safe recovery point.
@@ -181,8 +193,24 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Collect pending comments as leading trivia
+    fn take_leading_trivia(&mut self) -> Option<TriviaCollection> {
+        if self.pending_comments.is_empty() {
+            return None;
+        }
+
+        let leading = self
+            .pending_comments
+            .drain(..)
+            .map(Trivia::LineComment)
+            .collect();
+
+        Some(TriviaCollection::with_leading(leading))
+    }
+
     fn parse_import_stmt(&mut self) -> ParseResult<Import> {
         let start = self.cur.span;
+        let trivia = self.take_leading_trivia();
 
         self.expect(Token::Import, "'import'")?;
         // expect string path
@@ -221,12 +249,13 @@ impl<'a> Parser<'a> {
             path,
             alias: alias_ident.name,
             span: Span::join(start, Span::join(path_span, end)),
-            trivia: None,
+            trivia,
         })
     }
 
     fn parse_def(&mut self) -> ParseResult<Def> {
         let start = self.cur.span;
+        let trivia = self.take_leading_trivia();
         self.expect(Token::Def, "'def'")?;
         let name = self.expect_ident()?;
         self.expect(Token::LParen, "'(' after function name")?;
@@ -248,11 +277,12 @@ impl<'a> Parser<'a> {
         }
         let body = self.parse_if_or_expr()?;
         let end = body.span();
-        Ok(Def { name, params, lets, body, span: Span::join(start, end), trivia: None })
+        Ok(Def { name, params, lets, body, span: Span::join(start, end), trivia })
     }
 
     fn parse_let_stmt(&mut self) -> ParseResult<Let> {
         let start = self.cur.span;
+        let trivia = self.take_leading_trivia();
         self.expect(Token::Let, "'let'")?;
         let mut bindings = Vec::new();
 
@@ -264,7 +294,7 @@ impl<'a> Parser<'a> {
         bindings.push(Binding { name, value: expr, span: Span::join(name_span, expr_span) });
 
         let span = Span::join(start, bindings.last().unwrap().span);
-        Ok(Let { bindings, span, trivia: None })
+        Ok(Let { bindings, span, trivia })
     }
 
     fn parse_if_or_expr(&mut self) -> ParseResult<Expr> {
@@ -740,6 +770,9 @@ impl<'a> Parser<'a> {
             let mut entries = Vec::new();
             if !self.at(&Token::RBrace) {
                 loop {
+                    // Collect comments before this entry
+                    let entry_trivia = self.take_leading_trivia();
+
                     // entry = key ':' expr | '*' ':' expr
                     let entry = match &self.cur.tok {
                         Token::Star => {
@@ -748,7 +781,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after '*'")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(star_span, v.span());
-                            ObjectEntry::Spread { value: v, span }
+                            ObjectEntry::Spread { value: v, span, trivia: entry_trivia }
                         }
                         Token::String(s) => {
                             let kspan = self.cur.span;
@@ -757,7 +790,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair { key, value: v, span }
+                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia }
                         }
                         Token::Ident(id) => {
                             let kspan = self.cur.span;
@@ -767,7 +800,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair { key, value: v, span }
+                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia }
                         }
                         _ => {
                             return Err(ParseError::unexpected(
@@ -818,7 +851,8 @@ impl<'a> Parser<'a> {
         let old = if let Some(pk) = self.peeked.take() {
             mem::replace(&mut self.cur, pk)
         } else {
-            let nt = next_token(&mut self.lx)?;
+            let (nt, comments) = next_token_with_comments(&mut self.lx)?;
+            self.pending_comments.extend(comments);
             mem::replace(&mut self.cur, nt)
         };
         self.prev_span = old.span;
@@ -847,14 +881,15 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn next_token(lx: &mut Lexer<'_>) -> Result<Tok, ParseError> {
+/// Get the next non-comment token and collect any comments encountered
+fn next_token_with_comments(lx: &mut Lexer<'_>) -> Result<(Tok, Vec<String>), ParseError> {
+    let mut comments = Vec::new();
     loop {
         match lx.next_token() {
-            Ok((Token::Comment(_), _)) => {
-                // Skip comments for now (TODO: collect them for formatter)
-                continue;
+            Ok((Token::Comment(comment), _)) => {
+                comments.push(comment);
             }
-            Ok((t, s)) => return Ok(Tok { tok: t, span: s }),
+            Ok((t, s)) => return Ok((Tok { tok: t, span: s }, comments)),
             Err(le) => return Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
         }
     }

@@ -305,3 +305,83 @@ fn test_object_spread() {
     let formatted = format_source(input).unwrap();
     assert_eq!(formatted, r#"{*: .base, "override": true}"#);
 }
+
+#[test]
+fn test_comment_preservation() {
+    let input = r#"// File header comment
+import "foo.jslt" as foo
+
+// Function to add
+def add(x, y)
+  x + y
+
+// Compute result
+let x = 1
+
+{"sum": add(x, 2)}"#;
+
+    let formatted = format_source(input).unwrap();
+
+    // Verify all comments are preserved
+    assert!(formatted.contains("// File header comment"));
+    assert!(formatted.contains("// Function to add"));
+    assert!(formatted.contains("// Compute result"));
+
+    // Verify idempotency
+    let reformatted = format_source(&formatted).unwrap();
+    assert_eq!(formatted, reformatted);
+}
+
+#[test]
+fn test_object_literal_comments() {
+    let input = r#"{
+  // For building ip-geo lookup model.
+  "ipAddress": asString(.actor."spt:remoteAddress"),
+  "latitude": asNumber(.location.latitude),
+  "longitude": asNumber(.location.longitude),
+
+  // For analysis/debugging.
+  "eventType": asString(."@type"),
+  "trackerType": asString(.tracker.type),
+  "client": asString(get-client(.)),
+
+  // Used to infer quality/age of location
+  "locationAccuracy": asNumber(.location.accuracy),
+  "creationDate": asString(.creationDate),
+  "locationTimestamp": asString(.location.timestamp),
+  "published": asString(.published),
+
+  // To join back enrichment onto event later.
+  "eventId": asString(."@id")
+}"#;
+
+    let formatted = format_source(input).unwrap();
+
+    // Verify all comments are preserved
+    assert!(formatted.contains("// For building ip-geo lookup model."));
+    assert!(formatted.contains("// For analysis/debugging."));
+    assert!(formatted.contains("// Used to infer quality/age of location"));
+    assert!(formatted.contains("// To join back enrichment onto event later."));
+
+    // Verify idempotency
+    let reformatted = format_source(&formatted).unwrap();
+    assert_eq!(formatted, reformatted);
+}
+
+#[test]
+fn test_object_inline_comments() {
+    let input = r#"{
+  "field1": "value",
+  // This is a comment between fields
+  "field2": "another value"
+}"#;
+
+    let formatted = format_source(input).unwrap();
+
+    // Verify comment is preserved
+    assert!(formatted.contains("// This is a comment between fields"));
+
+    // Verify idempotency
+    let reformatted = format_source(&formatted).unwrap();
+    assert_eq!(formatted, reformatted);
+}

@@ -1,6 +1,6 @@
 use ast::{
     BinaryOp, Binding, Def, Expr, Ident, Import, Let, MemberKey, NumericKind, ObjectEntry,
-    ObjectKey, Program, Span, UnaryOp,
+    ObjectKey, Program, Span, Trivia, TriviaCollection, UnaryOp,
 };
 use lexer::{LexErrorKind, Lexer, Token};
 use std::mem;

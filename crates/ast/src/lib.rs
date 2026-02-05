@@ -223,9 +223,18 @@ pub enum MemberKey {
 #[derive(Debug, Clone)]
 pub enum ObjectEntry {
     // key: expr
-    Pair { key: ObjectKey, value: Expr, span: Span },
+    Pair {
+        key: ObjectKey,
+        value: Expr,
+        span: Span,
+        trivia: Option<TriviaCollection>,
+    },
     // *: expr
-    Spread { value: Expr, span: Span },
+    Spread {
+        value: Expr,
+        span: Span,
+        trivia: Option<TriviaCollection>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -774,13 +783,23 @@ mod tests {
         // Object literal with ident key, quoted key, and spread
         let obj = Expr::ObjectLiteral {
             entries: vec![
-                ObjectEntry::Pair { key: ObjectKey::Ident(id("a")), value: num("1"), span: sp() },
+                ObjectEntry::Pair {
+                    key: ObjectKey::Ident(id("a")),
+                    value: num("1"),
+                    span: sp(),
+                    trivia: None,
+                },
                 ObjectEntry::Pair {
                     key: ObjectKey::Str { value: "x y".to_string(), span: sp() },
                     value: str_("v"),
                     span: sp(),
+                    trivia: None,
                 },
-                ObjectEntry::Spread { value: member_ident(var("$"), "rest"), span: sp() },
+                ObjectEntry::Spread {
+                    value: member_ident(var("$"), "rest"),
+                    span: sp(),
+                    trivia: None,
+                },
             ],
             span: sp(),
         };

@@ -35,10 +35,10 @@ fn call(name: &str, args: Vec<Expr>) -> Expr {
 #[test]
 fn let_binding_and_variable_resolution() {
     // let x = 1;  $x
-    let program = Program {
+    let program = Program { trivia: None,
         imports: vec![],
         defs: vec![],
-        lets: vec![Let {
+        lets: vec![Let { trivia: None,
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
         }],
@@ -65,7 +65,7 @@ fn let_binding_and_variable_resolution() {
 #[test]
 fn function_definition_and_call() {
     // def inc(x) x + 1;  inc(41)
-    let def = Def {
+    let def = Def { trivia: None,
         name: ident("inc"),
         params: vec![ident("x")],
         lets: vec![],
@@ -78,7 +78,7 @@ fn function_definition_and_call() {
         span: s(),
     };
 
-    let program = Program {
+    let program = Program { trivia: None,
         imports: vec![],
         defs: vec![def],
         lets: vec![],
@@ -131,16 +131,16 @@ fn function_definition_and_call() {
 #[test]
 fn closure_captures_outer_let() {
     // let x = 1; def g() $x; g()
-    let program = Program {
+    let program = Program { trivia: None,
         imports: vec![],
-        defs: vec![Def {
+        defs: vec![Def { trivia: None,
             name: ident("g"),
             params: vec![],
             lets: vec![],
             body: var("x"), // references top-level let
             span: s(),
         }],
-        lets: vec![Let {
+        lets: vec![Let { trivia: None,
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
         }],
@@ -179,16 +179,16 @@ fn closure_captures_outer_let() {
 #[test]
 fn param_shadows_outer_let() {
     // let x = 1; def id(x) $x; id(2)
-    let program = Program {
+    let program = Program { trivia: None,
         imports: vec![],
-        defs: vec![Def {
+        defs: vec![Def { trivia: None,
             name: ident("id"),
             params: vec![ident("x")],
             lets: vec![],
             body: var("x"),
             span: s(),
         }],
-        lets: vec![Let {
+        lets: vec![Let { trivia: None,
             bindings: vec![Binding { name: ident("x"), value: num("1"), span: s() }],
             span: s(),
         }],
@@ -212,7 +212,7 @@ fn param_shadows_outer_let() {
 fn unknown_variable_yields_error_with_span() {
     // $nope
     let program =
-        Program { imports: vec![], defs: vec![], lets: vec![], body: Some(var("nope")), span: s() };
+        Program { trivia: None, imports: vec![], defs: vec![], lets: vec![], body: Some(var("nope")), span: s() };
     let err = bind(&program).unwrap_err();
     let msg = format!("{}", err);
     assert!(msg.contains("unknown variable"), "msg={}", msg);
@@ -222,9 +222,9 @@ fn unknown_variable_yields_error_with_span() {
 #[test]
 fn unknown_function_yields_error_with_suggestions() {
     // nope()
-    let program = Program {
+    let program = Program { trivia: None,
         imports: vec![],
-        defs: vec![Def {
+        defs: vec![Def { trivia: None,
             name: ident("near"),
             params: vec![],
             lets: vec![],
@@ -246,7 +246,7 @@ fn unknown_function_yields_error_with_suggestions() {
 #[test]
 fn non_function_callee_is_rejected() {
     // (.)(1) — callee is `.` which is not a bare function identifier
-    let program = Program {
+    let program = Program { trivia: None,
         imports: vec![],
         defs: vec![],
         lets: vec![],

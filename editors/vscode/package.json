@@ -13,7 +13,7 @@
     "languages": [
       {
         "id": "jslt",
-        "extensions": [".jslt"],
+        "extensions": [".jslt", ".jstl2"],
         "aliases": ["JSLT", "jslt"],
         "configuration": "./language-configuration.json"
       }

@@ -83,8 +83,8 @@ export function activate(context: ExtensionContext) {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{scheme: 'file', language: 'jslt'}],
     synchronize: {
-      // Notify the server about file changes to .jslt files
-      fileEvents: workspace.createFileSystemWatcher('**/*.jslt'),
+      // Notify the server about file changes to .jslt and legacy .jstl2 files
+      fileEvents: workspace.createFileSystemWatcher('**/*.{jslt,jstl2}'),
     },
   };
 

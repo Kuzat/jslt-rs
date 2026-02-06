@@ -335,6 +335,35 @@ let x = 1
 }
 
 #[test]
+fn test_no_blank_line_after_header_comments_before_def() {
+    let input = r#"// Convert any type to a number.
+// Numbers are returned as is.
+// Strings are parsed as numbers, if possible.
+// In other cases, null is returned.
+def asNumber(input)
+  number($input,null)"#;
+    let formatted = format_source(input).unwrap();
+
+    assert_eq!(
+        formatted,
+        r#"// Convert any type to a number.
+// Numbers are returned as is.
+// Strings are parsed as numbers, if possible.
+// In other cases, null is returned.
+def asNumber(input)
+  number($input, null)
+"#
+    );
+}
+
+#[test]
+fn test_no_leading_newline_at_start_of_file() {
+    let input = "\n\n\n// Top comment\ndef f(x) x";
+    let formatted = format_source(input).unwrap();
+    assert!(!formatted.starts_with('\n'));
+}
+
+#[test]
 fn test_object_literal_comments() {
     let input = r#"{
   // For building ip-geo lookup model.

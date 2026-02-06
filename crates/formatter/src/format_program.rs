@@ -11,9 +11,6 @@ pub fn format_program(writer: &mut Writer, program: &Program) {
     // Format file header comments
     if let Some(ref trivia) = program.trivia {
         format_leading_trivia(writer, trivia);
-        if !trivia.leading.is_empty() {
-            writer.newline();
-        }
     }
 
     // Format imports (one per line)

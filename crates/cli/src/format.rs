@@ -10,7 +10,7 @@ use std::path::Path;
 pub fn format_command(args: FormatArgs) -> Result<(), CliError> {
     // Load configuration
     let config = if let Some(config_path) = &args.config {
-        FormatConfig::from_toml_file(config_path).map_err(|e| CliError::Usage(e))?
+        FormatConfig::from_toml_file(config_path).map_err(CliError::Usage)?
     } else {
         FormatConfig::load_or_default(Path::new("."))
     };
@@ -50,7 +50,7 @@ fn format_stdin(config: &FormatConfig, check: bool) -> Result<(), CliError> {
     io::stdin().read_to_string(&mut source)?;
 
     let formatted =
-        format_source_with_config(&source, config.clone()).map_err(|e| CliError::Usage(e))?;
+        format_source_with_config(&source, config.clone()).map_err(CliError::Usage)?;
 
     if check {
         if source != formatted {

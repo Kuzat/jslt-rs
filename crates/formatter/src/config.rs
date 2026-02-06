@@ -74,10 +74,9 @@ impl Default for FormatConfig {
 impl FormatConfig {
     /// Load configuration from a TOML file
     pub fn from_toml_file(path: &Path) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse config file: {}", e))
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read config file: {}", e))?;
+        toml::from_str(&content).map_err(|e| format!("Failed to parse config file: {}", e))
     }
 
     /// Search for a .jsltfmt config file starting from the given directory
@@ -139,11 +138,8 @@ mod tests {
         };
         assert_eq!(config.indent_string(), "    ");
 
-        let config = FormatConfig {
-            indent_width: 1,
-            indent_style: IndentStyle::Tabs,
-            ..Default::default()
-        };
+        let config =
+            FormatConfig { indent_width: 1, indent_style: IndentStyle::Tabs, ..Default::default() };
         assert_eq!(config.indent_string(), "\t");
     }
 }

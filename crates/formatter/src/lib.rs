@@ -10,8 +10,8 @@ pub mod format_stmt;
 pub mod format_trivia;
 pub mod writer;
 
-pub use config::FormatConfig;
 use ast::Program;
+pub use config::FormatConfig;
 use writer::Writer;
 
 /// Main formatter struct

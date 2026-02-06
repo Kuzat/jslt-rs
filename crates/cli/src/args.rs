@@ -13,7 +13,13 @@ pub struct Cli {
     pub program: Option<String>,
 
     /// Inline JSLT expression to evaluate instead of a file.
-    #[arg(short = 'e', long = "eval", value_name = "EXPR", conflicts_with = "program", global = true)]
+    #[arg(
+        short = 'e',
+        long = "eval",
+        value_name = "EXPR",
+        conflicts_with = "program",
+        global = true
+    )]
     pub eval: Option<String>,
 
     /// JSON input file. Use '-' to read the input from stdin.

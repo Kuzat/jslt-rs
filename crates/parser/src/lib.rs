@@ -878,7 +878,12 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after '*'")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(star_span, v.span());
-                            ObjectEntry::Spread { value: v, span, trivia: entry_trivia, blank_lines_before }
+                            ObjectEntry::Spread {
+                                value: v,
+                                span,
+                                trivia: entry_trivia,
+                                blank_lines_before,
+                            }
                         }
                         Token::String(s) => {
                             let kspan = self.cur.span;
@@ -887,7 +892,13 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia, blank_lines_before }
+                            ObjectEntry::Pair {
+                                key,
+                                value: v,
+                                span,
+                                trivia: entry_trivia,
+                                blank_lines_before,
+                            }
                         }
                         Token::Ident(id) => {
                             let kspan = self.cur.span;
@@ -897,7 +908,13 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia, blank_lines_before }
+                            ObjectEntry::Pair {
+                                key,
+                                value: v,
+                                span,
+                                trivia: entry_trivia,
+                                blank_lines_before,
+                            }
                         }
                         _ => {
                             return Err(ParseError::unexpected(
@@ -989,7 +1006,9 @@ fn next_token_with_comments(lx: &mut Lexer<'_>) -> Result<(Tok, Vec<PendingComme
                 comments.push(PendingComment { text: comment, span });
             }
             Ok((t, s)) => return Ok((Tok { tok: t, span: s }, comments)),
-            Err(le) => return Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),
+            Err(le) => {
+                return Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) })
+            }
         }
     }
 }

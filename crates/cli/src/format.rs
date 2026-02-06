@@ -49,8 +49,8 @@ fn format_stdin(config: &FormatConfig, check: bool) -> Result<(), CliError> {
     let mut source = String::new();
     io::stdin().read_to_string(&mut source)?;
 
-    let formatted = format_source_with_config(&source, config.clone())
-        .map_err(|e| CliError::Usage(e))?;
+    let formatted =
+        format_source_with_config(&source, config.clone()).map_err(|e| CliError::Usage(e))?;
 
     if check {
         if source != formatted {

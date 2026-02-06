@@ -65,11 +65,8 @@ impl Writer {
 
     /// Check if adding text would fit on the current line
     pub fn fits_on_line(&self, text: &str) -> bool {
-        let indent_width = if self.at_line_start {
-            self.indent_level * self.indent_str.len()
-        } else {
-            0
-        };
+        let indent_width =
+            if self.at_line_start { self.indent_level * self.indent_str.len() } else { 0 };
         self.current_line_length + indent_width + text.len() <= self.config.max_width
     }
 
@@ -126,10 +123,7 @@ mod tests {
 
     #[test]
     fn test_fits_on_line() {
-        let config = FormatConfig {
-            max_width: 20,
-            ..Default::default()
-        };
+        let config = FormatConfig { max_width: 20, ..Default::default() };
         let mut w = Writer::new(config);
         w.write("hello");
         assert!(w.fits_on_line(" world"));

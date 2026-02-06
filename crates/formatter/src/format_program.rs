@@ -20,7 +20,9 @@ pub fn format_program(writer: &mut Writer, program: &Program) {
     }
 
     // Add blank line after imports if there are any and there are other statements
-    if !program.imports.is_empty() && (!program.defs.is_empty() || !program.lets.is_empty() || program.body.is_some()) {
+    if !program.imports.is_empty()
+        && (!program.defs.is_empty() || !program.lets.is_empty() || program.body.is_some())
+    {
         writer.newline();
     }
 

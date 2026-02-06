@@ -195,10 +195,11 @@ fn format_object(
     // Check if any entry has comments or blank lines - if so, force multi-line
     let has_comments_or_blanks = trailing_trivia.is_some()
         || entries.iter().any(|entry| match entry {
-        ObjectEntry::Pair { trivia, blank_lines_before, .. } | ObjectEntry::Spread { trivia, blank_lines_before, .. } => {
-            trivia.is_some() || *blank_lines_before > 0
-        }
-    });
+            ObjectEntry::Pair { trivia, blank_lines_before, .. }
+            | ObjectEntry::Spread { trivia, blank_lines_before, .. } => {
+                trivia.is_some() || *blank_lines_before > 0
+            }
+        });
 
     // Try single-line first (but not if there are comments or blank lines)
     let single_line = format_object_single_line(entries);

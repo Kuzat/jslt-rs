@@ -1,6 +1,9 @@
 use std::fmt;
 use std::fmt::Formatter;
 
+pub mod trivia;
+pub use trivia::{Trivia, TriviaCollection};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: usize, // byte offset (inclusive)
@@ -50,6 +53,7 @@ pub struct Program {
     pub lets: Vec<Let>,
     pub body: Option<Expr>,
     pub span: Span,
+    pub trivia: Option<TriviaCollection>, // File header comments
 }
 
 // import "path"
@@ -58,6 +62,7 @@ pub struct Import {
     pub path: String,  // "module.jslt"
     pub alias: String, // alias used in this file
     pub span: Span,
+    pub trivia: Option<TriviaCollection>,
 }
 
 // def name(param1, param2, ...) expr
@@ -68,6 +73,9 @@ pub struct Def {
     pub lets: Vec<Let>,
     pub body: Expr,
     pub span: Span,
+    pub trivia: Option<TriviaCollection>,
+    pub body_trivia: Option<TriviaCollection>,
+    pub body_trailing_trivia: Option<TriviaCollection>,
 }
 
 // let a = expr; b = expr;
@@ -75,6 +83,7 @@ pub struct Def {
 pub struct Let {
     pub bindings: Vec<Binding>,
     pub span: Span,
+    pub trivia: Option<TriviaCollection>,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +187,8 @@ pub enum Expr {
     ObjectLiteral {
         entries: Vec<ObjectEntry>,
         span: Span,
+        trivia: Option<TriviaCollection>,
+        trailing_trivia: Option<TriviaCollection>,
     },
     ObjectFor {
         seq: Box<Expr>,            // for (seq)
@@ -216,9 +227,20 @@ pub enum MemberKey {
 #[derive(Debug, Clone)]
 pub enum ObjectEntry {
     // key: expr
-    Pair { key: ObjectKey, value: Expr, span: Span },
+    Pair {
+        key: ObjectKey,
+        value: Expr,
+        span: Span,
+        trivia: Option<TriviaCollection>,
+        blank_lines_before: usize,
+    },
     // *: expr
-    Spread { value: Expr, span: Span },
+    Spread {
+        value: Expr,
+        span: Span,
+        trivia: Option<TriviaCollection>,
+        blank_lines_before: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -767,15 +789,30 @@ mod tests {
         // Object literal with ident key, quoted key, and spread
         let obj = Expr::ObjectLiteral {
             entries: vec![
-                ObjectEntry::Pair { key: ObjectKey::Ident(id("a")), value: num("1"), span: sp() },
+                ObjectEntry::Pair {
+                    key: ObjectKey::Ident(id("a")),
+                    value: num("1"),
+                    span: sp(),
+                    trivia: None,
+                    blank_lines_before: 0,
+                },
                 ObjectEntry::Pair {
                     key: ObjectKey::Str { value: "x y".to_string(), span: sp() },
                     value: str_("v"),
                     span: sp(),
+                    trivia: None,
+                    blank_lines_before: 0,
                 },
-                ObjectEntry::Spread { value: member_ident(var("$"), "rest"), span: sp() },
+                ObjectEntry::Spread {
+                    value: member_ident(var("$"), "rest"),
+                    span: sp(),
+                    trivia: None,
+                    blank_lines_before: 0,
+                },
             ],
             span: sp(),
+            trivia: None,
+            trailing_trivia: None,
         };
         assert_eq!(format!("{}", obj), "{a: 1, \"x y\": \"v\", *: $$.rest}");
     }
@@ -829,6 +866,9 @@ mod tests {
             lets: vec![],
             body: bin(BinaryOp::Add, var("x"), var("y")),
             span: sp(),
+            trivia: None,
+            body_trivia: None,
+            body_trailing_trivia: None,
         };
         let let_stmt = Let {
             bindings: vec![
@@ -836,6 +876,7 @@ mod tests {
                 Binding { name: id("b"), value: str_("s"), span: sp() },
             ],
             span: sp(),
+            trivia: None,
         };
         let prog = Program {
             imports: vec![],
@@ -843,6 +884,7 @@ mod tests {
             lets: vec![let_stmt],
             body: Some(bin(BinaryOp::Mul, var("a"), num("10"))),
             span: sp(),
+            trivia: None,
         };
         let rendered = format!("{}", prog);
         let expected = "def f(x, y) $x + $y\nlet a = 1, b = \"s\"\n$a * 10";

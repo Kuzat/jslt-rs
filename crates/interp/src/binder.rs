@@ -842,7 +842,7 @@ impl Binder {
                 })
             }
 
-            Expr::ObjectLiteral { entries, span } => {
+            Expr::ObjectLiteral { entries, span, .. } => {
                 // Convert to a pair list (key-expr, value-expr). Keys are syntactic (ident or string)
                 // we emit keys as string expressions so evaluator can compute object construction.
                 let mut pairs: Vec<(BoundExpr, BoundExpr)> = Vec::with_capacity(entries.len());

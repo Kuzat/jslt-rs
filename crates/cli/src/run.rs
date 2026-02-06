@@ -1,4 +1,4 @@
-use crate::args::Cli;
+use crate::args::{Cli, Command, RunArgs};
 use clap::Parser;
 use engine::compile_with_import_path;
 use serde_json::Value;
@@ -23,14 +23,33 @@ pub enum CliError {
 pub fn real_main() -> Result<(), CliError> {
     let cli = Cli::parse();
 
+    match cli.command {
+        Some(Command::Run(args)) => run_command(args),
+        Some(Command::Format(args)) => {
+            // Format command will be implemented in format.rs
+            crate::format::format_command(args)
+        }
+        None => {
+            // Backwards compatibility: treat as run command with legacy flags
+            run_command(RunArgs {
+                program: cli.program,
+                eval: cli.eval,
+                input: cli.input,
+                pretty: cli.pretty,
+            })
+        }
+    }
+}
+
+fn run_command(args: RunArgs) -> Result<(), CliError> {
     let (program_src, program_path_ctx) =
-        read_program_source(cli.program.as_deref(), cli.eval.as_deref())?;
-    let input = read_input_json(cli.input.as_deref())?;
+        read_program_source(args.program.as_deref(), args.eval.as_deref())?;
+    let input = read_input_json(args.input.as_deref())?;
 
     let compiled = compile_with_import_path(&program_src, &program_path_ctx)?;
     let out = compiled.apply(&input, None)?;
 
-    if cli.pretty {
+    if args.pretty {
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         println!("{}", serde_json::to_string(&out)?);

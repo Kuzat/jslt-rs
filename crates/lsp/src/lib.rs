@@ -4,6 +4,7 @@
 //! for the JSLT files
 
 use engine::EngineError;
+use formatter::format_source;
 use interp::binder::BindError;
 use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result;
@@ -220,10 +221,12 @@ impl LanguageServer for JsltLanguageServer {
                     TextDocumentSyncKind::FULL,
                 )),
 
+                // Code formatting support
+                document_formatting_provider: Some(OneOf::Left(true)),
+
                 // Add more capabilites here as we implement features:
                 // - completion_provider: for autocomplete
                 // - hover_provider: for documentation on hover
-                // - formatting_provider: for code formatting
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -296,6 +299,44 @@ impl LanguageServer for JsltLanguageServer {
 
         // Clear diagnostics
         self.client.publish_diagnostics(params.text_document.uri, Vec::new(), None).await;
+    }
+
+    /// Called when the editor requests document formatting
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri.to_string();
+        let doc = self.document_map.read().await;
+
+        if let Some(text) = doc.get(&uri) {
+            // Parse and format the document
+            match format_source(text) {
+                Ok(formatted) => {
+                    // Only return edits if the content actually changed
+                    if &formatted == text {
+                        return Ok(None);
+                    }
+
+                    // Create TextEdit replacing entire document
+                    let start = Position::new(0, 0);
+                    // Use a very large line number to cover the whole document
+                    let end = Position::new(u32::MAX, u32::MAX);
+                    let range = Range::new(start, end);
+
+                    Ok(Some(vec![TextEdit { range, new_text: formatted }]))
+                }
+                Err(e) => {
+                    // Don't format if there are parse errors
+                    self.client
+                        .log_message(
+                            MessageType::WARNING,
+                            format!("Cannot format document with parse errors: {}", e),
+                        )
+                        .await;
+                    Ok(None)
+                }
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 

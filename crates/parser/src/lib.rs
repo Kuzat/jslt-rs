@@ -208,6 +208,38 @@ impl<'a> Parser<'a> {
         Some(TriviaCollection::with_leading(leading))
     }
 
+    /// Count blank lines between previous token and current token
+    /// A blank line is defined as two consecutive newlines (one newline terminates a line,
+    /// another creates a blank line)
+    fn count_blank_lines_since_last(&self) -> usize {
+        let source = self.lx.source();
+
+        // Get the end of the previous token
+        let prev_end = self.prev_span.end;
+
+        // Get the start of current token
+        let cur_start = self.cur.span.start;
+
+        if cur_start <= prev_end || cur_start >= source.len() {
+            return 0;
+        }
+
+        // Extract the text between tokens
+        let between = &source[prev_end..cur_start];
+
+        // Count consecutive newlines
+        let mut newline_count: usize = 0;
+        for ch in between.chars() {
+            if ch == '\n' {
+                newline_count += 1;
+            }
+        }
+
+        // Two newlines = one blank line, three newlines = two blank lines, etc.
+        // One newline = no blank lines (just the normal line terminator)
+        newline_count.saturating_sub(1)
+    }
+
     fn parse_import_stmt(&mut self) -> ParseResult<Import> {
         let start = self.cur.span;
         let trivia = self.take_leading_trivia();
@@ -770,6 +802,9 @@ impl<'a> Parser<'a> {
             let mut entries = Vec::new();
             if !self.at(&Token::RBrace) {
                 loop {
+                    // Count blank lines before this entry
+                    let blank_lines_before = self.count_blank_lines_since_last();
+
                     // Collect comments before this entry
                     let entry_trivia = self.take_leading_trivia();
 
@@ -781,7 +816,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after '*'")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(star_span, v.span());
-                            ObjectEntry::Spread { value: v, span, trivia: entry_trivia }
+                            ObjectEntry::Spread { value: v, span, trivia: entry_trivia, blank_lines_before }
                         }
                         Token::String(s) => {
                             let kspan = self.cur.span;
@@ -790,7 +825,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia }
+                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia, blank_lines_before }
                         }
                         Token::Ident(id) => {
                             let kspan = self.cur.span;
@@ -800,7 +835,7 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Colon, "':' after object key")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia }
+                            ObjectEntry::Pair { key, value: v, span, trivia: entry_trivia, blank_lines_before }
                         }
                         _ => {
                             return Err(ParseError::unexpected(

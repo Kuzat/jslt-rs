@@ -97,6 +97,11 @@ impl<'a> Lexer<'a> {
         Lexer { src: input, idx: 0, line: 1, column: 1, finished: false }
     }
 
+    /// Get the source text
+    pub fn source(&self) -> &'a str {
+        self.src
+    }
+
     fn cur_pos(&self) -> Pos {
         Pos { byte: self.idx, line: self.line, column: self.column }
     }

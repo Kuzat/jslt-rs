@@ -21,10 +21,17 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
         Expr::If { cond, then_br, else_br, .. } => {
             writer.write("if (");
             format_expr(writer, cond);
-            writer.write(") ");
+            writer.write(")");
+            writer.newline();
+            writer.increase_indent();
             format_expr(writer, then_br);
-            writer.write(" else ");
+            writer.decrease_indent();
+            writer.newline();
+            writer.write("else");
+            writer.newline();
+            writer.increase_indent();
             format_expr(writer, else_br);
+            writer.decrease_indent();
         }
 
         Expr::Unary { op, expr, .. } => {
@@ -176,14 +183,16 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
         return;
     }
 
-    // Check if any entry has comments - if so, force multi-line
-    let has_comments = entries.iter().any(|entry| match entry {
-        ObjectEntry::Pair { trivia, .. } | ObjectEntry::Spread { trivia, .. } => trivia.is_some(),
+    // Check if any entry has comments or blank lines - if so, force multi-line
+    let has_comments_or_blanks = entries.iter().any(|entry| match entry {
+        ObjectEntry::Pair { trivia, blank_lines_before, .. } | ObjectEntry::Spread { trivia, blank_lines_before, .. } => {
+            trivia.is_some() || *blank_lines_before > 0
+        }
     });
 
-    // Try single-line first (but not if there are comments)
+    // Try single-line first (but not if there are comments or blank lines)
     let single_line = format_object_single_line(entries);
-    if !has_comments && writer.fits_on_line(&single_line) {
+    if !has_comments_or_blanks && writer.fits_on_line(&single_line) {
         writer.write(&single_line);
     } else {
         // Multi-line format
@@ -192,7 +201,20 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
         writer.increase_indent();
         for (i, entry) in entries.iter().enumerate() {
             match entry {
-                ObjectEntry::Pair { key, value, trivia, .. } => {
+                ObjectEntry::Pair { key, value, trivia, blank_lines_before, .. } => {
+                    // Add blank lines before this entry (skip for first entry)
+                    // If there are comments, subtract 1 because the comment line itself counts as a line
+                    if i > 0 {
+                        let blank_count = if trivia.is_some() {
+                            blank_lines_before.saturating_sub(1)
+                        } else {
+                            *blank_lines_before
+                        };
+                        for _ in 0..blank_count {
+                            writer.newline();
+                        }
+                    }
+
                     // Format leading comments
                     if let Some(t) = trivia {
                         format_leading_trivia(writer, t);
@@ -201,7 +223,20 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
                     writer.write(": ");
                     format_expr(writer, value);
                 }
-                ObjectEntry::Spread { value, trivia, .. } => {
+                ObjectEntry::Spread { value, trivia, blank_lines_before, .. } => {
+                    // Add blank lines before this entry (skip for first entry)
+                    // If there are comments, subtract 1 because the comment line itself counts as a line
+                    if i > 0 {
+                        let blank_count = if trivia.is_some() {
+                            blank_lines_before.saturating_sub(1)
+                        } else {
+                            *blank_lines_before
+                        };
+                        for _ in 0..blank_count {
+                            writer.newline();
+                        }
+                    }
+
                     // Format leading comments
                     if let Some(t) = trivia {
                         format_leading_trivia(writer, t);

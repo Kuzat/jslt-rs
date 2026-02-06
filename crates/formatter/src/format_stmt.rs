@@ -33,21 +33,18 @@ pub fn format_def(writer: &mut Writer, def: &Def) {
     }
 
     writer.write(")");
+    writer.newline();
+    writer.increase_indent();
 
-    // If there are let statements in the def, format them on new lines
-    if !def.lets.is_empty() {
+    // Format let statements if any
+    for let_stmt in &def.lets {
+        format_let(writer, let_stmt);
         writer.newline();
-        writer.increase_indent();
-        for let_stmt in &def.lets {
-            format_let(writer, let_stmt);
-            writer.newline();
-        }
-        writer.decrease_indent();
-    } else {
-        writer.write(" ");
     }
 
+    // Always format body on new line
     format_expr(writer, &def.body);
+    writer.decrease_indent();
 }
 
 /// Format a let statement

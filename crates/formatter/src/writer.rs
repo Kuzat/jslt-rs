@@ -84,7 +84,14 @@ impl Writer {
     }
 
     /// Convert the writer into a string
-    pub fn into_string(self) -> String {
+    pub fn into_string(mut self) -> String {
+        // Ensure exactly one trailing newline
+        while self.buffer.ends_with("\n\n") {
+            self.buffer.pop();
+        }
+        if !self.buffer.ends_with('\n') && !self.buffer.is_empty() {
+            self.buffer.push('\n');
+        }
         self.buffer
     }
 
@@ -104,7 +111,7 @@ mod tests {
         w.write("hello");
         w.write(" ");
         w.write("world");
-        assert_eq!(w.into_string(), "hello world");
+        assert_eq!(w.into_string(), "hello world\n");
     }
 
     #[test]
@@ -114,7 +121,7 @@ mod tests {
         w.newline();
         w.increase_indent();
         w.write("line2");
-        assert_eq!(w.into_string(), "line1\n  line2");
+        assert_eq!(w.into_string(), "line1\n  line2\n");
     }
 
     #[test]
@@ -142,6 +149,6 @@ mod tests {
         w.newline();
         w.decrease_indent();
         w.write("back to level1");
-        assert_eq!(w.into_string(), "level0\n  level1\n    level2\n  back to level1");
+        assert_eq!(w.into_string(), "level0\n  level1\n    level2\n  back to level1\n");
     }
 }

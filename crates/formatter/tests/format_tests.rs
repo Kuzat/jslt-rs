@@ -35,29 +35,29 @@ def complex(data)
 fn test_format_basic_expression() {
     let input = ".a+.b";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, ".a + .b");
+    assert_eq!(formatted, ".a + .b\n");
 }
 
 #[test]
 fn test_format_def_spacing() {
     let input = "def  foo(x,y,z)    x+y+z";
     let formatted = format_source(input).unwrap();
-    // Formatter adds newline after top-level defs
-    assert_eq!(formatted, "def foo(x, y, z) x + y + z\n");
+    // def bodies are always on new line with indentation
+    assert_eq!(formatted, "def foo(x, y, z)\n  x + y + z\n");
 }
 
 #[test]
 fn test_format_let_statement() {
     let input = "let   x=1+2\n{ \"result\": . }";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "let x = 1 + 2\n\n{\"result\": .}");
+    assert_eq!(formatted, "let x = 1 + 2\n\n{\"result\": .}\n");
 }
 
 #[test]
 fn test_format_array_single_line() {
     let input = "[1,2,3]";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "[1, 2, 3]");
+    assert_eq!(formatted, "[1, 2, 3]\n");
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn test_format_array_multiline() {
 fn test_format_object_single_line() {
     let input = r#"{"a":1,"b":2}"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, r#"{"a": 1, "b": 2}"#);
+    assert_eq!(formatted, r#"{"a": 1, "b": 2}"#.to_string() + "\n");
 }
 
 #[test]
@@ -95,26 +95,27 @@ fn test_format_object_multiline() {
 fn test_format_if_expression() {
     let input = "if(.x>5)   .a   else   .b";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "if (.x > 5) .a else .b");
+    // if/else branches are on new lines
+    assert_eq!(formatted, "if (.x > 5)\n  .a\nelse\n  .b\n");
 }
 
 #[test]
 fn test_format_binary_operators() {
     let tests = vec![
-        (".a+.b", ".a + .b"),
+        (".a+.b", ".a + .b\n"),
         // Note: .a-.b is parsed as .a followed by negative number -b
-        (".a - .b", ".a - .b"),
-        (".a*.b", ".a * .b"),
-        (".a/.b", ".a / .b"),
-        (".a%.b", ".a % .b"),
-        (".a<.b", ".a < .b"),
-        (".a<=.b", ".a <= .b"),
-        (".a>.b", ".a > .b"),
-        (".a>=.b", ".a >= .b"),
-        (".a==.b", ".a == .b"),
-        (".a!=.b", ".a != .b"),
-        (".a and .b", ".a and .b"),
-        (".a or .b", ".a or .b"),
+        (".a - .b", ".a - .b\n"),
+        (".a*.b", ".a * .b\n"),
+        (".a/.b", ".a / .b\n"),
+        (".a%.b", ".a % .b\n"),
+        (".a<.b", ".a < .b\n"),
+        (".a<=.b", ".a <= .b\n"),
+        (".a>.b", ".a > .b\n"),
+        (".a>=.b", ".a >= .b\n"),
+        (".a==.b", ".a == .b\n"),
+        (".a!=.b", ".a != .b\n"),
+        (".a and .b", ".a and .b\n"),
+        (".a or .b", ".a or .b\n"),
     ];
 
     for (input, expected) in tests {
@@ -127,34 +128,34 @@ fn test_format_binary_operators() {
 fn test_format_unary_operators() {
     let input = "not   .x";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "not .x");
+    assert_eq!(formatted, "not .x\n");
 
     let input = "-.x";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "-.x");
+    assert_eq!(formatted, "-.x\n");
 }
 
 #[test]
 fn test_format_member_access() {
     let input = ".foo.bar.baz";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, ".foo.bar.baz");
+    assert_eq!(formatted, ".foo.bar.baz\n");
 }
 
 #[test]
 fn test_format_index_access() {
     let input = ".array[0]";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, ".array[0]");
+    assert_eq!(formatted, ".array[0]\n");
 }
 
 #[test]
 fn test_format_slice() {
     let tests = vec![
-        (".array[1:3]", ".array[1:3]"),
-        (".array[:3]", ".array[:3]"),
-        (".array[1:]", ".array[1:]"),
-        (".array[:]", ".array[:]"),
+        (".array[1:3]", ".array[1:3]\n"),
+        (".array[:3]", ".array[:3]\n"),
+        (".array[1:]", ".array[1:]\n"),
+        (".array[:]", ".array[:]\n"),
     ];
 
     for (input, expected) in tests {
@@ -167,36 +168,36 @@ fn test_format_slice() {
 fn test_format_function_call() {
     let input = "foo(1,2,3)";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "foo(1, 2, 3)");
+    assert_eq!(formatted, "foo(1, 2, 3)\n");
 }
 
 #[test]
 fn test_format_array_comprehension() {
     let input = "[for(.items).value]";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "[for (.items) .value]");
+    assert_eq!(formatted, "[for (.items) .value]\n");
 
     let input = "[for(.items).value if .active]";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "[for (.items) .value if .active]");
+    assert_eq!(formatted, "[for (.items) .value if .active]\n");
 }
 
 #[test]
 fn test_format_object_comprehension() {
     let input = "{for(.items).key:.value}";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "{for (.items) .key: .value}");
+    assert_eq!(formatted, "{for (.items) .key: .value}\n");
 
     let input = "{for(.items).key:.value if .active}";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "{for (.items) .key: .value if .active}");
+    assert_eq!(formatted, "{for (.items) .key: .value if .active}\n");
 }
 
 #[test]
 fn test_format_string_escaping() {
     let input = r#"{"text": "hello\nworld"}"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, r#"{"text": "hello\nworld"}"#);
+    assert_eq!(formatted, r#"{"text": "hello\nworld"}"#.to_string() + "\n");
 }
 
 #[test]
@@ -204,7 +205,7 @@ fn test_format_program_with_imports() {
     let input = r#"import   "foo.jslt"   as   foo
 .result"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "import \"foo.jslt\" as foo\n\n.result");
+    assert_eq!(formatted, "import \"foo.jslt\" as foo\n\n.result\n");
 }
 
 #[test]
@@ -224,18 +225,18 @@ let y = 2
 fn test_format_empty_array_object() {
     let input = "[]";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "[]");
+    assert_eq!(formatted, "[]\n");
 
     let input = "{}";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "{}");
+    assert_eq!(formatted, "{}\n");
 }
 
 #[test]
 fn test_format_nested_structures() {
     let input = r#"{"outer":{"inner":[1,2,3]}}"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, r#"{"outer": {"inner": [1, 2, 3]}}"#);
+    assert_eq!(formatted, r#"{"outer": {"inner": [1, 2, 3]}}"#.to_string() + "\n");
 }
 
 #[test]
@@ -243,7 +244,8 @@ fn test_format_let_block() {
     // Let blocks are inline expressions, not top-level lets
     let input = "if (true) let x=1 let y=2 x+y else 0";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "if (true) let x = 1 let y = 2 x + y else 0");
+    // if/else now on new lines, but let blocks within branches stay inline
+    assert_eq!(formatted, "if (true)\n  let x = 1 let y = 2 x + y\nelse\n  0\n");
 }
 
 #[test]
@@ -260,23 +262,23 @@ fn test_custom_indent_width() {
         max_width: 10, // Force multi-line
         ..Default::default()
     };
-    let input = "[1, 2, 3]";
+    let input = "[1, 2, 3, 4, 5]"; // Longer array to exceed max_width
     let formatted = format_source_with_config(input, config).unwrap();
     // Multi-line array should have 4-space indentation
-    if formatted.contains('\n') {
-        assert!(formatted.contains("    "), "Should use 4-space indent");
-    }
+    // The output should be multi-line due to max_width
+    assert!(formatted.contains('\n'));
+    assert!(formatted.contains("    "), "Should use 4-space indent");
 }
 
 #[test]
 fn test_literals() {
     let tests = vec![
-        ("null", "null"),
-        ("true", "true"),
-        ("false", "false"),
-        ("42", "42"),
-        ("3.14", "3.14"),
-        (r#""hello""#, r#""hello""#),
+        ("null", "null\n"),
+        ("true", "true\n"),
+        ("false", "false\n"),
+        ("42", "42\n"),
+        ("3.14", "3.14\n"),
+        (r#""hello""#, "\"hello\"\n"),
     ];
 
     for (input, expected) in tests {
@@ -289,21 +291,21 @@ fn test_literals() {
 fn test_variables() {
     let input = "$foo";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, "$foo");
+    assert_eq!(formatted, "$foo\n");
 }
 
 #[test]
 fn test_this_expression() {
     let input = ".";
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, ".");
+    assert_eq!(formatted, ".\n");
 }
 
 #[test]
 fn test_object_spread() {
     let input = r#"{*:.base,"override":true}"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, r#"{*: .base, "override": true}"#);
+    assert_eq!(formatted, r#"{*: .base, "override": true}"#.to_string() + "\n");
 }
 
 #[test]
@@ -382,6 +384,86 @@ fn test_object_inline_comments() {
     assert!(formatted.contains("// This is a comment between fields"));
 
     // Verify idempotency
+    let reformatted = format_source(&formatted).unwrap();
+    assert_eq!(formatted, reformatted);
+}
+
+#[test]
+fn test_preserve_blank_lines_in_objects() {
+    let input = r#"{
+  "section1": 1,
+
+  "section2": 2,
+
+
+  "section3": 3
+}"#;
+    let formatted = format_source(input).unwrap();
+
+    // Should preserve single blank line
+    assert!(formatted.contains("\"section1\": 1,\n\n  \"section2\""));
+
+    // Should preserve two blank lines
+    assert!(formatted.contains("\"section2\": 2,\n\n\n  \"section3\""));
+
+    // Verify idempotency
+    let reformatted = format_source(&formatted).unwrap();
+    assert_eq!(formatted, reformatted);
+}
+
+#[test]
+fn test_trailing_newline() {
+    let input = "def foo(x) x";
+    let formatted = format_source(input).unwrap();
+    assert!(formatted.ends_with('\n'), "Should have trailing newline");
+    assert!(!formatted.ends_with("\n\n"), "Should have exactly one trailing newline");
+}
+
+#[test]
+fn test_def_body_on_newline() {
+    let input = "def simple(x) x + 1";
+    let formatted = format_source(input).unwrap();
+    assert_eq!(formatted, "def simple(x)\n  x + 1\n");
+}
+
+#[test]
+fn test_nested_if_else() {
+    let input = "if (.a) if (.b) 1 else 2 else 3";
+    let formatted = format_source(input).unwrap();
+    // Verify proper multi-level indentation
+    assert!(formatted.contains("if (.a)\n  if (.b)"));
+}
+
+#[test]
+fn test_complex_formatting_example() {
+    // Use the user's actual example
+    let input = r#"
+def asNumber(input)
+  number($input,null)
+
+def asString(input)
+  if ($input == null)
+    null
+  else
+    string($input)
+
+{
+  // For building ip-geo lookup model.
+  "ipAddress": asString(.actor."spt:remoteAddress"),
+
+  // For analysis/debugging.
+  "eventType": asString(."@type")
+}
+"#;
+    let formatted = format_source(input).unwrap();
+
+    // Verify all requirements met
+    assert!(formatted.ends_with('\n'));
+    assert!(formatted.contains("def asNumber(input)\n  number("));
+    assert!(formatted.contains("if ($input == null)\n"));
+    assert!(formatted.contains("\"ipAddress\": asString(.actor"));
+
+    // Idempotency check
     let reformatted = format_source(&formatted).unwrap();
     assert_eq!(formatted, reformatted);
 }

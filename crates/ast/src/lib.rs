@@ -228,12 +228,14 @@ pub enum ObjectEntry {
         value: Expr,
         span: Span,
         trivia: Option<TriviaCollection>,
+        blank_lines_before: usize,
     },
     // *: expr
     Spread {
         value: Expr,
         span: Span,
         trivia: Option<TriviaCollection>,
+        blank_lines_before: usize,
     },
 }
 
@@ -788,17 +790,20 @@ mod tests {
                     value: num("1"),
                     span: sp(),
                     trivia: None,
+                    blank_lines_before: 0,
                 },
                 ObjectEntry::Pair {
                     key: ObjectKey::Str { value: "x y".to_string(), span: sp() },
                     value: str_("v"),
                     span: sp(),
                     trivia: None,
+                    blank_lines_before: 0,
                 },
                 ObjectEntry::Spread {
                     value: member_ident(var("$"), "rest"),
                     span: sp(),
                     trivia: None,
+                    blank_lines_before: 0,
                 },
             ],
             span: sp(),

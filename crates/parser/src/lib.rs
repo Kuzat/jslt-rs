@@ -68,6 +68,12 @@ struct Tok {
     span: Span,
 }
 
+#[derive(Clone)]
+struct PendingComment {
+    text: String,
+    span: Span,
+}
+
 pub struct Parser<'a> {
     lx: Lexer<'a>,
     cur: Tok,
@@ -75,7 +81,7 @@ pub struct Parser<'a> {
     errors: Vec<ParseError>,
     prev_span: Span,
     /// Buffer for comments that haven't been attached to a node yet
-    pending_comments: Vec<String>,
+    pending_comments: Vec<PendingComment>,
 }
 
 impl<'a> Parser<'a> {
@@ -202,10 +208,42 @@ impl<'a> Parser<'a> {
         let leading = self
             .pending_comments
             .drain(..)
-            .map(Trivia::LineComment)
+            .map(|comment| Trivia::LineComment(comment.text))
             .collect();
 
         Some(TriviaCollection::with_leading(leading))
+    }
+
+    /// Collect comments on the same line as an anchor offset as trailing trivia.
+    fn take_inline_trailing_trivia(&mut self, anchor_offset: usize) -> Option<TriviaCollection> {
+        if self.pending_comments.is_empty() {
+            return None;
+        }
+
+        let anchor_line = self.line_for_offset(anchor_offset);
+        let trailing_count = self
+            .pending_comments
+            .iter()
+            .take_while(|comment| self.line_for_offset(comment.span.start) == anchor_line)
+            .count();
+
+        if trailing_count == 0 {
+            return None;
+        }
+
+        let trailing = self
+            .pending_comments
+            .drain(..trailing_count)
+            .map(|comment| Trivia::LineComment(comment.text))
+            .collect();
+        Some(TriviaCollection::with_trailing(trailing))
+    }
+
+    /// Convert byte offset to 0-based source line.
+    fn line_for_offset(&self, offset: usize) -> usize {
+        let source = self.lx.source();
+        let clamped = offset.min(source.len());
+        source[..clamped].bytes().filter(|b| *b == b'\n').count()
     }
 
     /// Count blank lines between previous token and current token
@@ -307,9 +345,20 @@ impl<'a> Parser<'a> {
             let l = self.parse_let_stmt()?;
             lets.push(l);
         }
+        let body_trivia = self.take_leading_trivia();
         let body = self.parse_if_or_expr()?;
+        let body_trailing_trivia = self.take_inline_trailing_trivia(body.span().end);
         let end = body.span();
-        Ok(Def { name, params, lets, body, span: Span::join(start, end), trivia })
+        Ok(Def {
+            name,
+            params,
+            lets,
+            body,
+            span: Span::join(start, end),
+            trivia,
+            body_trivia,
+            body_trailing_trivia,
+        })
     }
 
     fn parse_let_stmt(&mut self) -> ParseResult<Let> {
@@ -748,6 +797,7 @@ impl<'a> Parser<'a> {
 
     fn parse_object_like(&mut self) -> ParseResult<Expr> {
         let start = self.cur.span;
+        let pending_before_lbrace = self.pending_comments.len();
         self.bump()?; // '{'
 
         if self.at(&Token::For) {
@@ -798,6 +848,18 @@ impl<'a> Parser<'a> {
                 let l = self.parse_let_stmt()?;
                 leading_lets.push(l);
             }
+
+            // Preserve comments that appeared before the '{' itself as object-level trivia.
+            let trivia = if pending_before_lbrace > 0 {
+                let leading = self
+                    .pending_comments
+                    .drain(..pending_before_lbrace)
+                    .map(|comment| Trivia::LineComment(comment.text))
+                    .collect();
+                Some(TriviaCollection::with_leading(leading))
+            } else {
+                None
+            };
 
             let mut entries = Vec::new();
             if !self.at(&Token::RBrace) {
@@ -854,9 +916,11 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            // Preserve comments that appear after the last entry and before '}'.
+            let trailing_trivia = self.take_leading_trivia();
             let end_span = self.expect(Token::RBrace, "'}' to close object")?;
             let span = Span::join(start, end_span);
-            let obj = Expr::ObjectLiteral { entries, span };
+            let obj = Expr::ObjectLiteral { entries, span, trivia, trailing_trivia };
             if leading_lets.is_empty() {
                 Ok(obj)
             } else {
@@ -917,12 +981,12 @@ impl<'a> Parser<'a> {
 }
 
 /// Get the next non-comment token and collect any comments encountered
-fn next_token_with_comments(lx: &mut Lexer<'_>) -> Result<(Tok, Vec<String>), ParseError> {
+fn next_token_with_comments(lx: &mut Lexer<'_>) -> Result<(Tok, Vec<PendingComment>), ParseError> {
     let mut comments = Vec::new();
     loop {
         match lx.next_token() {
-            Ok((Token::Comment(comment), _)) => {
-                comments.push(comment);
+            Ok((Token::Comment(comment), span)) => {
+                comments.push(PendingComment { text: comment, span });
             }
             Ok((t, s)) => return Ok((Tok { tok: t, span: s }, comments)),
             Err(le) => return Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) }),

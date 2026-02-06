@@ -74,6 +74,8 @@ pub struct Def {
     pub body: Expr,
     pub span: Span,
     pub trivia: Option<TriviaCollection>,
+    pub body_trivia: Option<TriviaCollection>,
+    pub body_trailing_trivia: Option<TriviaCollection>,
 }
 
 // let a = expr; b = expr;
@@ -185,6 +187,8 @@ pub enum Expr {
     ObjectLiteral {
         entries: Vec<ObjectEntry>,
         span: Span,
+        trivia: Option<TriviaCollection>,
+        trailing_trivia: Option<TriviaCollection>,
     },
     ObjectFor {
         seq: Box<Expr>,            // for (seq)
@@ -807,6 +811,8 @@ mod tests {
                 },
             ],
             span: sp(),
+            trivia: None,
+            trailing_trivia: None,
         };
         assert_eq!(format!("{}", obj), "{a: 1, \"x y\": \"v\", *: $$.rest}");
     }
@@ -861,6 +867,8 @@ mod tests {
             body: bin(BinaryOp::Add, var("x"), var("y")),
             span: sp(),
             trivia: None,
+            body_trivia: None,
+            body_trailing_trivia: None,
         };
         let let_stmt = Let {
             bindings: vec![

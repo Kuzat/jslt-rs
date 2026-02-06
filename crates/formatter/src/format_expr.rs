@@ -110,8 +110,8 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
             writer.write("]");
         }
 
-        Expr::ObjectLiteral { entries, .. } => {
-            format_object(writer, entries);
+        Expr::ObjectLiteral { entries, trivia, trailing_trivia, .. } => {
+            format_object(writer, entries, trivia.as_ref(), trailing_trivia.as_ref());
         }
 
         Expr::ObjectFor { seq, key, value, filter, .. } => {
@@ -177,14 +177,24 @@ fn format_array(writer: &mut Writer, elements: &[Expr]) {
 }
 
 /// Format an object literal
-fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
-    if entries.is_empty() {
+fn format_object(
+    writer: &mut Writer,
+    entries: &[ObjectEntry],
+    trivia: Option<&ast::TriviaCollection>,
+    trailing_trivia: Option<&ast::TriviaCollection>,
+) {
+    if let Some(t) = trivia {
+        format_leading_trivia(writer, t);
+    }
+
+    if entries.is_empty() && trailing_trivia.is_none() {
         writer.write("{}");
         return;
     }
 
     // Check if any entry has comments or blank lines - if so, force multi-line
-    let has_comments_or_blanks = entries.iter().any(|entry| match entry {
+    let has_comments_or_blanks = trailing_trivia.is_some()
+        || entries.iter().any(|entry| match entry {
         ObjectEntry::Pair { trivia, blank_lines_before, .. } | ObjectEntry::Spread { trivia, blank_lines_before, .. } => {
             trivia.is_some() || *blank_lines_before > 0
         }
@@ -203,10 +213,10 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
             match entry {
                 ObjectEntry::Pair { key, value, trivia, blank_lines_before, .. } => {
                     // Add blank lines before this entry (skip for first entry)
-                    // If there are comments, subtract 1 because the comment line itself counts as a line
+                    // Comments in trivia are already rendered as their own lines.
                     if i > 0 {
-                        let blank_count = if trivia.is_some() {
-                            blank_lines_before.saturating_sub(1)
+                        let blank_count = if let Some(t) = trivia {
+                            blank_lines_before.saturating_sub(t.leading.len())
                         } else {
                             *blank_lines_before
                         };
@@ -225,10 +235,10 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
                 }
                 ObjectEntry::Spread { value, trivia, blank_lines_before, .. } => {
                     // Add blank lines before this entry (skip for first entry)
-                    // If there are comments, subtract 1 because the comment line itself counts as a line
+                    // Comments in trivia are already rendered as their own lines.
                     if i > 0 {
-                        let blank_count = if trivia.is_some() {
-                            blank_lines_before.saturating_sub(1)
+                        let blank_count = if let Some(t) = trivia {
+                            blank_lines_before.saturating_sub(t.leading.len())
                         } else {
                             *blank_lines_before
                         };
@@ -249,6 +259,9 @@ fn format_object(writer: &mut Writer, entries: &[ObjectEntry]) {
                 writer.write(",");
             }
             writer.newline();
+        }
+        if let Some(t) = trailing_trivia {
+            format_leading_trivia(writer, t);
         }
         writer.decrease_indent();
         writer.write("}");

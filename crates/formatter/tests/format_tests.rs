@@ -364,6 +364,62 @@ fn test_no_leading_newline_at_start_of_file() {
 }
 
 #[test]
+fn test_comment_before_top_level_object_stays_outside_object() {
+    let input = r#"def f(x)
+  x
+// Keep this outside the object
+{"a":1}"#;
+    let formatted = format_source(input).unwrap();
+
+    assert!(formatted.contains("x\n\n// Keep this outside the object\n{\"a\": 1}\n"));
+}
+
+#[test]
+fn test_preserve_comment_before_closing_object_brace() {
+    let input = r#"{"a": 1 // keep
+}"#;
+    let formatted = format_source(input).unwrap();
+
+    assert!(formatted.contains("\"a\": 1\n  // keep\n}"));
+}
+
+#[test]
+fn test_no_extra_blank_line_before_consecutive_object_comments() {
+    let input = r#"{
+  "a": 1,
+  // first
+  // second
+  "b": 2
+}"#;
+    let formatted = format_source(input).unwrap();
+
+    assert!(formatted.contains("\"a\": 1,\n  // first\n  // second\n  \"b\": 2"));
+    assert!(!formatted.contains("\"a\": 1,\n\n  // first\n\n  // second"));
+}
+
+#[test]
+fn test_preserve_def_body_and_inline_comments() {
+    let input = r#"// Convert any type to a string.
+def asString(input)
+  // some comment here as well
+  if ($input == null)
+    null
+  else
+    string($input) // Some end of line comment"#;
+    let formatted = format_source(input).unwrap();
+
+    let expected = r#"// Convert any type to a string.
+def asString(input)
+  // some comment here as well
+  if ($input == null)
+    null
+  else
+    string($input)  // Some end of line comment
+"#;
+    assert_eq!(formatted, expected);
+}
+
+#[test]
 fn test_object_literal_comments() {
     let input = r#"{
   // For building ip-geo lookup model.

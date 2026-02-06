@@ -1,7 +1,7 @@
 //! Statement formatting (imports, defs, lets)
 
 use crate::format_expr::format_expr;
-use crate::format_trivia::format_leading_trivia;
+use crate::format_trivia::{format_leading_trivia, format_trailing_trivia};
 use crate::writer::Writer;
 use ast::{Binding, Def, Import, Let};
 
@@ -42,8 +42,15 @@ pub fn format_def(writer: &mut Writer, def: &Def) {
         writer.newline();
     }
 
+    if let Some(ref body_trivia) = def.body_trivia {
+        format_leading_trivia(writer, body_trivia);
+    }
+
     // Always format body on new line
     format_expr(writer, &def.body);
+    if let Some(ref body_trailing_trivia) = def.body_trailing_trivia {
+        format_trailing_trivia(writer, body_trailing_trivia);
+    }
     writer.decrease_indent();
 }
 

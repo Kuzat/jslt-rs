@@ -878,16 +878,62 @@ impl<'a> Parser<'a> {
                     // Collect comments before this entry
                     let entry_trivia = self.take_leading_trivia();
 
-                    // entry = key ':' expr | '*' ':' expr
+                    // entry = key ':' expr | '*' ('-' key)* ':' expr
                     let entry = match &self.cur.tok {
                         Token::Star => {
                             let star_span = self.cur.span;
                             self.bump()?;
+                            let mut exclude_keys = Vec::new();
+                            while self.eat(&Token::Minus) {
+                                let excluded_key = match &self.cur.tok {
+                                    Token::Ident(id) => {
+                                        let name = id.clone();
+                                        self.bump()?;
+                                        name
+                                    }
+                                    Token::String(s) => {
+                                        let name = s.clone();
+                                        self.bump()?;
+                                        name
+                                    }
+                                    _ => {
+                                        return Err(ParseError::unexpected(
+                                            self.prev_span,
+                                            self.cur.tok.clone(),
+                                            "identifier or string after '-' in object wildcard",
+                                        ))
+                                    }
+                                };
+                                exclude_keys.push(excluded_key);
+                                while self.eat(&Token::Comma) {
+                                    let excluded_key = match &self.cur.tok {
+                                        Token::Ident(id) => {
+                                            let name = id.clone();
+                                            self.bump()?;
+                                            name
+                                        }
+                                        Token::String(s) => {
+                                            let name = s.clone();
+                                            self.bump()?;
+                                            name
+                                        }
+                                        _ => {
+                                            return Err(ParseError::unexpected(
+                                                self.prev_span,
+                                                self.cur.tok.clone(),
+                                                "identifier or string after ',' in object wildcard exclusion",
+                                            ))
+                                        }
+                                    };
+                                    exclude_keys.push(excluded_key);
+                                }
+                            }
                             self.expect(Token::Colon, "':' after '*'")?;
                             let v = self.parse_if_or_expr()?;
                             let span = Span::join(star_span, v.span());
                             ObjectEntry::Spread {
                                 value: v,
+                                exclude_keys,
                                 span,
                                 trivia: entry_trivia,
                                 blank_lines_before,

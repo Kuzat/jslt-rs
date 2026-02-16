@@ -1,0 +1,13 @@
+{
+  "name": "213_object_wildcard_transform_values",
+  "description": "Wildcard value expression is evaluated per source field value",
+  "program": "{ *: if (is-number(.)) . + 1 else . }",
+  "input": {
+    "a": 1,
+    "b": "x"
+  },
+  "expected": {
+    "a": 2,
+    "b": "x"
+  }
+}

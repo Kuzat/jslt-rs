@@ -237,6 +237,7 @@ pub enum ObjectEntry {
     // *: expr
     Spread {
         value: Expr,
+        exclude_keys: Vec<String>,
         span: Span,
         trivia: Option<TriviaCollection>,
         blank_lines_before: usize,
@@ -574,8 +575,18 @@ impl<'a, 'b> Pretty<'a, 'b> {
                             write!(self.f, ": ")?;
                             self.expr(value, Prec::Lowest)?;
                         }
-                        ObjectEntry::Spread { value, .. } => {
-                            write!(self.f, "*: ")?;
+                        ObjectEntry::Spread { value, exclude_keys, .. } => {
+                            write!(self.f, "*")?;
+                            if !exclude_keys.is_empty() {
+                                write!(self.f, " - ")?;
+                                for (i, key) in exclude_keys.iter().enumerate() {
+                                    if i > 0 {
+                                        write!(self.f, ", ")?;
+                                    }
+                                    write!(self.f, "{}", key)?;
+                                }
+                            }
+                            write!(self.f, ": ")?;
                             self.expr(value, Prec::Lowest)?;
                         }
                     }
@@ -807,6 +818,7 @@ mod tests {
                 },
                 ObjectEntry::Spread {
                     value: member_ident(var("$"), "rest"),
+                    exclude_keys: vec![],
                     span: sp(),
                     trivia: None,
                     blank_lines_before: 0,

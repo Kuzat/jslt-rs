@@ -121,7 +121,7 @@ pub enum BoundExpr {
 
     // postfix: member, index/slice,  comprehensions
     ArrayLiteral(Vec<BoundExpr>, Span),
-    ObjectLiteral(Vec<(BoundExpr, BoundExpr)>, Option<Box<BoundExpr>> /* spread */, Span),
+    ObjectLiteral(Vec<BoundObjectEntry>, Span),
 
     // Array comprehensions
     ArrayFor {
@@ -150,6 +150,12 @@ pub enum BoundExpr {
         end: Option<Box<BoundExpr>>,
         span: Span,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum BoundObjectEntry {
+    Pair(BoundExpr, BoundExpr),
+    Wildcard { value: BoundExpr, exclude_keys: Vec<String> },
 }
 
 impl BoundExpr {
@@ -182,7 +188,7 @@ impl BoundExpr {
             | Or(_, _, s) => *s,
             If { span, .. } => *span,
             ArrayLiteral(_, s) => *s,
-            ObjectLiteral(_, _, s) => *s,
+            ObjectLiteral(_, s) => *s,
             ArrayFor { span, .. } => *span,
             ObjectFor { span, .. } => *span,
             Member(_, _, s) => *s,
@@ -846,10 +852,8 @@ impl Binder {
             }
 
             Expr::ObjectLiteral { entries, span, .. } => {
-                // Convert to a pair list (key-expr, value-expr). Keys are syntactic (ident or string)
-                // we emit keys as string expressions so evaluator can compute object construction.
-                let mut pairs: Vec<(BoundExpr, BoundExpr)> = Vec::with_capacity(entries.len());
-                let mut spread: Option<Box<BoundExpr>> = None;
+                // Convert entries preserving wildcard semantics.
+                let mut out_entries: Vec<BoundObjectEntry> = Vec::with_capacity(entries.len());
                 for ent in entries {
                     match ent {
                         ast::ObjectEntry::Pair { key, value, .. } => {
@@ -862,16 +866,17 @@ impl Binder {
                                 }
                             };
                             let vexpr = self.bind_expr_recovery(value);
-                            pairs.push((kexpr, vexpr));
+                            out_entries.push(BoundObjectEntry::Pair(kexpr, vexpr));
                         }
-                        ast::ObjectEntry::Spread { value, .. } => {
-                            // Only one spread supported in this bound form; if multiple are allowed,
-                            // convert to a list and adjust BoundExpr to carry a Vec
-                            spread = Some(Box::new(self.bind_expr_recovery(value)));
+                        ast::ObjectEntry::Spread { value, exclude_keys, .. } => {
+                            out_entries.push(BoundObjectEntry::Wildcard {
+                                value: self.bind_expr_recovery(value),
+                                exclude_keys: exclude_keys.clone(),
+                            });
                         }
                     }
                 }
-                Ok(BoundExpr::ObjectLiteral(pairs, spread, *span))
+                Ok(BoundExpr::ObjectLiteral(out_entries, *span))
             }
 
             Expr::ObjectFor { seq, key, value, filter, span } => {

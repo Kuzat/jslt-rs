@@ -236,7 +236,7 @@ fn format_object(
                     writer.write(": ");
                     format_expr(writer, value);
                 }
-                ObjectEntry::Spread { value, trivia, blank_lines_before, .. } => {
+                ObjectEntry::Spread { value, exclude_keys, trivia, blank_lines_before, .. } => {
                     // Add blank lines before this entry (skip for first entry)
                     // Comments in trivia are already rendered as their own lines.
                     if i > 0 {
@@ -254,7 +254,17 @@ fn format_object(
                     if let Some(t) = trivia {
                         format_leading_trivia(writer, t);
                     }
-                    writer.write("*: ");
+                    writer.write("*");
+                    if !exclude_keys.is_empty() {
+                        writer.write(" - ");
+                        for (i, key) in exclude_keys.iter().enumerate() {
+                            if i > 0 {
+                                writer.write(", ");
+                            }
+                            writer.write(key);
+                        }
+                    }
+                    writer.write(": ");
                     format_expr(writer, value);
                 }
             }
@@ -345,8 +355,18 @@ fn format_object_single_line(entries: &[ObjectEntry]) -> String {
                 result.push_str(": ");
                 result.push_str(&format!("{}", value));
             }
-            ObjectEntry::Spread { value, .. } => {
-                result.push_str("*: ");
+            ObjectEntry::Spread { value, exclude_keys, .. } => {
+                result.push('*');
+                if !exclude_keys.is_empty() {
+                    result.push_str(" - ");
+                    for (i, key) in exclude_keys.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(key);
+                    }
+                }
+                result.push_str(": ");
                 result.push_str(&format!("{}", value));
             }
         }

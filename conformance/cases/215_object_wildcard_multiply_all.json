@@ -1,0 +1,13 @@
+{
+  "name": "215_object_wildcard_multiply_all",
+  "description": "Wildcard expression is evaluated per field value",
+  "program": "{ *: . * 10 }",
+  "input": {
+    "foo": 1,
+    "bar": 2
+  },
+  "expected": {
+    "foo": 10,
+    "bar": 20
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "217_object_wildcard_nested_match",
+  "description": "Nested wildcard matches against the nested source object for that key",
+  "program": "{ \"foo\": { \"baz\": .hey.ho, *: . }, \"bar\": 24 }",
+  "input": {
+    "foo": {
+      "x": 1,
+      "hey": {
+        "ho": 9
+      }
+    },
+    "hey": {
+      "ho": 2
+    },
+    "bar": 3
+  },
+  "expected": {
+    "foo": {
+      "baz": 2,
+      "x": 1,
+      "hey": {
+        "ho": 9
+      }
+    },
+    "bar": 24
+  }
+}

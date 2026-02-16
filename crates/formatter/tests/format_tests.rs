@@ -310,6 +310,14 @@ fn test_object_spread() {
     let input = r#"{*:.base,"override":true}"#;
     let formatted = format_source(input).unwrap();
     assert_eq!(formatted, r#"{*: .base, "override": true}"#.to_string() + "\n");
+
+    let input_excluded = r#"{*-location:.}"#;
+    let formatted_excluded = format_source(input_excluded).unwrap();
+    assert_eq!(formatted_excluded, "{* - location: .}\n");
+
+    let input_excluded_many = r#"{*-bar,baz,quux:.}"#;
+    let formatted_excluded_many = format_source(input_excluded_many).unwrap();
+    assert_eq!(formatted_excluded_many, "{* - bar, baz, quux: .}\n");
 }
 
 #[test]

@@ -58,6 +58,9 @@ fn if_expression_lowest_precedence() {
 
     // (if (true) 1 else 2) + 1 gets parenthesized when needed
     assert_eq!(parse_fmt("(if (true) 1 else 2) + 1"), "(if (true) 1 else 2) + 1");
+
+    // else branch is optional
+    assert_eq!(parse_fmt("if ($a) $b"), "if ($a) $b");
 }
 
 #[test]
@@ -169,4 +172,11 @@ fn errors_are_helpful() {
     // let binding missing '='
     let e = parse_err("let a 1; .");
     assert!(e.contains("=") || e.contains("binding"), "unexpected error: {e}");
+}
+
+#[test]
+fn parser_collects_multiple_lex_and_parse_errors() {
+    let mut p = Parser::new("! @ def foo( x\nlet a 1\n$").expect("parser init should recover");
+    let err = p.parse_program().expect_err("expected parse errors");
+    assert!(err.errors.len() >= 2, "expected multiple errors, got {}", err.errors.len());
 }

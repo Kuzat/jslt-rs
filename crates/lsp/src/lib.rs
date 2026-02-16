@@ -6,6 +6,7 @@
 use engine::EngineError;
 use formatter::format_source;
 use interp::binder::BindError;
+use parser::Parser;
 use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -33,6 +34,13 @@ impl JsltLanguageServer {
     ///
     /// This is where we integrate with out parser to detect syntax errors
     async fn parse_and_diagnose(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
+        // Parse first to report as many in-file syntax/lexer errors as possible.
+        if let Ok(mut parser) = Parser::new(text) {
+            if let Err(parse_errors) = parser.parse_program() {
+                return Self::parse_errors_to_diagnostics(parse_errors, text);
+            }
+        }
+
         // Extract the file path for module resolution
         let file_path = uri
             .to_file_path()
@@ -47,6 +55,28 @@ impl JsltLanguageServer {
         }
     }
 
+    fn parse_errors_to_diagnostics(parse_errors: parser::ParseErrors, text: &str) -> Vec<Diagnostic> {
+        parse_errors
+            .errors
+            .into_iter()
+            .map(|err| {
+                let start = Self::byte_offset_to_position(text, err.span.start);
+                let end = Self::byte_offset_to_position(text, err.span.end);
+                Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("jslt-parser".to_string()),
+                    message: format!("{}", err),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            })
+            .collect()
+    }
+
     /// Convert a parser error into an LSP Diagnostic
     ///
     /// LSP diagnostics have:
@@ -59,22 +89,7 @@ impl JsltLanguageServer {
 
         match err {
             EngineError::ParseErrors(parse_errors) => {
-                for err in parse_errors.errors {
-                    let start = Self::byte_offset_to_position(text, err.span.start);
-                    let end = Self::byte_offset_to_position(text, err.span.end);
-
-                    diagnostic.push(Diagnostic {
-                        range: Range { start, end },
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        code_description: None,
-                        source: Some("jslt-parser".to_string()),
-                        message: format!("{}", err),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    });
-                }
+                diagnostic.extend(Self::parse_errors_to_diagnostics(parse_errors, text));
             }
             EngineError::Parse(parser_err) => {
                 // get the error span if available
@@ -352,4 +367,41 @@ pub async fn run_server() {
 
     // Run the server
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_errors_are_reported_as_multiple_diagnostics() {
+        let text = "! @ def foo( x\nlet a 1\n$";
+        let mut parser = Parser::new(text).expect("parser init should recover");
+        let parse_errors = parser.parse_program().expect_err("expected parse errors");
+
+        let diags = JsltLanguageServer::parse_errors_to_diagnostics(parse_errors, text);
+        assert!(
+            diags.len() >= 2,
+            "expected multiple diagnostics, got {}",
+            diags.len()
+        );
+        assert!(diags.iter().all(|d| d.source.as_deref() == Some("jslt-parser")));
+    }
+
+    #[test]
+    fn engine_parse_errors_expand_to_multiple_diagnostics() {
+        let text = "! @ def foo( x\nlet a 1\n$";
+        let mut parser = Parser::new(text).expect("parser init should recover");
+        let parse_errors = parser.parse_program().expect_err("expected parse errors");
+
+        let diags = JsltLanguageServer::error_to_diagnostic(
+            EngineError::ParseErrors(parse_errors),
+            text,
+        );
+        assert!(
+            diags.len() >= 2,
+            "expected multiple diagnostics, got {}",
+            diags.len()
+        );
+    }
 }

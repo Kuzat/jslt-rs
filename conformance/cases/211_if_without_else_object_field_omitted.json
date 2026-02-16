@@ -1,0 +1,9 @@
+{
+  "name": "211_if_without_else_object_field_omitted",
+  "description": "if expression without else omits object key when condition is false",
+  "program": "{ \"hello\": if (.nullid == 0) \"yes\" }",
+  "input": {
+    "nullid": 1
+  },
+  "expected": {}
+}

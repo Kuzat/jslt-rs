@@ -131,7 +131,7 @@ pub enum Expr {
     If {
         cond: Box<Expr>,
         then_br: Box<Expr>,
-        else_br: Box<Expr>,
+        else_br: Option<Box<Expr>>,
         span: Span,
     },
     // Unary / Binary
@@ -419,8 +419,10 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 self.expr(cond, Prec::Lowest)?;
                 write!(self.f, ") ")?;
                 self.expr(then_br, Prec::Lowest)?;
-                write!(self.f, " else ")?;
-                self.expr(else_br, Prec::Lowest)?;
+                if let Some(else_br) = else_br {
+                    write!(self.f, " else ")?;
+                    self.expr(else_br, Prec::Lowest)?;
+                }
                 if need_paren {
                     write!(self.f, ")")?;
                 }
@@ -751,7 +753,7 @@ mod tests {
         let e = Expr::If {
             cond: Box::new(bool_(true)),
             then_br: Box::new(num("1")),
-            else_br: Box::new(num("2")),
+            else_br: Some(Box::new(num("2"))),
             span: sp(),
         };
         let wrapped = bin(BinaryOp::Add, e.clone(), num("1"));

@@ -744,7 +744,10 @@ impl Binder {
             Expr::If { cond, then_br, else_br, span } => Ok(BoundExpr::If {
                 cond: Box::new(self.bind_expr_recovery(cond)),
                 then_br: Box::new(self.bind_expr_recovery(then_br)),
-                else_br: Box::new(self.bind_expr_recovery(else_br)),
+                else_br: Box::new(match else_br {
+                    Some(else_br) => self.bind_expr_recovery(else_br),
+                    None => BoundExpr::Null(*span),
+                }),
                 span: *span,
             }),
 

@@ -26,12 +26,14 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
             writer.increase_indent();
             format_expr(writer, then_br);
             writer.decrease_indent();
-            writer.newline();
-            writer.write("else");
-            writer.newline();
-            writer.increase_indent();
-            format_expr(writer, else_br);
-            writer.decrease_indent();
+            if let Some(else_br) = else_br {
+                writer.newline();
+                writer.write("else");
+                writer.newline();
+                writer.increase_indent();
+                format_expr(writer, else_br);
+                writer.decrease_indent();
+            }
         }
 
         Expr::Unary { op, expr, .. } => {

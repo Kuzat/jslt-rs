@@ -97,6 +97,10 @@ fn test_format_if_expression() {
     let formatted = format_source(input).unwrap();
     // if/else branches are on new lines
     assert_eq!(formatted, "if (.x > 5)\n  .a\nelse\n  .b\n");
+
+    let input_no_else = "if(.x>5)   .a";
+    let formatted_no_else = format_source(input_no_else).unwrap();
+    assert_eq!(formatted_no_else, "if (.x > 5)\n  .a\n");
 }
 
 #[test]

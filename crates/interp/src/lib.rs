@@ -526,7 +526,11 @@ impl<'p> Evaluator<'p> {
                         }
                     };
                     let val = self.eval_expr(vexpr)?;
-                    obj.insert(s, val.into_json());
+                    let val_json = val.into_json();
+                    if should_omit_object_field(&val_json) {
+                        continue;
+                    }
+                    obj.insert(s, val_json);
                 }
                 Ok(JsltValue::from_json(Value::Object(obj)))
             }
@@ -607,7 +611,11 @@ impl<'p> Evaluator<'p> {
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
-                                out.insert(kstr, v.into_json());
+                                let v_json = v.into_json();
+                                if should_omit_object_field(&v_json) {
+                                    continue;
+                                }
+                                out.insert(kstr, v_json);
                             }
                         }
                     }
@@ -632,7 +640,11 @@ impl<'p> Evaluator<'p> {
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
-                                out.insert(kstr, v.into_json());
+                                let v_json = v.into_json();
+                                if should_omit_object_field(&v_json) {
+                                    continue;
+                                }
+                                out.insert(kstr, v_json);
                             }
                         }
                     }
@@ -1022,6 +1034,16 @@ fn obj_get(target: &JsltValue, key: &ObjectKey) -> JsltValue {
             m.get(k).cloned().map(JsltValue::from_json).unwrap_or(JsltValue::null())
         }
         _ => JsltValue::null(),
+    }
+}
+
+// In object construction, null/empty object/empty array values are omitted.
+fn should_omit_object_field(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Object(m) => m.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        _ => false,
     }
 }
 

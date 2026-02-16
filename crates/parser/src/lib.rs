@@ -2,7 +2,7 @@ use ast::{
     BinaryOp, Binding, Def, Expr, Ident, Import, Let, MemberKey, NumericKind, ObjectEntry,
     ObjectKey, Program, Span, Trivia, TriviaCollection, UnaryOp,
 };
-use lexer::{LexErrorKind, Lexer, Token};
+use lexer::{LexErrorKind, LexStep, Lexer, Token};
 use std::mem;
 use thiserror::Error;
 
@@ -87,13 +87,13 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
         let mut lx = Lexer::new(input);
-        let (first, initial_comments) = next_token_with_comments(&mut lx)?;
+        let (first, initial_comments, initial_errors) = next_token_with_comments(&mut lx);
         let prev_span = first.span;
         Ok(Parser {
             lx,
             cur: first,
             peeked: None,
-            errors: Vec::new(),
+            errors: initial_errors,
             prev_span,
             pending_comments: initial_comments,
         })
@@ -386,13 +386,21 @@ impl<'a> Parser<'a> {
             let cond = self.parse_if_or_expr()?;
             self.expect(Token::RParen, "')' after if condition")?;
             let then_expr = self.parse_lets_then_expr()?;
-            self.expect(Token::Else, "'else'")?;
-            let else_expr = self.parse_lets_then_expr()?;
-            let span = Span::join(start, else_expr.span());
+            let else_expr = if self.at(&Token::Else) {
+                self.bump()?; // 'else'
+                Some(Box::new(self.parse_lets_then_expr()?))
+            } else {
+                None
+            };
+            let end_span = else_expr
+                .as_ref()
+                .map(|e| e.span())
+                .unwrap_or_else(|| then_expr.span());
+            let span = Span::join(start, end_span);
             Ok(Expr::If {
                 cond: Box::new(cond),
                 then_br: Box::new(then_expr),
-                else_br: Box::new(else_expr),
+                else_br: else_expr,
                 span,
             })
         } else {
@@ -967,8 +975,9 @@ impl<'a> Parser<'a> {
         let old = if let Some(pk) = self.peeked.take() {
             mem::replace(&mut self.cur, pk)
         } else {
-            let (nt, comments) = next_token_with_comments(&mut self.lx)?;
+            let (nt, comments, lex_errors) = next_token_with_comments(&mut self.lx);
             self.pending_comments.extend(comments);
+            self.errors.extend(lex_errors);
             mem::replace(&mut self.cur, nt)
         };
         self.prev_span = old.span;
@@ -998,16 +1007,17 @@ impl<'a> Parser<'a> {
 }
 
 /// Get the next non-comment token and collect any comments encountered
-fn next_token_with_comments(lx: &mut Lexer<'_>) -> Result<(Tok, Vec<PendingComment>), ParseError> {
+fn next_token_with_comments(lx: &mut Lexer<'_>) -> (Tok, Vec<PendingComment>, Vec<ParseError>) {
     let mut comments = Vec::new();
+    let mut errors = Vec::new();
     loop {
-        match lx.next_token() {
-            Ok((Token::Comment(comment), span)) => {
+        match lx.next_step() {
+            LexStep::Token(Token::Comment(comment), span) => {
                 comments.push(PendingComment { text: comment, span });
             }
-            Ok((t, s)) => return Ok((Tok { tok: t, span: s }, comments)),
-            Err(le) => {
-                return Err(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) })
+            LexStep::Token(t, s) => return (Tok { tok: t, span: s }, comments, errors),
+            LexStep::Error(le) => {
+                errors.push(ParseError { span: le.span, kind: ParseErrorKind::Lex(le.kind) });
             }
         }
     }

@@ -6,8 +6,10 @@
 use engine::EngineError;
 use formatter::format_source;
 use interp::binder::BindError;
-use parser::Parser;
+use parser::{parse_import_header, Parser};
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -31,7 +33,9 @@ impl JsltLanguageServer {
     const CODE_BIND_UNKNOWN_VARIABLE: &'static str = "JSLT_BIND_UNKNOWN_VARIABLE";
     const CODE_BIND_NON_FUNCTION_CALLEE: &'static str = "JSLT_BIND_NON_FUNCTION_CALLEE";
     const CODE_MODULE: &'static str = "JSLT_MODULE";
-    const DIAGNOSTIC_DOCS_BASE: &'static str = "https://jslt-rs.dev/diagnostics";
+    const DIAGNOSTIC_DOCS_BASE: &'static str =
+        "https://github.com/Kuzat/jslt-rs/blob/main/docs/diagnostics.md";
+    const CONFIG_FILE_NAMES: [&'static str; 2] = ["jslt-lsp.toml", ".jslt-lsp.toml"];
 
     /// Create a new language server instance
     pub fn new(client: Client) -> Self {
@@ -42,34 +46,143 @@ impl JsltLanguageServer {
     ///
     /// This is where we integrate with out parser to detect syntax errors
     async fn parse_and_diagnose(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
-        let file_path = uri
-            .to_file_path()
-            .ok()
-            .and_then(|p| p.to_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| ".".to_string());
+        let file_path = uri.to_file_path().unwrap_or_else(|_| PathBuf::from("."));
+        let roots = Self::module_resolution_roots_for_file(&file_path);
 
         // Parse first to report as many in-file syntax/lexer errors as possible.
         if let Ok(mut parser) = Parser::new(text) {
             if let Err(parse_errors) = parser.parse_program() {
                 let mut diagnostics = Self::parse_errors_to_diagnostics(parse_errors, text);
                 diagnostics.extend(Self::module_diagnostics_to_lsp(
-                    engine::collect_import_diagnostics(text, &file_path),
+                    Self::collect_import_diagnostics_for_roots(text, &roots),
                     text,
                 ));
                 return diagnostics;
             }
         }
 
-        let module_diags = engine::collect_import_diagnostics(text, &file_path);
+        let module_diags = Self::collect_import_diagnostics_for_roots(text, &roots);
         if !module_diags.is_empty() {
             return Self::module_diagnostics_to_lsp(module_diags, text);
         }
 
-        // Try to compile the document
-        match engine::compile_with_import_path(text, &file_path) {
-            Ok(_) => Vec::new(),
-            Err(err) => Self::error_to_diagnostic(err, text),
+        let mut last_module_error: Option<EngineError> = None;
+        for root in roots {
+            let virtual_main = root.join("__jslt_lsp_virtual__.jslt");
+            match engine::compile_with_import_path(text, &virtual_main.to_string_lossy()) {
+                Ok(_) => return Vec::new(),
+                Err(err @ EngineError::ModuleErrors(_)) | Err(err @ EngineError::ModuleError(_)) => {
+                    last_module_error = Some(err);
+                }
+                Err(err) => return Self::error_to_diagnostic(err, text),
+            }
         }
+
+        if let Some(err) = last_module_error {
+            Self::error_to_diagnostic(err, text)
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn module_resolution_roots_for_file(file_path: &Path) -> Vec<PathBuf> {
+        let default_root = file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let mut roots = Vec::new();
+        if let Some(config_path) = Self::find_config_path_for_file(file_path) {
+            roots.extend(Self::parse_module_roots_from_config(&config_path));
+        }
+        roots.push(default_root);
+
+        let mut deduped = Vec::new();
+        for root in roots {
+            if !deduped.iter().any(|existing: &PathBuf| existing == &root) {
+                deduped.push(root);
+            }
+        }
+        deduped
+    }
+
+    fn find_config_path_for_file(file_path: &Path) -> Option<PathBuf> {
+        let mut current = file_path.parent();
+        while let Some(dir) = current {
+            for name in Self::CONFIG_FILE_NAMES {
+                let candidate = dir.join(name);
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+            current = dir.parent();
+        }
+        None
+    }
+
+    fn parse_module_roots_from_config(config_path: &Path) -> Vec<PathBuf> {
+        let Ok(raw) = fs::read_to_string(config_path) else {
+            return Vec::new();
+        };
+        let Ok(value) = raw.parse::<toml::Value>() else {
+            return Vec::new();
+        };
+        let mut roots = Vec::new();
+        let base = config_path.parent().unwrap_or(Path::new("."));
+
+        let mut push_root = |s: &str| {
+            if s.is_empty() {
+                return;
+            }
+            let p = Path::new(s);
+            let resolved = if p.is_absolute() { p.to_path_buf() } else { base.join(p) };
+            roots.push(resolved);
+        };
+
+        if let Some(root) = value.get("module_root").and_then(|v| v.as_str()) {
+            push_root(root);
+        }
+        if let Some(root) =
+            value.get("imports").and_then(|v| v.get("root")).and_then(|v| v.as_str())
+        {
+            push_root(root);
+        }
+        if let Some(arr) = value.get("module_roots").and_then(|v| v.as_array()) {
+            for entry in arr {
+                if let Some(s) = entry.as_str() {
+                    push_root(s);
+                }
+            }
+        }
+        if let Some(arr) =
+            value.get("imports").and_then(|v| v.get("roots")).and_then(|v| v.as_array())
+        {
+            for entry in arr {
+                if let Some(s) = entry.as_str() {
+                    push_root(s);
+                }
+            }
+        }
+
+        roots
+    }
+
+    fn collect_import_diagnostics_for_roots(
+        text: &str,
+        roots: &[PathBuf],
+    ) -> Vec<engine::ModuleDiagnostic> {
+        let parsed = parse_import_header(text);
+        parsed
+            .imports
+            .into_iter()
+            .filter_map(|imp| {
+                let exists_anywhere = roots.iter().any(|root| root.join(&imp.path).exists());
+                if exists_anywhere {
+                    None
+                } else {
+                    Some(engine::ModuleDiagnostic {
+                        message: format!("imported module not found: {}", imp.path),
+                        span: Some(imp.span),
+                    })
+                }
+            })
+            .collect()
     }
 
     fn module_diagnostics_to_lsp(
@@ -551,8 +664,9 @@ import "does-not-exist" as package
 }
 "#;
         let file_path = uri.to_file_path().expect("file path");
+        let roots = JsltLanguageServer::module_resolution_roots_for_file(&file_path);
         let diags = JsltLanguageServer::module_diagnostics_to_lsp(
-            engine::collect_import_diagnostics(text, &file_path.to_string_lossy()),
+            JsltLanguageServer::collect_import_diagnostics_for_roots(text, &roots),
             text,
         );
         assert_eq!(diags.len(), 1);
@@ -587,8 +701,9 @@ import "missing-two.jslt" as two
 .
 "#;
         let file_path = uri.to_file_path().expect("file path");
+        let roots = JsltLanguageServer::module_resolution_roots_for_file(&file_path);
         let diags = JsltLanguageServer::module_diagnostics_to_lsp(
-            engine::collect_import_diagnostics(text, &file_path.to_string_lossy()),
+            JsltLanguageServer::collect_import_diagnostics_for_roots(text, &roots),
             text,
         );
         assert_eq!(diags.len(), 2);
@@ -724,5 +839,30 @@ import "missing-two.jslt" as two
                 if code == JsltLanguageServer::CODE_BIND_NON_FUNCTION_CALLEE
         ));
         assert!(non_fun.code_description.is_some());
+    }
+
+    #[test]
+    fn module_roots_can_be_configured_via_jslt_lsp_toml() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "jslt-lsp-config-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let main_dir = test_dir.join("queries");
+        let resources_dir = test_dir.join("src").join("main").join("resources");
+        fs::create_dir_all(&main_dir).expect("create main dir");
+        fs::create_dir_all(&resources_dir).expect("create resources dir");
+        fs::write(test_dir.join("jslt-lsp.toml"), "module_roots = [\"src/main/resources\"]\n")
+            .expect("write config");
+        fs::write(resources_dir.join("something.jslt"), ".").expect("write module");
+        let main_file = main_dir.join("main.jslt");
+        fs::write(&main_file, "import \"something.jslt\" as s\n.").expect("write main");
+
+        let roots = JsltLanguageServer::module_resolution_roots_for_file(&main_file);
+        let text = fs::read_to_string(&main_file).expect("read main");
+        let diags = JsltLanguageServer::collect_import_diagnostics_for_roots(&text, &roots);
+        assert!(diags.is_empty(), "expected no missing import diagnostics");
     }
 }

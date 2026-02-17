@@ -1180,6 +1180,13 @@ impl<'a> Parser<'a> {
                         }
                     };
                     entries.push(entry);
+                    // JSLT allows a trailing comma in object literals.
+                    if self.eat(&Token::Comma) {
+                        if self.at(&Token::RBrace) {
+                            break;
+                        }
+                        continue;
+                    }
                     match self.recover_list_separator(
                         "',' or '}' after object entry",
                         "object literal",

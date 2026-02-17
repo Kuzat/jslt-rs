@@ -1,6 +1,6 @@
 // Bring the parser entry points into scope.
 // Adjust paths if your crate names differ.
-use parser::Parser;
+use parser::{parse_import_header, Parser};
 
 // Pretty helper: parse a whole program and return its pretty-printed form.
 // We prefer checking the Display output (AST pretty-printer) to avoid
@@ -181,4 +181,77 @@ fn parser_collects_multiple_lex_and_parse_errors() {
     let mut p = Parser::new("! @ def foo( x\nlet a 1\n$").expect("parser init should recover");
     let err = p.parse_program().expect_err("expected parse errors");
     assert!(err.errors.len() >= 2, "expected multiple errors, got {}", err.errors.len());
+}
+
+#[test]
+fn parser_recovers_inside_object_and_reports_followup_errors() {
+    let src = r#"
+{
+  "hello": "world"
+  "something": package:
+}
+"#;
+    let mut p = Parser::new(src).expect("parser init should recover");
+    let err = p.parse_program().expect_err("expected parse errors");
+    assert!(err.errors.len() >= 2, "expected multiple errors, got {}", err.errors.len());
+}
+
+#[test]
+fn import_header_parses_multiple_imports_even_if_body_has_errors() {
+    let src = r#"
+import "a.jslt" as a
+import "b.jslt" as b
+
+{
+  "hello": "world"
+  "something": package:
+}
+"#;
+    let parsed = parse_import_header(src);
+    assert_eq!(parsed.imports.len(), 2);
+    assert_eq!(parsed.imports[0].path, "a.jslt");
+    assert_eq!(parsed.imports[1].path, "b.jslt");
+}
+
+#[test]
+fn parser_recovers_missing_commas_in_multiple_list_constructs() {
+    let src = r#"
+def foo(a b, c d) 1
+{
+  "arr": [1 2 3],
+  "call": foo(1 2 3)
+}
+"#;
+    let mut p = Parser::new(src).expect("parser init should recover");
+    let err = p.parse_program().expect_err("expected parse errors");
+    assert!(err.errors.len() >= 4, "expected many errors, got {}", err.errors.len());
+}
+
+#[test]
+fn parser_recovers_in_if_group_and_index_boundaries() {
+    let src = r#"
+{
+  "a": if ($x "bad") (1 + 2,
+  "b": $arr[ ] + foo(1 2),
+  "c": .broken.
+}
+"#;
+    let mut p = Parser::new(src).expect("parser init should recover");
+    let err = p.parse_program().expect_err("expected parse errors");
+    assert!(err.errors.len() >= 4, "expected many errors, got {}", err.errors.len());
+}
+
+#[test]
+fn parser_recovers_after_expression_operator_failures() {
+    let src = r#"
+{
+  "a": 1 + ,
+  "b": 2 * ),
+  "c": foo(1, , 2),
+  "d": [1, , 2]
+}
+"#;
+    let mut p = Parser::new(src).expect("parser init should recover");
+    let err = p.parse_program().expect_err("expected parse errors");
+    assert!(err.errors.len() >= 4, "expected many errors, got {}", err.errors.len());
 }

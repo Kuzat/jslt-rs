@@ -62,6 +62,39 @@ impl std::fmt::Display for ParseErrors {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ImportHeaderParse {
+    pub imports: Vec<Import>,
+    pub errors: Vec<ParseError>,
+}
+
+/// Parse only the top import block (`import "...\" as alias`) and stop at
+/// the first non-import token.
+///
+/// This is useful for tools (like the LSP) that need import-level diagnostics
+/// even when the rest of the file has syntax errors.
+pub fn parse_import_header(input: &str) -> ImportHeaderParse {
+    let mut parser = match Parser::new(input) {
+        Ok(parser) => parser,
+        Err(err) => {
+            return ImportHeaderParse { imports: Vec::new(), errors: vec![err] };
+        }
+    };
+
+    let mut imports = Vec::new();
+    while let Token::Import = parser.cur.tok {
+        match parser.parse_import_stmt() {
+            Ok(import) => imports.push(import),
+            Err(err) => {
+                parser.errors.push(err);
+                parser.synchronize();
+            }
+        }
+    }
+
+    ImportHeaderParse { imports, errors: std::mem::take(&mut parser.errors) }
+}
+
 #[derive(Clone)]
 struct Tok {
     tok: Token,
@@ -82,6 +115,11 @@ pub struct Parser<'a> {
     prev_span: Span,
     /// Buffer for comments that haven't been attached to a node yet
     pending_comments: Vec<PendingComment>,
+}
+
+enum ListRecovery {
+    Continue,
+    Break,
 }
 
 impl<'a> Parser<'a> {
@@ -333,9 +371,19 @@ impl<'a> Parser<'a> {
         if !self.at(&Token::RParen) {
             let p = self.expect_ident()?;
             params.push(p);
-            while self.eat(&Token::Comma) {
-                let p = self.expect_ident()?;
-                params.push(p);
+            loop {
+                match self.recover_list_separator(
+                    "',' or ')' after parameter",
+                    "function parameter list",
+                    |tok| matches!(tok, Token::Ident(_)),
+                    |tok| matches!(tok, Token::RParen),
+                )? {
+                    ListRecovery::Continue => {
+                        let p = self.expect_ident()?;
+                        params.push(p);
+                    }
+                    ListRecovery::Break => break,
+                }
             }
         }
         self.expect(Token::RParen, "')' after parameters")?;
@@ -382,9 +430,19 @@ impl<'a> Parser<'a> {
         if self.at(&Token::If) {
             let start = self.cur.span;
             self.bump()?; // 'if'
-            self.expect(Token::LParen, "'(' after if")?;
+            self.expect_with_recovery(
+                Token::LParen,
+                "'(' after if",
+                "if expression",
+                Self::is_expr_start,
+            )?;
             let cond = self.parse_if_or_expr()?;
-            self.expect(Token::RParen, "')' after if condition")?;
+            self.expect_with_recovery(
+                Token::RParen,
+                "')' after if condition",
+                "if condition",
+                |tok| matches!(tok, Token::Let | Token::If) || Self::is_expr_start(tok),
+            )?;
             let then_expr = self.parse_lets_then_expr()?;
             let else_expr = if self.at(&Token::Else) {
                 self.bump()?; // 'else'
@@ -430,7 +488,14 @@ impl<'a> Parser<'a> {
         while self.at(&Token::Or) {
             let _op_span = self.cur.span;
             self.bump()?;
-            let right = self.parse_and_expr()?;
+            let right = match self.parse_and_expr() {
+                Ok(expr) => expr,
+                Err(err) => {
+                    self.errors.push(err);
+                    self.synchronize_expression();
+                    break;
+                }
+            };
             let span = Span::join(left.span(), right.span());
             left = Expr::Binary {
                 op: BinaryOp::Or,
@@ -447,7 +512,14 @@ impl<'a> Parser<'a> {
         while self.at(&Token::And) {
             let _op_span = self.cur.span;
             self.bump()?;
-            let right = self.parse_cmp_expr()?;
+            let right = match self.parse_cmp_expr() {
+                Ok(expr) => expr,
+                Err(err) => {
+                    self.errors.push(err);
+                    self.synchronize_expression();
+                    break;
+                }
+            };
             let span = Span::join(left.span(), right.span());
             left = Expr::Binary {
                 op: BinaryOp::And,
@@ -473,7 +545,14 @@ impl<'a> Parser<'a> {
             };
             if let Some(op) = op {
                 self.bump()?;
-                let right = self.parse_add_expr()?;
+                let right = match self.parse_add_expr() {
+                    Ok(expr) => expr,
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize_expression();
+                        break;
+                    }
+                };
                 let span = Span::join(left.span(), right.span());
                 left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
             } else {
@@ -493,7 +572,14 @@ impl<'a> Parser<'a> {
             };
             if let Some(op) = op {
                 self.bump()?;
-                let right = self.parse_mul_expr()?;
+                let right = match self.parse_mul_expr() {
+                    Ok(expr) => expr,
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize_expression();
+                        break;
+                    }
+                };
                 let span = Span::join(left.span(), right.span());
                 left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
             } else {
@@ -514,7 +600,14 @@ impl<'a> Parser<'a> {
             };
             if let Some(op) = op {
                 self.bump()?;
-                let right = self.parse_unary_expr()?;
+                let right = match self.parse_unary_expr() {
+                    Ok(expr) => expr,
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize_expression();
+                        break;
+                    }
+                };
                 let span = Span::join(left.span(), right.span());
                 left = Expr::Binary { op, left: Box::new(left), right: Box::new(right), span };
             } else {
@@ -598,11 +691,12 @@ impl<'a> Parser<'a> {
                             expr = Expr::Member { target: Box::new(expr), key, span };
                         }
                         _ => {
-                            return Err(ParseError::unexpected(
+                            self.errors.push(ParseError::unexpected(
                                 self.prev_span,
                                 self.cur.tok.clone(),
                                 "identifier or string after '.'",
                             ));
+                            break;
                         }
                     }
                 }
@@ -623,16 +717,33 @@ impl<'a> Parser<'a> {
                                   // optional first expr
                     let mut first: Option<Expr> = None;
                     if !self.at(&Token::RBracket) && !self.at(&Token::Colon) {
-                        first = Some(self.parse_if_or_expr()?);
+                        match self.parse_if_or_expr() {
+                            Ok(expr) => first = Some(expr),
+                            Err(err) => {
+                                self.errors.push(err);
+                                self.synchronize_expression();
+                            }
+                        }
                     }
                     if self.at(&Token::Colon) {
                         // slice: [':' [expr] ']'
                         self.bump()?; // ':'
                         let mut second: Option<Expr> = None;
                         if !self.at(&Token::RBracket) {
-                            second = Some(self.parse_if_or_expr()?);
+                            match self.parse_if_or_expr() {
+                                Ok(expr) => second = Some(expr),
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
+                                }
+                            }
                         }
-                        let end_span = self.expect(Token::RBracket, "']' for slice")?;
+                        let end_span = self.expect_with_recovery(
+                            Token::RBracket,
+                            "']' for slice",
+                            "slice expression",
+                            Self::is_expr_boundary,
+                        )?;
                         let span = Span::join(start, end_span);
                         expr = Expr::Slice {
                             target: Box::new(expr),
@@ -645,10 +756,22 @@ impl<'a> Parser<'a> {
                         let first_expr = match first {
                             Some(e) => e,
                             None => {
-                                return Err(ParseError::expected_expr(self.cur.span));
+                                self.errors.push(ParseError::expected_expr(self.cur.span));
+                                let _ = self.expect_with_recovery(
+                                    Token::RBracket,
+                                    "']' for index",
+                                    "index expression",
+                                    Self::is_expr_boundary,
+                                )?;
+                                continue;
                             }
                         };
-                        let end_span = self.expect(Token::RBracket, "']' for index")?;
+                        let end_span = self.expect_with_recovery(
+                            Token::RBracket,
+                            "']' for index",
+                            "index expression",
+                            Self::is_expr_boundary,
+                        )?;
                         let span = Span::join(start, end_span);
                         expr = Expr::Index {
                             target: Box::new(expr),
@@ -663,14 +786,39 @@ impl<'a> Parser<'a> {
                     self.bump()?; // '('
                     let mut args = Vec::new();
                     if !self.at(&Token::RParen) {
-                        let arg = self.parse_if_or_expr()?;
-                        args.push(arg);
-                        while self.eat(&Token::Comma) {
-                            let arg = self.parse_if_or_expr()?;
-                            args.push(arg);
+                        match self.parse_if_or_expr() {
+                            Ok(arg) => args.push(arg),
+                            Err(err) => {
+                                self.errors.push(err);
+                                self.synchronize_expression();
+                            }
+                        }
+                        loop {
+                            match self.recover_list_separator(
+                                "',' or ')' after argument",
+                                "function call arguments",
+                                Self::is_expr_start,
+                                |tok| matches!(tok, Token::RParen),
+                            )? {
+                                ListRecovery::Continue => {
+                                    match self.parse_if_or_expr() {
+                                        Ok(arg) => args.push(arg),
+                                        Err(err) => {
+                                            self.errors.push(err);
+                                            self.synchronize_expression();
+                                        }
+                                    }
+                                }
+                                ListRecovery::Break => break,
+                            }
                         }
                     }
-                    let end_span = self.expect(Token::RParen, "')' to close call")?;
+                    let end_span = self.expect_with_recovery(
+                        Token::RParen,
+                        "')' to close call",
+                        "function call",
+                        Self::is_expr_boundary,
+                    )?;
                     let span = Span::join(start, end_span);
                     expr = Expr::Call { callee: Box::new(expr), args, span };
                 }
@@ -738,8 +886,20 @@ impl<'a> Parser<'a> {
             }
             Token::LParen => {
                 self.bump()?;
-                let inner = self.parse_if_or_expr()?;
-                let end_span = self.expect(Token::RParen, "')' to close group")?;
+                let inner = match self.parse_if_or_expr() {
+                    Ok(expr) => expr,
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize_expression();
+                        Expr::Null(self.prev_span)
+                    }
+                };
+                let end_span = self.expect_with_recovery(
+                    Token::RParen,
+                    "')' to close group",
+                    "group expression",
+                    Self::is_expr_boundary,
+                )?;
                 let span = Span::join(inner.span(), end_span);
                 Ok(Expr::Group { expr: Box::new(inner), span })
             }
@@ -792,9 +952,29 @@ impl<'a> Parser<'a> {
         } else {
             let mut elems = Vec::new();
             if !self.at(&Token::RBracket) {
-                elems.push(self.parse_if_or_expr()?);
-                while self.eat(&Token::Comma) {
-                    elems.push(self.parse_if_or_expr()?);
+                match self.parse_if_or_expr() {
+                    Ok(elem) => elems.push(elem),
+                    Err(err) => {
+                        self.errors.push(err);
+                        self.synchronize_expression();
+                    }
+                }
+                loop {
+                    match self.recover_list_separator(
+                        "',' or ']' after array element",
+                        "array literal",
+                        Self::is_expr_start,
+                        |tok| matches!(tok, Token::RBracket),
+                    )? {
+                        ListRecovery::Continue => match self.parse_if_or_expr() {
+                            Ok(elem) => elems.push(elem),
+                            Err(err) => {
+                                self.errors.push(err);
+                                self.synchronize_expression();
+                            }
+                        },
+                        ListRecovery::Break => break,
+                    }
                 }
             }
             let end_span = self.expect(Token::RBracket, "']' to close array")?;
@@ -929,7 +1109,14 @@ impl<'a> Parser<'a> {
                                 }
                             }
                             self.expect(Token::Colon, "':' after '*'")?;
-                            let v = self.parse_if_or_expr()?;
+                            let v = match self.parse_if_or_expr() {
+                                Ok(expr) => expr,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
+                                    Expr::Null(self.prev_span)
+                                }
+                            };
                             let span = Span::join(star_span, v.span());
                             ObjectEntry::Spread {
                                 value: v,
@@ -944,7 +1131,14 @@ impl<'a> Parser<'a> {
                             let key = ObjectKey::Str { value: s.clone(), span: self.cur.span };
                             self.bump()?;
                             self.expect(Token::Colon, "':' after object key")?;
-                            let v = self.parse_if_or_expr()?;
+                            let v = match self.parse_if_or_expr() {
+                                Ok(expr) => expr,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
+                                    Expr::Null(self.prev_span)
+                                }
+                            };
                             let span = Span::join(kspan, v.span());
                             ObjectEntry::Pair {
                                 key,
@@ -960,7 +1154,14 @@ impl<'a> Parser<'a> {
                                 ObjectKey::Ident(Ident { name: id.clone(), span: self.cur.span });
                             self.bump()?;
                             self.expect(Token::Colon, "':' after object key")?;
-                            let v = self.parse_if_or_expr()?;
+                            let v = match self.parse_if_or_expr() {
+                                Ok(expr) => expr,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
+                                    Expr::Null(self.prev_span)
+                                }
+                            };
                             let span = Span::join(kspan, v.span());
                             ObjectEntry::Pair {
                                 key,
@@ -979,11 +1180,14 @@ impl<'a> Parser<'a> {
                         }
                     };
                     entries.push(entry);
-                    if self.eat(&Token::Comma) {
-                        // continue reading entries
-                        continue;
-                    } else {
-                        break;
+                    match self.recover_list_separator(
+                        "',' or '}' after object entry",
+                        "object literal",
+                        |tok| matches!(tok, Token::String(_) | Token::Ident(_) | Token::Star),
+                        |tok| matches!(tok, Token::RBrace),
+                    )? {
+                        ListRecovery::Continue => continue,
+                        ListRecovery::Break => break,
                     }
                 }
             }
@@ -1049,6 +1253,171 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::expected_ident(self.prev_span)),
         }
+    }
+
+    fn is_expr_start(tok: &Token) -> bool {
+        matches!(
+            tok,
+            Token::If
+                | Token::Null
+                | Token::True
+                | Token::False
+                | Token::NumberFloat(_)
+                | Token::NumberInt(_)
+                | Token::String(_)
+                | Token::Dollar
+                | Token::Dot
+                | Token::LParen
+                | Token::LBracket
+                | Token::LBrace
+                | Token::Ident(_)
+                | Token::Not
+                | Token::Minus
+        )
+    }
+
+    fn recover_list_separator<F, G>(
+        &mut self,
+        expected: &'static str,
+        context: &'static str,
+        is_item_start: F,
+        is_end: G,
+    ) -> ParseResult<ListRecovery>
+    where
+        F: Fn(&Token) -> bool,
+        G: Fn(&Token) -> bool,
+    {
+        if self.eat(&Token::Comma) {
+            return Ok(ListRecovery::Continue);
+        }
+        if is_end(&self.cur.tok) {
+            return Ok(ListRecovery::Break);
+        }
+
+        self.errors.push(ParseError::unexpected(self.prev_span, self.cur.tok.clone(), expected));
+        if is_item_start(&self.cur.tok) {
+            return Ok(ListRecovery::Continue);
+        }
+
+        while !matches!(self.cur.tok, Token::Comma | Token::Eof)
+            && !is_end(&self.cur.tok)
+            && !is_item_start(&self.cur.tok)
+        {
+            self.bump()?;
+        }
+
+        if self.eat(&Token::Comma) {
+            return Ok(ListRecovery::Continue);
+        }
+        if is_item_start(&self.cur.tok) {
+            return Ok(ListRecovery::Continue);
+        }
+        if is_end(&self.cur.tok) {
+            return Ok(ListRecovery::Break);
+        }
+        if matches!(self.cur.tok, Token::Eof) {
+            return Err(ParseError::unterminated(self.prev_span, context));
+        }
+        Ok(ListRecovery::Break)
+    }
+
+    fn is_expr_boundary(tok: &Token) -> bool {
+        matches!(
+            tok,
+            Token::Or
+                | Token::And
+                | Token::Lt
+                | Token::LtEq
+                | Token::Gt
+                | Token::GtEq
+                | Token::EqEq
+                | Token::BangEq
+                | Token::Plus
+                | Token::Minus
+                | Token::Star
+                | Token::Slash
+                | Token::Percent
+                | Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Else
+                | Token::Eof
+        )
+    }
+
+    fn is_hard_expr_boundary(tok: &Token) -> bool {
+        matches!(
+            tok,
+            Token::Comma
+                | Token::Colon
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Else
+                | Token::Def
+                | Token::Let
+                | Token::Import
+                | Token::Eof
+        )
+    }
+
+    fn synchronize_expression(&mut self) {
+        let mut advanced = false;
+        while !Self::is_hard_expr_boundary(&self.cur.tok) {
+            if self.bump().is_err() {
+                break;
+            }
+            advanced = true;
+        }
+        if !advanced && !Self::is_hard_expr_boundary(&self.cur.tok) {
+            let _ = self.bump();
+            while !Self::is_hard_expr_boundary(&self.cur.tok) {
+                if self.bump().is_err() {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn expect_with_recovery<F>(
+        &mut self,
+        t: Token,
+        expected: &'static str,
+        context: &'static str,
+        is_recovery_boundary: F,
+    ) -> ParseResult<Span>
+    where
+        F: Fn(&Token) -> bool,
+    {
+        if self.at(&t) {
+            let s = self.cur.span;
+            self.bump()?;
+            return Ok(s);
+        }
+
+        self.errors.push(ParseError::unexpected(self.prev_span, self.cur.tok.clone(), expected));
+        if is_recovery_boundary(&self.cur.tok) {
+            return Ok(self.prev_span);
+        }
+
+        while !self.at(&t) && !matches!(self.cur.tok, Token::Eof) && !is_recovery_boundary(&self.cur.tok)
+        {
+            self.bump()?;
+        }
+
+        if self.at(&t) {
+            let s = self.cur.span;
+            self.bump()?;
+            return Ok(s);
+        }
+
+        if matches!(self.cur.tok, Token::Eof) {
+            return Err(ParseError::unterminated(self.prev_span, context));
+        }
+
+        Ok(self.prev_span)
     }
 }
 

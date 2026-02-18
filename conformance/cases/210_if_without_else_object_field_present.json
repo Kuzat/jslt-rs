@@ -1,0 +1,11 @@
+{
+  "name": "210_if_without_else_object_field_present",
+  "description": "if expression without else can be used in object value and keeps key when condition is true",
+  "program": "{ \"hello\": if (.nullid == 0) \"yes\" }",
+  "input": {
+    "nullid": 0
+  },
+  "expected": {
+    "hello": "yes"
+  }
+}

@@ -26,12 +26,14 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
             writer.increase_indent();
             format_expr(writer, then_br);
             writer.decrease_indent();
-            writer.newline();
-            writer.write("else");
-            writer.newline();
-            writer.increase_indent();
-            format_expr(writer, else_br);
-            writer.decrease_indent();
+            if let Some(else_br) = else_br {
+                writer.newline();
+                writer.write("else");
+                writer.newline();
+                writer.increase_indent();
+                format_expr(writer, else_br);
+                writer.decrease_indent();
+            }
         }
 
         Expr::Unary { op, expr, .. } => {
@@ -201,9 +203,12 @@ fn format_object(
             }
         });
 
-    // Try single-line first (but not if there are comments or blank lines)
+    // Single-line object literals are only allowed for zero/one-entry objects.
+    let has_multiple_entries = entries.len() > 1;
+
+    // Try single-line first (but not if there are comments/blank lines or multiple entries)
     let single_line = format_object_single_line(entries);
-    if !has_comments_or_blanks && writer.fits_on_line(&single_line) {
+    if !has_multiple_entries && !has_comments_or_blanks && writer.fits_on_line(&single_line) {
         writer.write(&single_line);
     } else {
         // Multi-line format
@@ -234,7 +239,7 @@ fn format_object(
                     writer.write(": ");
                     format_expr(writer, value);
                 }
-                ObjectEntry::Spread { value, trivia, blank_lines_before, .. } => {
+                ObjectEntry::Spread { value, exclude_keys, trivia, blank_lines_before, .. } => {
                     // Add blank lines before this entry (skip for first entry)
                     // Comments in trivia are already rendered as their own lines.
                     if i > 0 {
@@ -252,7 +257,17 @@ fn format_object(
                     if let Some(t) = trivia {
                         format_leading_trivia(writer, t);
                     }
-                    writer.write("*: ");
+                    writer.write("*");
+                    if !exclude_keys.is_empty() {
+                        writer.write(" - ");
+                        for (i, key) in exclude_keys.iter().enumerate() {
+                            if i > 0 {
+                                writer.write(", ");
+                            }
+                            format_wildcard_exclude_key(writer, key);
+                        }
+                    }
+                    writer.write(": ");
                     format_expr(writer, value);
                 }
             }
@@ -343,8 +358,18 @@ fn format_object_single_line(entries: &[ObjectEntry]) -> String {
                 result.push_str(": ");
                 result.push_str(&format!("{}", value));
             }
-            ObjectEntry::Spread { value, .. } => {
-                result.push_str("*: ");
+            ObjectEntry::Spread { value, exclude_keys, .. } => {
+                result.push('*');
+                if !exclude_keys.is_empty() {
+                    result.push_str(" - ");
+                    for (i, key) in exclude_keys.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(&format_wildcard_exclude_key_string(key));
+                    }
+                }
+                result.push_str(": ");
                 result.push_str(&format!("{}", value));
             }
         }
@@ -358,4 +383,45 @@ fn format_object_key_string(key: &ObjectKey) -> String {
         ObjectKey::Ident(id) => id.name.clone(),
         ObjectKey::Str { value, .. } => format!("\"{}\"", value),
     }
+}
+
+fn format_wildcard_exclude_key(writer: &mut Writer, key: &str) {
+    if is_unquoted_wildcard_exclude_key(key) {
+        writer.write(key);
+    } else {
+        format_string(writer, key);
+    }
+}
+
+fn format_wildcard_exclude_key_string(key: &str) -> String {
+    if is_unquoted_wildcard_exclude_key(key) {
+        key.to_string()
+    } else {
+        let mut escaped = String::new();
+        escaped.push('"');
+        for ch in key.chars() {
+            match ch {
+                '"' => escaped.push_str("\\\""),
+                '\\' => escaped.push_str("\\\\"),
+                '\u{08}' => escaped.push_str("\\b"),
+                '\u{0C}' => escaped.push_str("\\f"),
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                c if c.is_control() => escaped.push_str(&format!("\\u{:04X}", c as u32)),
+                c => escaped.push(c),
+            }
+        }
+        escaped.push('"');
+        escaped
+    }
+}
+
+fn is_unquoted_wildcard_exclude_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }

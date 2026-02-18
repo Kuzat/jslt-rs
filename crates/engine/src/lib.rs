@@ -1,12 +1,32 @@
 use ast::Program;
 use interp::binder::{Binder, BoundProgram};
 use interp::{apply_with_modules, binder, EvalConfig, RuntimeError};
-use parser::Parser;
+use parser::{parse_import_header, Parser};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
+
+#[derive(Debug, Clone)]
+pub struct ModuleDiagnostic {
+    pub message: String,
+    pub span: Option<ast::Span>,
+}
+
+#[derive(Debug, Error)]
+pub struct ModuleDiagnostics {
+    pub diagnostics: Vec<ModuleDiagnostic>,
+}
+
+impl std::fmt::Display for ModuleDiagnostics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for diagnostic in &self.diagnostics {
+            writeln!(f, "{}", diagnostic.message)?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -16,6 +36,8 @@ pub enum EngineError {
     Parse(#[from] parser::ParseError),
     #[error("bind error: {0}")]
     Bind(#[from] binder::BindErrors),
+    #[error("module errors: \n{0}")]
+    ModuleErrors(#[from] ModuleDiagnostics),
     #[error("runtime error: {0}")]
     Runtime(#[from] RuntimeError),
     #[error("io error: {0}")]
@@ -158,6 +180,12 @@ pub fn compile_with_import_path(
     // Parse main
     let mut parser = Parser::new(main_src)?;
     let ast: Program = parser.parse_program()?;
+    let base_dir = Path::new(main_path).parent().unwrap_or(Path::new("."));
+
+    let missing_imports = collect_missing_imports_from_ast(&ast, base_dir);
+    if !missing_imports.is_empty() {
+        return Err(EngineError::ModuleErrors(ModuleDiagnostics { diagnostics: missing_imports }));
+    }
 
     // Prepare binder for main, and loader
     let mut binder = Binder::new();
@@ -167,7 +195,6 @@ pub fn compile_with_import_path(
     let mut all_children: HashMap<String, (BoundProgram, bool)> = HashMap::new();
 
     // Load and register each import (recursive)
-    let base_dir = Path::new(main_path).parent().unwrap_or(Path::new("."));
     for imp in &ast.imports {
         let loaded_module = loader.load_module(base_dir, &imp.path)?;
         all_children.insert(
@@ -185,6 +212,43 @@ pub fn compile_with_import_path(
     // Bind main
     let bound = binder.bind_program(&ast)?;
     Ok(CompiledProgram { bound, modules: all_children })
+}
+
+pub fn collect_import_diagnostics(main_src: &str, main_path: &str) -> Vec<ModuleDiagnostic> {
+    let parsed = parse_import_header(main_src);
+    let base_dir = Path::new(main_path).parent().unwrap_or(Path::new("."));
+    parsed
+        .imports
+        .into_iter()
+        .filter_map(|imp| {
+            let resolved = base_dir.join(&imp.path);
+            if resolved.exists() {
+                None
+            } else {
+                Some(ModuleDiagnostic {
+                    message: format!("imported module not found: {}", imp.path),
+                    span: Some(imp.span),
+                })
+            }
+        })
+        .collect()
+}
+
+fn collect_missing_imports_from_ast(ast: &Program, base_dir: &Path) -> Vec<ModuleDiagnostic> {
+    ast.imports
+        .iter()
+        .filter_map(|imp| {
+            let resolved = base_dir.join(&imp.path);
+            if resolved.exists() {
+                None
+            } else {
+                Some(ModuleDiagnostic {
+                    message: format!("imported module not found: {}", imp.path),
+                    span: Some(imp.span),
+                })
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -205,5 +269,43 @@ mod tests {
         let input = json!({"a": 2, "b": 3, "name": "alice"});
         let out = prog.apply(&input, None).expect("apply");
         assert_eq!(out, json!({"sum": 5, "greet": "hi alice"}));
+    }
+
+    #[test]
+    fn compile_reports_all_missing_top_level_imports() {
+        let src = r#"
+import "__missing_one__.jslt" as one
+import "__missing_two__.jslt" as two
+.
+"#;
+        let err = compile_with_import_path(src, "/tmp/main.jslt").expect_err("expected error");
+        match err {
+            EngineError::ModuleErrors(module_errors) => {
+                assert_eq!(module_errors.diagnostics.len(), 2);
+                assert!(module_errors
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("__missing_one__.jslt")));
+                assert!(module_errors
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("__missing_two__.jslt")));
+            }
+            other => panic!("expected module errors, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn import_diagnostics_are_available_even_with_parse_errors_after_header() {
+        let src = r#"
+import "__missing_header__.jslt" as modx
+{
+  "x": 1
+  "y": modx:
+}
+"#;
+        let diags = collect_import_diagnostics(src, "/tmp/main.jslt");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("__missing_header__.jslt"));
     }
 }

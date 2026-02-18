@@ -131,7 +131,7 @@ pub enum Expr {
     If {
         cond: Box<Expr>,
         then_br: Box<Expr>,
-        else_br: Box<Expr>,
+        else_br: Option<Box<Expr>>,
         span: Span,
     },
     // Unary / Binary
@@ -237,6 +237,7 @@ pub enum ObjectEntry {
     // *: expr
     Spread {
         value: Expr,
+        exclude_keys: Vec<String>,
         span: Span,
         trivia: Option<TriviaCollection>,
         blank_lines_before: usize,
@@ -419,8 +420,10 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 self.expr(cond, Prec::Lowest)?;
                 write!(self.f, ") ")?;
                 self.expr(then_br, Prec::Lowest)?;
-                write!(self.f, " else ")?;
-                self.expr(else_br, Prec::Lowest)?;
+                if let Some(else_br) = else_br {
+                    write!(self.f, " else ")?;
+                    self.expr(else_br, Prec::Lowest)?;
+                }
                 if need_paren {
                     write!(self.f, ")")?;
                 }
@@ -572,8 +575,22 @@ impl<'a, 'b> Pretty<'a, 'b> {
                             write!(self.f, ": ")?;
                             self.expr(value, Prec::Lowest)?;
                         }
-                        ObjectEntry::Spread { value, .. } => {
-                            write!(self.f, "*: ")?;
+                        ObjectEntry::Spread { value, exclude_keys, .. } => {
+                            write!(self.f, "*")?;
+                            if !exclude_keys.is_empty() {
+                                write!(self.f, " - ")?;
+                                for (i, key) in exclude_keys.iter().enumerate() {
+                                    if i > 0 {
+                                        write!(self.f, ", ")?;
+                                    }
+                                    if is_unquoted_wildcard_exclude_key(key) {
+                                        write!(self.f, "{}", key)?;
+                                    } else {
+                                        self.string(key)?;
+                                    }
+                                }
+                            }
+                            write!(self.f, ": ")?;
                             self.expr(value, Prec::Lowest)?;
                         }
                     }
@@ -629,6 +646,15 @@ impl<'a, 'b> Pretty<'a, 'b> {
         }
         write!(self.f, "\"")
     }
+}
+
+fn is_unquoted_wildcard_exclude_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 #[cfg(test)]
@@ -751,7 +777,7 @@ mod tests {
         let e = Expr::If {
             cond: Box::new(bool_(true)),
             then_br: Box::new(num("1")),
-            else_br: Box::new(num("2")),
+            else_br: Some(Box::new(num("2"))),
             span: sp(),
         };
         let wrapped = bin(BinaryOp::Add, e.clone(), num("1"));
@@ -805,6 +831,7 @@ mod tests {
                 },
                 ObjectEntry::Spread {
                     value: member_ident(var("$"), "rest"),
+                    exclude_keys: vec![],
                     span: sp(),
                     trivia: None,
                     blank_lines_before: 0,

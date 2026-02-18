@@ -1,0 +1,12 @@
+{
+  "name": "212_object_wildcard_exclude_key",
+  "description": "Wildcard object copy excludes explicit keys listed with '-'",
+  "program": "{ * - location: . }",
+  "input": {
+    "hello": "World",
+    "location": 12
+  },
+  "expected": {
+    "hello": "World"
+  }
+}

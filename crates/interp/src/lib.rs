@@ -1,6 +1,6 @@
 use crate::binder::{
-    BindErrors, Binder, BoundExpr, BoundFunction, BoundProgram, CaptureSpec, FunctionId, ObjectKey,
-    ResolvedVar, SyntheticFun,
+    BindErrors, Binder, BoundExpr, BoundFunction, BoundObjectEntry, BoundProgram, CaptureSpec,
+    FunctionId, ObjectKey, ResolvedVar, SyntheticFun,
 };
 use ast::{Program, Span};
 use serde_json::{json, Map, Value};
@@ -408,7 +408,7 @@ impl<'p> Evaluator<'p> {
                 if !res.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
                 }
-                Ok(JsltValue::from_json(json!(res)))
+                Ok(JsltValue::number(res))
             }
 
             Add(l, r, sp) => self.eval_add(l, r, *sp),
@@ -432,7 +432,7 @@ impl<'p> Evaluator<'p> {
                 if !res.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
                 }
-                Ok(JsltValue::from_json(json!(res)))
+                Ok(JsltValue::number(res))
             }
             Mod(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
@@ -452,7 +452,7 @@ impl<'p> Evaluator<'p> {
                 if !res.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
                 }
-                Ok(JsltValue::from_json(json!(res)))
+                Ok(JsltValue::number(res))
             }
 
             Eq(l, r, _) => {
@@ -495,41 +495,7 @@ impl<'p> Evaluator<'p> {
                 Ok(JsltValue::from_json(Value::Array(out)))
             }
 
-            ObjectLiteral(pairs, spread, sp) => {
-                let mut obj = Map::new();
-                if let Some(sv) = spread {
-                    let spread_val = self.eval_expr(sv)?;
-                    match spread_val.as_json() {
-                        Value::Null => { /* no-op */ }
-                        Value::Object(m) => {
-                            for (k, v) in m {
-                                obj.insert(k.clone(), v.clone());
-                            }
-                        }
-                        _ => {
-                            return Err(RuntimeError::TypeError {
-                                msg: "object spread expects object or null".into(),
-                                span: *sp,
-                            });
-                        }
-                    }
-                }
-                for (kexpr, vexpr) in pairs {
-                    let key = self.eval_expr(kexpr)?;
-                    let s = match key.as_json() {
-                        Value::String(s) => s.clone(),
-                        _ => {
-                            return Err(RuntimeError::TypeError {
-                                msg: "object key must be a  string".into(),
-                                span: kexpr.span(),
-                            });
-                        }
-                    };
-                    let val = self.eval_expr(vexpr)?;
-                    obj.insert(s, val.into_json());
-                }
-                Ok(JsltValue::from_json(Value::Object(obj)))
-            }
+            ObjectLiteral(entries, _sp) => self.eval_object_literal(entries, None),
 
             ArrayFor { seq, elem, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
@@ -607,7 +573,11 @@ impl<'p> Evaluator<'p> {
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
-                                out.insert(kstr, v.into_json());
+                                let v_json = v.into_json();
+                                if should_omit_object_field(&v_json) {
+                                    continue;
+                                }
+                                out.insert(kstr, v_json);
                             }
                         }
                     }
@@ -632,7 +602,11 @@ impl<'p> Evaluator<'p> {
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
-                                out.insert(kstr, v.into_json());
+                                let v_json = v.into_json();
+                                if should_omit_object_field(&v_json) {
+                                    continue;
+                                }
+                                out.insert(kstr, v_json);
                             }
                         }
                     }
@@ -870,7 +844,7 @@ impl<'p> Evaluator<'p> {
         if !res.is_finite() {
             return Err(RuntimeError::NonFiniteNumber { span });
         }
-        Ok(JsltValue::from_json(json!(res)))
+        Ok(JsltValue::number(res))
     }
 
     fn eval_cmp(
@@ -1009,6 +983,83 @@ impl<'p> Evaluator<'p> {
 
         result
     }
+
+    fn eval_object_literal(
+        &mut self,
+        entries: &[BoundObjectEntry],
+        explicit_match_source: Option<Value>,
+    ) -> Result<JsltValue, RuntimeError> {
+        let mut obj = Map::new();
+        let active_match_source =
+            explicit_match_source.or_else(|| match self.current_frame().this_val.as_json() {
+                Value::Object(m) => Some(Value::Object(m.clone())),
+                _ => None,
+            });
+
+        // Wildcard copies should skip explicitly-defined keys.
+        let explicit_keys: std::collections::HashSet<std::string::String> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                BoundObjectEntry::Pair(BoundExpr::String(s, _), _) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+
+        for entry in entries {
+            match entry {
+                BoundObjectEntry::Pair(kexpr, vexpr) => {
+                    let key = self.eval_expr(kexpr)?;
+                    let s = match key.as_json() {
+                        Value::String(s) => s.clone(),
+                        _ => {
+                            return Err(RuntimeError::TypeError {
+                                msg: "object key must be a  string".into(),
+                                span: kexpr.span(),
+                            });
+                        }
+                    };
+
+                    let val = match vexpr {
+                        BoundExpr::ObjectLiteral(nested_entries, _) => {
+                            let nested_source = match &active_match_source {
+                                Some(Value::Object(m)) => m.get(&s).cloned(),
+                                _ => None,
+                            };
+                            self.eval_object_literal(nested_entries, nested_source)?
+                        }
+                        _ => self.eval_expr(vexpr)?,
+                    };
+
+                    let val_json = val.into_json();
+                    if should_omit_object_field(&val_json) {
+                        continue;
+                    }
+                    obj.insert(s, val_json);
+                }
+                BoundObjectEntry::Wildcard { value, exclude_keys } => {
+                    if let Some(Value::Object(m)) = &active_match_source {
+                        let excluded: std::collections::HashSet<&str> =
+                            exclude_keys.iter().map(std::string::String::as_str).collect();
+                        let saved_this = self.current_frame().this_val.clone();
+                        for (k, v) in m {
+                            if explicit_keys.contains(k) || excluded.contains(k.as_str()) {
+                                continue;
+                            }
+                            self.current_frame_mut().this_val = JsltValue::from_json(v.clone());
+                            let mapped = self.eval_expr(value)?.into_json();
+                            if should_omit_object_field(&mapped) {
+                                continue;
+                            }
+                            obj.insert(k.clone(), mapped);
+                        }
+                        self.current_frame_mut().this_val = saved_this;
+                    }
+                }
+            }
+        }
+
+        Ok(JsltValue::from_json(Value::Object(obj)))
+    }
 }
 
 // Member access with null propagation
@@ -1022,6 +1073,16 @@ fn obj_get(target: &JsltValue, key: &ObjectKey) -> JsltValue {
             m.get(k).cloned().map(JsltValue::from_json).unwrap_or(JsltValue::null())
         }
         _ => JsltValue::null(),
+    }
+}
+
+// In object construction, null/empty object/empty array values are omitted.
+fn should_omit_object_field(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Object(m) => m.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        _ => false,
     }
 }
 
@@ -1072,7 +1133,8 @@ fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> Runtim
 mod tests {
     use super::*;
     use binder::{
-        BoundExpr as B, BoundFunction, CaptureSpec, FunctionId, ObjectKey as OK, ResolvedVar as RV,
+        BoundExpr as B, BoundFunction, BoundObjectEntry as BOE, CaptureSpec, FunctionId,
+        ObjectKey as OK, ResolvedVar as RV,
     };
     use serde_json::json;
 
@@ -1200,24 +1262,22 @@ mod tests {
         // The above is awkward. Let's instead test equality through evaluator's deep_eq by constructing JsltValue via ObjectLiteral:
         let body_obj_left = B::ObjectLiteral(
             vec![
-                (B::String("x".into(), sp()), B::NumberInt(1, sp())),
-                (
+                BOE::Pair(B::String("x".into(), sp()), B::NumberInt(1, sp())),
+                BOE::Pair(
                     B::String("y".into(), sp()),
                     B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
                 ),
             ],
-            None,
             sp(),
         );
         let body_obj_right = B::ObjectLiteral(
             vec![
-                (
+                BOE::Pair(
                     B::String("y".into(), sp()),
                     B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
                 ),
-                (B::String("x".into(), sp()), B::NumberInt(1, sp())),
+                BOE::Pair(B::String("x".into(), sp()), B::NumberInt(1, sp())),
             ],
-            None,
             sp(),
         );
         let body_eq_objs = B::Eq(Box::new(body_obj_left), Box::new(body_obj_right), sp());

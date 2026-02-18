@@ -1,0 +1,14 @@
+{
+  "name": "216_object_wildcard_exclude_multiple_keys",
+  "description": "Wildcard supports omitting multiple keys with comma-separated exclusions",
+  "program": "{ \"foo\": .foo * 10, * - bar, baz, quux: . }",
+  "input": {
+    "foo": 1,
+    "bar": 2,
+    "baz": 3,
+    "quux": 4
+  },
+  "expected": {
+    "foo": 10
+  }
+}

@@ -84,6 +84,12 @@ pub struct LexError {
     pub kind: LexErrorKind,
 }
 
+#[derive(Debug)]
+pub enum LexStep {
+    Token(Token, Span),
+    Error(LexError),
+}
+
 pub struct Lexer<'a> {
     src: &'a str,
     idx: usize,
@@ -678,6 +684,23 @@ impl<'a> Lexer<'a> {
         self.consume_char();
         Err(LexError { span: self.make_span(start), kind: LexErrorKind::InvalidChar })
     }
+
+    /// Recoverable token step for editor use-cases.
+    ///
+    /// This never panics and guarantees forward progress even on malformed input.
+    pub fn next_step(&mut self) -> LexStep {
+        let before = self.idx;
+        match self.next_token() {
+            Ok((tok, span)) => LexStep::Token(tok, span),
+            Err(err) => {
+                // Ensure we never get stuck repeatedly returning the same error.
+                if self.idx <= before && !self.finished {
+                    self.consume_char();
+                }
+                LexStep::Error(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -960,5 +983,29 @@ mod tests {
         assert_eq!(t7, Token::Ident("foo".into()));
         let (t8, _) = lx.next_token().unwrap();
         assert_eq!(t8, Token::Eof);
+    }
+
+    #[test]
+    fn recoverable_mode_reports_multiple_errors_and_continues() {
+        let mut lx = Lexer::new("! @ \"unterminated\nlet x = 1");
+        let mut errors = 0usize;
+        let mut saw_let = false;
+        let mut saw_ident_x = false;
+
+        loop {
+            match lx.next_step() {
+                LexStep::Error(_) => errors += 1,
+                LexStep::Token(tok, _) => match tok {
+                    Token::Let => saw_let = true,
+                    Token::Ident(name) if name == "x" => saw_ident_x = true,
+                    Token::Eof => break,
+                    _ => {}
+                },
+            }
+        }
+
+        assert!(errors >= 3);
+        assert!(saw_let);
+        assert!(saw_ident_x);
     }
 }

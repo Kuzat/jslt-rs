@@ -93,6 +93,7 @@ fn arrays_and_objects_and_spread() {
     // Object literal with ident key, quoted key, and spread
     assert_eq!(parse_fmt("{ a: 1, \"x y\": \"v\", *: $rest }"), "{a: 1, \"x y\": \"v\", *: $rest}");
     assert_eq!(parse_fmt("{ * - location: . }"), "{* - location: .}");
+    assert_eq!(parse_fmt("{ * - \"x y\": . }"), "{* - \"x y\": .}");
     assert_eq!(parse_fmt("{ * - bar, baz, quux: . }"), "{* - bar, baz, quux: .}");
     assert_eq!(parse_fmt("{\"a\":1,}"), "{\"a\": 1}");
 }

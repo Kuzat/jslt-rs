@@ -76,7 +76,7 @@ fn test_format_array_multiline() {
 fn test_format_object_single_line() {
     let input = r#"{"a":1,"b":2}"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, r#"{"a": 1, "b": 2}"#.to_string() + "\n");
+    assert_eq!(formatted, "{\n  \"a\": 1,\n  \"b\": 2\n}\n");
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn test_this_expression() {
 fn test_object_spread() {
     let input = r#"{*:.base,"override":true}"#;
     let formatted = format_source(input).unwrap();
-    assert_eq!(formatted, r#"{*: .base, "override": true}"#.to_string() + "\n");
+    assert_eq!(formatted, "{\n  *: .base,\n  \"override\": true\n}\n");
 
     let input_excluded = r#"{*-location:.}"#;
     let formatted_excluded = format_source(input_excluded).unwrap();
@@ -318,6 +318,10 @@ fn test_object_spread() {
     let input_excluded_many = r#"{*-bar,baz,quux:.}"#;
     let formatted_excluded_many = format_source(input_excluded_many).unwrap();
     assert_eq!(formatted_excluded_many, "{* - bar, baz, quux: .}\n");
+
+    let input_excluded_quoted = r#"{*-"x y":.}"#;
+    let formatted_excluded_quoted = format_source(input_excluded_quoted).unwrap();
+    assert_eq!(formatted_excluded_quoted, "{* - \"x y\": .}\n");
 }
 
 #[test]

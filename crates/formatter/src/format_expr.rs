@@ -203,9 +203,12 @@ fn format_object(
             }
         });
 
-    // Try single-line first (but not if there are comments or blank lines)
+    // Single-line object literals are only allowed for zero/one-entry objects.
+    let has_multiple_entries = entries.len() > 1;
+
+    // Try single-line first (but not if there are comments/blank lines or multiple entries)
     let single_line = format_object_single_line(entries);
-    if !has_comments_or_blanks && writer.fits_on_line(&single_line) {
+    if !has_multiple_entries && !has_comments_or_blanks && writer.fits_on_line(&single_line) {
         writer.write(&single_line);
     } else {
         // Multi-line format
@@ -261,7 +264,7 @@ fn format_object(
                             if i > 0 {
                                 writer.write(", ");
                             }
-                            writer.write(key);
+                            format_wildcard_exclude_key(writer, key);
                         }
                     }
                     writer.write(": ");
@@ -363,7 +366,7 @@ fn format_object_single_line(entries: &[ObjectEntry]) -> String {
                         if i > 0 {
                             result.push_str(", ");
                         }
-                        result.push_str(key);
+                        result.push_str(&format_wildcard_exclude_key_string(key));
                     }
                 }
                 result.push_str(": ");
@@ -380,4 +383,45 @@ fn format_object_key_string(key: &ObjectKey) -> String {
         ObjectKey::Ident(id) => id.name.clone(),
         ObjectKey::Str { value, .. } => format!("\"{}\"", value),
     }
+}
+
+fn format_wildcard_exclude_key(writer: &mut Writer, key: &str) {
+    if is_unquoted_wildcard_exclude_key(key) {
+        writer.write(key);
+    } else {
+        format_string(writer, key);
+    }
+}
+
+fn format_wildcard_exclude_key_string(key: &str) -> String {
+    if is_unquoted_wildcard_exclude_key(key) {
+        key.to_string()
+    } else {
+        let mut escaped = String::new();
+        escaped.push('"');
+        for ch in key.chars() {
+            match ch {
+                '"' => escaped.push_str("\\\""),
+                '\\' => escaped.push_str("\\\\"),
+                '\u{08}' => escaped.push_str("\\b"),
+                '\u{0C}' => escaped.push_str("\\f"),
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                c if c.is_control() => escaped.push_str(&format!("\\u{:04X}", c as u32)),
+                c => escaped.push(c),
+            }
+        }
+        escaped.push('"');
+        escaped
+    }
+}
+
+fn is_unquoted_wildcard_exclude_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }

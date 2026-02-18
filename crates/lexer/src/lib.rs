@@ -995,14 +995,12 @@ mod tests {
         loop {
             match lx.next_step() {
                 LexStep::Error(_) => errors += 1,
-                LexStep::Token(tok, _) => {
-                    match tok {
-                        Token::Let => saw_let = true,
-                        Token::Ident(name) if name == "x" => saw_ident_x = true,
-                        Token::Eof => break,
-                        _ => {}
-                    }
-                }
+                LexStep::Token(tok, _) => match tok {
+                    Token::Let => saw_let = true,
+                    Token::Ident(name) if name == "x" => saw_ident_x = true,
+                    Token::Eof => break,
+                    _ => {}
+                },
             }
         }
 

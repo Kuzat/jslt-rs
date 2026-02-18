@@ -1000,10 +1000,7 @@ impl<'p> Evaluator<'p> {
         let explicit_keys: std::collections::HashSet<std::string::String> = entries
             .iter()
             .filter_map(|entry| match entry {
-                BoundObjectEntry::Pair(kexpr, _) => match kexpr {
-                    BoundExpr::String(s, _) => Some(s.clone()),
-                    _ => None,
-                },
+                BoundObjectEntry::Pair(BoundExpr::String(s, _), _) => Some(s.clone()),
                 _ => None,
             })
             .collect();

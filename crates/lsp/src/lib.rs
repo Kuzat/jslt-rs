@@ -6,7 +6,7 @@
 use engine::EngineError;
 use formatter::format_source;
 use interp::binder::BindError;
-use parser::{parse_import_header, Parser};
+use parser::{Parser, parse_import_header};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,15 +50,15 @@ impl JsltLanguageServer {
         let roots = Self::module_resolution_roots_for_file(&file_path);
 
         // Parse first to report as many in-file syntax/lexer errors as possible.
-        if let Ok(mut parser) = Parser::new(text) {
-            if let Err(parse_errors) = parser.parse_program() {
-                let mut diagnostics = Self::parse_errors_to_diagnostics(parse_errors, text);
-                diagnostics.extend(Self::module_diagnostics_to_lsp(
-                    Self::collect_import_diagnostics_for_roots(text, &roots),
-                    text,
-                ));
-                return diagnostics;
-            }
+        if let Ok(mut parser) = Parser::new(text)
+            && let Err(parse_errors) = parser.parse_program()
+        {
+            let mut diagnostics = Self::parse_errors_to_diagnostics(parse_errors, text);
+            diagnostics.extend(Self::module_diagnostics_to_lsp(
+                Self::collect_import_diagnostics_for_roots(text, &roots),
+                text,
+            ));
+            return diagnostics;
         }
 
         let module_diags = Self::collect_import_diagnostics_for_roots(text, &roots);
@@ -71,7 +71,8 @@ impl JsltLanguageServer {
             let virtual_main = root.join("__jslt_lsp_virtual__.jslt");
             match engine::compile_with_import_path(text, &virtual_main.to_string_lossy()) {
                 Ok(_) => return Vec::new(),
-                Err(err @ EngineError::ModuleErrors(_)) | Err(err @ EngineError::ModuleError(_)) => {
+                Err(err @ EngineError::ModuleErrors(_))
+                | Err(err @ EngineError::ModuleError(_)) => {
                     last_module_error = Some(err);
                 }
                 Err(err) => return Self::error_to_diagnostic(err, text),
@@ -199,8 +200,10 @@ impl JsltLanguageServer {
                     ),
                     None => {
                         let start = Self::byte_offset_to_position(text, 0);
-                        let end =
-                            Self::byte_offset_to_position(text, text.find('\n').unwrap_or(text.len()));
+                        let end = Self::byte_offset_to_position(
+                            text,
+                            text.find('\n').unwrap_or(text.len()),
+                        );
                         (start, end)
                     }
                 };
@@ -222,7 +225,10 @@ impl JsltLanguageServer {
         Self::normalize_diagnostics(diagnostics)
     }
 
-    fn parse_errors_to_diagnostics(parse_errors: parser::ParseErrors, text: &str) -> Vec<Diagnostic> {
+    fn parse_errors_to_diagnostics(
+        parse_errors: parser::ParseErrors,
+        text: &str,
+    ) -> Vec<Diagnostic> {
         let diagnostics: Vec<Diagnostic> = parse_errors
             .errors
             .into_iter()
@@ -273,9 +279,8 @@ impl JsltLanguageServer {
                     b.source.as_deref().unwrap_or(""),
                 ))
         });
-        normalized.dedup_by(|a, b| {
-            a.range == b.range && a.message == b.message && a.source == b.source
-        });
+        normalized
+            .dedup_by(|a, b| a.range == b.range && a.message == b.message && a.source == b.source);
         normalized
     }
 
@@ -443,12 +448,8 @@ impl JsltLanguageServer {
     }
 
     fn diagnostic_href(code: &str) -> Url {
-        Url::parse(&format!(
-            "{}#{}",
-            Self::DIAGNOSTIC_DOCS_BASE,
-            code.to_ascii_lowercase()
-        ))
-        .expect("valid diagnostic docs URL")
+        Url::parse(&format!("{}#{}", Self::DIAGNOSTIC_DOCS_BASE, code.to_ascii_lowercase()))
+            .expect("valid diagnostic docs URL")
     }
 }
 
@@ -611,11 +612,7 @@ mod tests {
         let parse_errors = parser.parse_program().expect_err("expected parse errors");
 
         let diags = JsltLanguageServer::parse_errors_to_diagnostics(parse_errors, text);
-        assert!(
-            diags.len() >= 2,
-            "expected multiple diagnostics, got {}",
-            diags.len()
-        );
+        assert!(diags.len() >= 2, "expected multiple diagnostics, got {}", diags.len());
         assert!(diags.iter().all(|d| d.source.as_deref() == Some("jslt-parser")));
         assert!(diags.iter().all(|d| {
             matches!(
@@ -632,15 +629,9 @@ mod tests {
         let mut parser = Parser::new(text).expect("parser init should recover");
         let parse_errors = parser.parse_program().expect_err("expected parse errors");
 
-        let diags = JsltLanguageServer::error_to_diagnostic(
-            EngineError::ParseErrors(parse_errors),
-            text,
-        );
-        assert!(
-            diags.len() >= 2,
-            "expected multiple diagnostics, got {}",
-            diags.len()
-        );
+        let diags =
+            JsltLanguageServer::error_to_diagnostic(EngineError::ParseErrors(parse_errors), text);
+        assert!(diags.len() >= 2, "expected multiple diagnostics, got {}", diags.len());
     }
 
     #[test]
@@ -677,10 +668,12 @@ import "does-not-exist" as package
             Some(NumberOrString::String(code))
                 if code == JsltLanguageServer::CODE_IMPORT_NOT_FOUND
         ));
-        assert!(diags[0]
-            .code_description
-            .as_ref()
-            .is_some_and(|desc| desc.href.as_str().contains("#jslt_import_not_found")));
+        assert!(
+            diags[0]
+                .code_description
+                .as_ref()
+                .is_some_and(|desc| desc.href.as_str().contains("#jslt_import_not_found"))
+        );
     }
 
     #[test]

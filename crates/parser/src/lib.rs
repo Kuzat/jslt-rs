@@ -371,19 +371,14 @@ impl<'a> Parser<'a> {
         if !self.at(&Token::RParen) {
             let p = self.expect_ident()?;
             params.push(p);
-            loop {
-                match self.recover_list_separator(
-                    "',' or ')' after parameter",
-                    "function parameter list",
-                    |tok| matches!(tok, Token::Ident(_)),
-                    |tok| matches!(tok, Token::RParen),
-                )? {
-                    ListRecovery::Continue => {
-                        let p = self.expect_ident()?;
-                        params.push(p);
-                    }
-                    ListRecovery::Break => break,
-                }
+            while let ListRecovery::Continue = self.recover_list_separator(
+                "',' or ')' after parameter",
+                "function parameter list",
+                |tok| matches!(tok, Token::Ident(_)),
+                |tok| matches!(tok, Token::RParen),
+            )? {
+                let p = self.expect_ident()?;
+                params.push(p);
             }
         }
         self.expect(Token::RParen, "')' after parameters")?;
@@ -450,10 +445,7 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            let end_span = else_expr
-                .as_ref()
-                .map(|e| e.span())
-                .unwrap_or_else(|| then_expr.span());
+            let end_span = else_expr.as_ref().map(|e| e.span()).unwrap_or_else(|| then_expr.span());
             let span = Span::join(start, end_span);
             Ok(Expr::If {
                 cond: Box::new(cond),
@@ -793,23 +785,18 @@ impl<'a> Parser<'a> {
                                 self.synchronize_expression();
                             }
                         }
-                        loop {
-                            match self.recover_list_separator(
-                                "',' or ')' after argument",
-                                "function call arguments",
-                                Self::is_expr_start,
-                                |tok| matches!(tok, Token::RParen),
-                            )? {
-                                ListRecovery::Continue => {
-                                    match self.parse_if_or_expr() {
-                                        Ok(arg) => args.push(arg),
-                                        Err(err) => {
-                                            self.errors.push(err);
-                                            self.synchronize_expression();
-                                        }
-                                    }
+                        while let ListRecovery::Continue = self.recover_list_separator(
+                            "',' or ')' after argument",
+                            "function call arguments",
+                            Self::is_expr_start,
+                            |tok| matches!(tok, Token::RParen),
+                        )? {
+                            match self.parse_if_or_expr() {
+                                Ok(arg) => args.push(arg),
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
                                 }
-                                ListRecovery::Break => break,
                             }
                         }
                     }
@@ -959,21 +946,18 @@ impl<'a> Parser<'a> {
                         self.synchronize_expression();
                     }
                 }
-                loop {
-                    match self.recover_list_separator(
-                        "',' or ']' after array element",
-                        "array literal",
-                        Self::is_expr_start,
-                        |tok| matches!(tok, Token::RBracket),
-                    )? {
-                        ListRecovery::Continue => match self.parse_if_or_expr() {
-                            Ok(elem) => elems.push(elem),
-                            Err(err) => {
-                                self.errors.push(err);
-                                self.synchronize_expression();
-                            }
-                        },
-                        ListRecovery::Break => break,
+                while let ListRecovery::Continue = self.recover_list_separator(
+                    "',' or ']' after array element",
+                    "array literal",
+                    Self::is_expr_start,
+                    |tok| matches!(tok, Token::RBracket),
+                )? {
+                    match self.parse_if_or_expr() {
+                        Ok(elem) => elems.push(elem),
+                        Err(err) => {
+                            self.errors.push(err);
+                            self.synchronize_expression();
+                        }
                     }
                 }
             }
@@ -1409,7 +1393,9 @@ impl<'a> Parser<'a> {
             return Ok(self.prev_span);
         }
 
-        while !self.at(&t) && !matches!(self.cur.tok, Token::Eof) && !is_recovery_boundary(&self.cur.tok)
+        while !self.at(&t)
+            && !matches!(self.cur.tok, Token::Eof)
+            && !is_recovery_boundary(&self.cur.tok)
         {
             self.bump()?;
         }

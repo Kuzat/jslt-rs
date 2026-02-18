@@ -282,18 +282,14 @@ import "__missing_two__.jslt" as two
         match err {
             EngineError::ModuleErrors(module_errors) => {
                 assert_eq!(module_errors.diagnostics.len(), 2);
-                assert!(
-                    module_errors
-                        .diagnostics
-                        .iter()
-                        .any(|d| d.message.contains("__missing_one__.jslt"))
-                );
-                assert!(
-                    module_errors
-                        .diagnostics
-                        .iter()
-                        .any(|d| d.message.contains("__missing_two__.jslt"))
-                );
+                assert!(module_errors
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("__missing_one__.jslt")));
+                assert!(module_errors
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("__missing_two__.jslt")));
             }
             other => panic!("expected module errors, got: {other}"),
         }

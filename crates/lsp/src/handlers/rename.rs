@@ -12,7 +12,7 @@ use crate::context::{
     AnalysisSnapshot, Symbol, SymbolKind, position_to_byte_offset, span_contains,
 };
 use crate::handlers::references::{is_exported_function, qualified_usages, span_to_range};
-use crate::naming::{alias_declaration_span, split_qualified};
+use crate::naming::{alias_declaration_span, identifier_span, split_qualified};
 
 /// What a rename request at a given position actually renames.
 #[derive(Debug, Clone)]
@@ -55,7 +55,10 @@ pub(crate) async fn rename(
     server: &JsltLanguageServer,
     params: RenameParams,
 ) -> Result<Option<WorkspaceEdit>> {
-    if !valid_identifier(&params.new_name) {
+    // The rename box shows `value` rather than `$value`, so a user typing the
+    // sigil back in means the identifier, not a name starting with `$`.
+    let new_name = params.new_name.strip_prefix('$').unwrap_or(&params.new_name).to_string();
+    if !valid_identifier(&new_name) {
         return Ok(None);
     }
 
@@ -69,7 +72,7 @@ pub(crate) async fn rename(
         return Ok(None);
     };
 
-    let changes = rename_edits(server, &uri, &snapshot, &prepared.target, &params.new_name).await;
+    let changes = rename_edits(server, &uri, &snapshot, &prepared.target, &new_name).await;
     if changes.is_empty() {
         return Ok(None);
     }
@@ -113,7 +116,7 @@ async fn resolve_target(
     let span = occurrence_at(symbol, offset).unwrap_or(symbol.declaration);
     Some(PreparedRename {
         target: RenameTarget::Local(symbol.clone()),
-        range: span_to_range(&snapshot.text, span),
+        range: span_to_range(&snapshot.text, identifier_span(&snapshot.text, span)),
     })
 }
 
@@ -177,8 +180,7 @@ async fn rename_edits(
             changes.insert(uri.clone(), alias_edits(snapshot, symbol, new_name));
         }
         RenameTarget::Local(symbol) => {
-            let mut spans = vec![symbol.declaration];
-            spans.extend(symbol.references.iter().copied());
+            let spans = occurrence_spans(&snapshot.text, symbol);
             changes.insert(uri.clone(), edits_for_spans(&snapshot.text, spans, new_name));
 
             if is_exported_function(symbol) {
@@ -190,8 +192,7 @@ async fn rename_edits(
                 return changes;
             };
 
-            let mut spans = vec![symbol.declaration];
-            spans.extend(symbol.references.iter().copied());
+            let spans = occurrence_spans(&file.snapshot.text, symbol);
             changes.insert(file.uri.clone(), edits_for_spans(&file.snapshot.text, spans, new_name));
 
             extend_with_importers(server, def_uri, &symbol.name, new_name, &mut changes).await;
@@ -252,6 +253,14 @@ async fn extend_with_importers(
     for edits in changes.values_mut() {
         sort_and_dedup(edits);
     }
+}
+
+/// Every place `symbol` is written, narrowed to the identifier itself.
+fn occurrence_spans(text: &str, symbol: &Symbol) -> Vec<Span> {
+    std::iter::once(symbol.declaration)
+        .chain(symbol.references.iter().copied())
+        .map(|span| identifier_span(text, span))
+        .collect()
 }
 
 fn edits_for_spans(text: &str, spans: Vec<Span>, new_name: &str) -> Vec<TextEdit> {
@@ -381,22 +390,26 @@ mod tests {
 
     #[test]
     fn local_edits_cover_declaration_and_every_reference() {
+        // References span the whole `$x` token; declarations cover only `x`.
         let text = "let x = 1\n$x + $x\n";
         let symbol = Symbol {
             id: SymbolId(0),
             kind: SymbolKind::LetVariable,
             name: "x".to_string(),
             declaration: span(4, 5),
-            references: vec![span(11, 12), span(16, 17)],
+            references: vec![span(10, 12), span(15, 17)],
             scope: ScopeId(0),
         };
 
-        let mut spans = vec![symbol.declaration];
-        spans.extend(symbol.references.iter().copied());
-        let edits = edits_for_spans(text, spans, "y");
+        let edits = edits_for_spans(text, occurrence_spans(text, &symbol), "y");
 
         assert_eq!(edits.len(), 3);
         assert!(edits.iter().all(|edit| edit.new_text == "y"));
+        // Every edit rewrites the identifier only, leaving the `$` in place.
+        assert_eq!(edits[1].range.start.character, 1);
+        assert_eq!(edits[1].range.end.character, 2);
+        assert_eq!(edits[2].range.start.character, 6);
+        assert_eq!(edits[2].range.end.character, 7);
     }
 
     #[test]

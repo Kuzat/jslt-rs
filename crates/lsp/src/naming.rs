@@ -70,6 +70,18 @@ pub(crate) fn alias_declaration_span(text: &str, import_span: Span, alias: &str)
     Some(sub_span(import_span, offset, offset + alias.len()))
 }
 
+/// The identifier inside an occurrence span, without a leading `$`.
+///
+/// A variable reference is spanned over the whole `$name` token while its
+/// declaration covers only `name`. Rename has to rewrite just the identifier,
+/// or renaming `$value` to `val` would eat the sigil too.
+pub(crate) fn identifier_span(text: &str, span: Span) -> Span {
+    match text.get(span.start..span.end) {
+        Some(slice) if slice.starts_with('$') => sub_span(span, 1, slice.len()),
+        _ => span,
+    }
+}
+
 /// A sub-range of `span`, offset by byte counts relative to its start.
 fn sub_span(span: Span, start: usize, end: usize) -> Span {
     Span { start: span.start + start, end: span.start + end, line: span.line, column: span.column }
@@ -113,6 +125,15 @@ mod tests {
 
         assert!(split_qualified("utils", span(0, 5), &aliases).is_none());
         assert!(split_qualified("utils:", span(0, 6), &aliases).is_none());
+    }
+
+    #[test]
+    fn identifier_span_drops_a_leading_sigil() {
+        let text = "let value = 1\n$value + 1\n";
+
+        // `$value` in the body, and `value` in the declaration.
+        assert_eq!(identifier_span(text, span(14, 20)), span(15, 20));
+        assert_eq!(identifier_span(text, span(4, 9)), span(4, 9));
     }
 
     #[test]

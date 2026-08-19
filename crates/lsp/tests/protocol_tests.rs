@@ -243,6 +243,74 @@ async fn renaming_from_a_call_site_renames_the_imported_definition() {
 }
 
 #[tokio::test]
+async fn renaming_a_variable_keeps_the_dollar_sigil() {
+    let mut server = fixture_server().await;
+    server.open("main.jslt", MAIN_JSLT).await;
+
+    // Cursor on the `n` of `$n` in `utils:double($n)`.
+    let prepared = server.position_request("textDocument/prepareRename", "main.jslt", 5, 27).await;
+
+    // The range must exclude the `$`, or accepting the box rewrites the sigil.
+    assert_eq!(prepared["range"]["start"], json!({ "line": 5, "character": 27 }));
+    assert_eq!(prepared["range"]["end"], json!({ "line": 5, "character": 28 }));
+    assert_eq!(prepared["placeholder"], json!("n"));
+
+    let uri = server.uri("main.jslt");
+    let result = server
+        .request(
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": 5, "character": 27 },
+                "newName": "count",
+            }),
+        )
+        .await;
+
+    let edits = result["changes"][uri.as_str()].as_array().expect("edits");
+    // `let n`, plus `$n` on each of the two call lines.
+    assert_eq!(edits.len(), 3, "unexpected edits: {:?}", edits);
+    assert_eq!(
+        edits[0]["range"],
+        json!({ "start": { "line": 2, "character": 4 }, "end": { "line": 2, "character": 5 } })
+    );
+    assert_eq!(
+        edits[1]["range"],
+        json!({ "start": { "line": 5, "character": 27 }, "end": { "line": 5, "character": 28 } })
+    );
+    assert_eq!(
+        edits[2]["range"],
+        json!({ "start": { "line": 6, "character": 27 }, "end": { "line": 6, "character": 28 } })
+    );
+    assert!(edits.iter().all(|edit| edit["newText"] == json!("count")));
+}
+
+#[tokio::test]
+async fn renaming_a_variable_tolerates_a_typed_sigil() {
+    let mut server = fixture_server().await;
+    server.open("main.jslt", MAIN_JSLT).await;
+
+    let uri = server.uri("main.jslt");
+    let result = server
+        .request(
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": 5, "character": 27 },
+                "newName": "$count",
+            }),
+        )
+        .await;
+
+    let edits = result["changes"][uri.as_str()].as_array().expect("edits");
+    assert!(
+        edits.iter().all(|edit| edit["newText"] == json!("count")),
+        "the sigil must not be doubled: {:?}",
+        edits
+    );
+}
+
+#[tokio::test]
 async fn rename_rejects_invalid_identifiers() {
     let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;

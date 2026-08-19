@@ -1,0 +1,15 @@
+// Numeric helpers shared across transformations.
+
+def clamp(value, low, high)
+  if ($value < $low)
+    $low
+  else if ($value > $high)
+    $high
+  else
+    $value
+
+def percent(part, whole)
+  if ($whole == 0)
+    0
+  else
+    round(100 * $part / $whole)

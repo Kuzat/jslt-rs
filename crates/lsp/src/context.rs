@@ -109,6 +109,17 @@ impl AnalysisSnapshot {
             .map(|(_, symbol)| symbol)
     }
 
+    /// The reference span of `symbol` that covers `position`, if any.
+    pub(crate) fn reference_at(&self, symbol: &Symbol, position: Position) -> Option<Span> {
+        let offset = position_to_byte_offset(&self.text, position)?;
+        symbol.references.iter().find(|span| span_contains(**span, offset)).copied()
+    }
+
+    /// Every import alias declared in this document.
+    pub(crate) fn import_aliases(&self) -> Vec<String> {
+        self.imports.iter().map(|imp| imp.alias.clone()).collect()
+    }
+
     #[allow(dead_code)]
     pub(crate) fn scope_at(&self, position: Position) -> Option<&Scope> {
         let offset = position_to_byte_offset(&self.text, position)?;

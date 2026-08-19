@@ -5,6 +5,7 @@ mod capabilities;
 mod context;
 mod errors;
 mod handlers;
+mod naming;
 mod state;
 mod workspace;
 

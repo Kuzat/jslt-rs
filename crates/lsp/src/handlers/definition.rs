@@ -1,10 +1,11 @@
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    GotoDefinitionParams, GotoDefinitionResponse, Location, Position, Range,
+    GotoDefinitionParams, GotoDefinitionResponse, Location, Position, Range, Url,
 };
 
 use crate::JsltLanguageServer;
 use crate::context::{AnalysisSnapshot, Symbol, SymbolKind, byte_offset_to_position};
+use crate::naming::split_qualified;
 
 pub(crate) async fn definition(
     server: &JsltLanguageServer,
@@ -27,6 +28,14 @@ pub(crate) async fn definition(
         return Ok(None);
     };
 
+    // An `alias:function` reference should jump to the `def` in the imported
+    // module rather than to the local import statement.
+    if symbol.kind == SymbolKind::ImportAlias
+        && let Some(location) = imported_definition(server, &snapshot, &uri, symbol, position).await
+    {
+        return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+    }
+
     if let Some(location) = definition_location(&snapshot, &uri, symbol) {
         return Ok(Some(GotoDefinitionResponse::Scalar(location)));
     }
@@ -34,22 +43,50 @@ pub(crate) async fn definition(
     Ok(None)
 }
 
+/// Resolve a qualified reference under the cursor to its definition in the
+/// imported module, falling back to the top of the module file.
+async fn imported_definition(
+    server: &JsltLanguageServer,
+    snapshot: &AnalysisSnapshot,
+    uri: &Url,
+    symbol: &Symbol,
+    position: Position,
+) -> Option<Location> {
+    let span = snapshot.reference_at(symbol, position)?;
+    let qualified = split_qualified(&snapshot.text, span, &snapshot.import_aliases())?;
+    let import = snapshot.imports.iter().find(|imp| imp.alias == qualified.alias)?;
+    let target = JsltLanguageServer::resolve_import_uri(uri, &import.path)?;
+
+    let Some(file) = server.indexed_file(&target).await else {
+        return Some(module_head(target));
+    };
+
+    match file.exported_function(&qualified.function) {
+        Some(def) => Some(Location {
+            uri: file.uri.clone(),
+            range: span_to_range(&file.snapshot.text, def.declaration),
+        }),
+        None => Some(module_head(file.uri.clone())),
+    }
+}
+
 fn definition_location(
     snapshot: &AnalysisSnapshot,
-    uri: &tower_lsp::lsp_types::Url,
+    uri: &Url,
     symbol: &Symbol,
 ) -> Option<Location> {
     if symbol.kind == SymbolKind::ImportAlias {
         let import = snapshot.imports.iter().find(|imp| imp.alias == symbol.name)?;
         if let Some(target_uri) = JsltLanguageServer::resolve_import_uri(uri, &import.path) {
-            return Some(Location {
-                uri: target_uri,
-                range: Range::new(Position::new(0, 0), Position::new(0, 0)),
-            });
+            return Some(module_head(target_uri));
         }
     }
 
     Some(Location { uri: uri.clone(), range: span_to_range(&snapshot.text, symbol.declaration) })
+}
+
+fn module_head(uri: Url) -> Location {
+    Location { uri, range: Range::new(Position::new(0, 0), Position::new(0, 0)) }
 }
 
 fn span_to_range(text: &str, span: ast::Span) -> Range {
@@ -84,7 +121,7 @@ mod tests {
             imports: Vec::new(),
             text: "let x = 1\n".to_string(),
         };
-        let uri = tower_lsp::lsp_types::Url::parse("file:///tmp/test.jslt").expect("uri");
+        let uri = Url::parse("file:///tmp/test.jslt").expect("uri");
 
         let loc = definition_location(&snapshot, &uri, &snapshot.symbols[0]).expect("location");
         assert_eq!(loc.uri, uri);

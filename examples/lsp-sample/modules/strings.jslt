@@ -1,0 +1,9 @@
+// String helpers shared across transformations.
+//
+// Hover any function name here, or find its references across the workspace.
+
+def slug(text)
+  lowercase(replace(trim($text), " ", "-"))
+
+def shout(text)
+  uppercase(trim($text)) + "!"

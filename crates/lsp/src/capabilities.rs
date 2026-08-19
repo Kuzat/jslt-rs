@@ -1,0 +1,42 @@
+use tower_lsp::lsp_types::{
+    CompletionOptions, HoverProviderCapability, OneOf, RenameOptions, ServerCapabilities,
+    SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
+    WorkDoneProgressOptions,
+};
+
+pub(crate) fn build_server_capabilities() -> ServerCapabilities {
+    ServerCapabilities {
+        // We support full text document synchronization.
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+
+        // Code formatting support.
+        document_formatting_provider: Some(OneOf::Left(true)),
+
+        completion_provider: Some(CompletionOptions {
+            resolve_provider: Some(true),
+            trigger_characters: Some(vec![
+                ".".to_string(),
+                "$".to_string(),
+                "\"".to_string(),
+                ":".to_string(),
+            ]),
+            ..Default::default()
+        }),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
+            ..Default::default()
+        }),
+        definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        // Right variant so clients also send textDocument/prepareRename.
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
+
+        // Add more capabilities here as we implement features.
+        ..Default::default()
+    }
+}

@@ -36,10 +36,17 @@ impl JsltLanguageServer {
 
         let snapshot = Self::build_analysis_snapshot(uri, text, version);
         self.cache_snapshot(uri, version, snapshot.clone()).await;
+        // Keep the workspace index in sync with the editor buffer so that
+        // cross-file lookups see unsaved changes.
+        self.index_snapshot(uri, snapshot.clone()).await;
         snapshot
     }
 
-    fn build_analysis_snapshot(uri: &Url, text: &str, version: Option<i32>) -> AnalysisSnapshot {
+    pub(crate) fn build_analysis_snapshot(
+        uri: &Url,
+        text: &str,
+        version: Option<i32>,
+    ) -> AnalysisSnapshot {
         let diagnostics = Self::compute_diagnostics(uri, text);
         let mut snapshot = AnalysisSnapshot::new(version, text.to_string(), diagnostics);
 

@@ -15,8 +15,8 @@ use crate::JsltLanguageServer;
 
 #[tower_lsp::async_trait]
 impl LanguageServer for JsltLanguageServer {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
-        lifecycle::initialize()
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        lifecycle::initialize(self, params).await
     }
 
     async fn initialized(&self, params: InitializedParams) {

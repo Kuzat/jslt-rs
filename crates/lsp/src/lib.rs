@@ -6,6 +6,7 @@ mod context;
 mod errors;
 mod handlers;
 mod state;
+mod workspace;
 
 pub use state::JsltLanguageServer;
 

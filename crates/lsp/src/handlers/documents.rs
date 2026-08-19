@@ -74,5 +74,6 @@ pub(crate) async fn did_change(server: &JsltLanguageServer, params: DidChangeTex
 pub(crate) async fn did_close(server: &JsltLanguageServer, params: DidCloseTextDocumentParams) {
     let uri = params.text_document.uri;
     server.remove_document(&uri).await;
+    server.refresh_index_from_disk(&uri).await;
     server.client.publish_diagnostics(uri, Vec::new(), None).await;
 }

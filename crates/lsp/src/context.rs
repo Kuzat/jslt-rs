@@ -144,6 +144,7 @@ impl DocumentContext {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WorkspaceView {
     pub(crate) open_document_count: usize,
+    pub(crate) indexed_file_count: usize,
 }
 
 #[derive(Debug, Clone)]

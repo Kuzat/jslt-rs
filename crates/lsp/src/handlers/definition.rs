@@ -4,7 +4,10 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::JsltLanguageServer;
-use crate::context::{AnalysisSnapshot, Symbol, SymbolKind, byte_offset_to_position};
+use crate::context::{
+    AnalysisSnapshot, Symbol, SymbolKind, byte_offset_to_position, position_to_byte_offset,
+    span_contains,
+};
 use crate::naming::split_qualified;
 
 pub(crate) async fn definition(
@@ -56,6 +59,12 @@ async fn imported_definition(
     let qualified = split_qualified(&snapshot.text, span, &snapshot.import_aliases())?;
     let import = snapshot.imports.iter().find(|imp| imp.alias == qualified.alias)?;
     let target = JsltLanguageServer::resolve_import_uri(uri, &import.path)?;
+
+    // The alias half of `alias:function` names the module, not the function.
+    let offset = position_to_byte_offset(&snapshot.text, position)?;
+    if span_contains(qualified.alias_span, offset) {
+        return Some(module_head(target));
+    }
 
     let Some(file) = server.indexed_file(&target).await else {
         return Some(module_head(target));

@@ -1,6 +1,5 @@
 use crate::context::{AnalysisSnapshot, ScopeId, Symbol, SymbolKind};
 use crate::state::JsltLanguageServer;
-use ast::Span;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,9 +16,7 @@ const SKIPPED_DIRS: [&str; 4] = ["target", "node_modules", "dist", "build"];
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedImport {
     pub(crate) alias: String,
-    pub(crate) path: String,
-    #[allow(dead_code)]
-    pub(crate) span: Span,
+    /// `None` when the module path does not resolve to a file on disk.
     pub(crate) target: Option<Url>,
 }
 
@@ -32,14 +29,6 @@ pub(crate) struct IndexedFile {
 }
 
 impl IndexedFile {
-    /// The alias this file uses for `target`, if it imports it.
-    pub(crate) fn alias_for(&self, target: &Url) -> Option<&str> {
-        self.imports
-            .iter()
-            .find(|imp| imp.target.as_ref() == Some(target))
-            .map(|imp| imp.alias.as_str())
-    }
-
     /// A top-level `def` in this file, which is what importers can call.
     pub(crate) fn exported_function(&self, name: &str) -> Option<&Symbol> {
         self.snapshot.symbols.iter().find(|symbol| {
@@ -107,8 +96,6 @@ impl WorkspaceIndex {
             .iter()
             .map(|imp| ResolvedImport {
                 alias: imp.alias.clone(),
-                path: imp.path.clone(),
-                span: imp.span,
                 target: JsltLanguageServer::resolve_import_uri(uri, &imp.path),
             })
             .collect();
@@ -270,9 +257,6 @@ mod tests {
 
         let dependents = index.dependents_of(&module);
         assert_eq!(dependents, vec![(main.clone(), "utils".to_string())]);
-
-        let importer = index.get(&main).expect("indexed importer");
-        assert_eq!(importer.alias_for(&module), Some("utils"));
 
         let target = index.get(&module).expect("indexed module");
         assert!(target.exported_function("double").is_some());

@@ -88,11 +88,15 @@ impl JsltLanguageServer {
         let open_document_count = self.document_map.read().await.len();
         let indexed_file_count = self.workspace_index.read().await.len();
 
-        RequestContext {
-            document,
-            snapshot,
-            workspace: WorkspaceView { open_document_count, indexed_file_count },
-        }
+        let workspace = WorkspaceView { open_document_count, indexed_file_count };
+        tracing::trace!(
+            uri = %uri,
+            open_documents = workspace.open_document_count,
+            indexed_files = workspace.indexed_file_count,
+            "built request context",
+        );
+
+        RequestContext { document, snapshot, workspace }
     }
 
     /// Record the workspace roots reported by the client during `initialize`.

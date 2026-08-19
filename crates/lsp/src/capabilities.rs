@@ -1,5 +1,6 @@
 use tower_lsp::lsp_types::{
-    CompletionOptions, OneOf, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionOptions, HoverProviderCapability, OneOf, ServerCapabilities, SignatureHelpOptions,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
 pub(crate) fn build_server_capabilities() -> ServerCapabilities {
@@ -18,6 +19,12 @@ pub(crate) fn build_server_capabilities() -> ServerCapabilities {
                 "\"".to_string(),
                 ":".to_string(),
             ]),
+            ..Default::default()
+        }),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
             ..Default::default()
         }),
 

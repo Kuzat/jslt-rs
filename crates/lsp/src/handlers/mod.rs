@@ -1,6 +1,7 @@
 mod completion;
 mod documents;
 mod formatting;
+mod hover;
 mod lifecycle;
 
 use tower_lsp::LanguageServer;
@@ -45,5 +46,13 @@ impl LanguageServer for JsltLanguageServer {
 
     async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
         completion::completion_resolve(self, params).await
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        hover::hover(self, params).await
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        hover::signature_help(self, params).await
     }
 }

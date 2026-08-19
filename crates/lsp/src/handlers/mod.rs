@@ -4,6 +4,7 @@ mod documents;
 mod formatting;
 mod hover;
 mod lifecycle;
+mod references;
 
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::Result;
@@ -62,5 +63,9 @@ impl LanguageServer for JsltLanguageServer {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         definition::definition(self, params).await
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        references::references(self, params).await
     }
 }

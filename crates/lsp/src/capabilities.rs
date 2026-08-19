@@ -28,6 +28,7 @@ pub(crate) fn build_server_capabilities() -> ServerCapabilities {
             ..Default::default()
         }),
         definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
 
         // Add more capabilities here as we implement features.
         ..Default::default()

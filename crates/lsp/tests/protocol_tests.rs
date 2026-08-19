@@ -1,145 +1,24 @@
 //! Protocol-level tests that drive the server through JSON-RPC requests over a
 //! real multi-file workspace on disk.
 
-use std::path::{Path, PathBuf};
+mod harness;
 
-use futures::StreamExt;
-use jslt_lsp::JsltLanguageServer;
+use harness::TestServer;
 use serde_json::{Value, json};
-use tempfile::TempDir;
-use tower::{Service, ServiceExt};
-use tower_lsp::LspService;
-use tower_lsp::jsonrpc::Request;
 
 const UTILS_JSLT: &str =
     "def double(x)\n  $x * 2\n\ndef triple(x)\n  $x * 3\n\n{\"doubled\": double(.value)}\n";
 
 const MAIN_JSLT: &str = "import \"utils.jslt\" as utils\n\nlet n = .value\n\n{\n  \"doubled\": utils:double($n),\n  \"tripled\": utils:triple($n)\n}\n";
 
-/// A running language server plus the temporary workspace it was pointed at.
-struct TestServer {
-    service: LspService<JsltLanguageServer>,
-    dir: TempDir,
-    next_id: i64,
-}
-
-impl TestServer {
-    /// Start a server over a workspace containing `utils.jslt` and `main.jslt`.
-    async fn start() -> Self {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(dir.path().join("utils.jslt"), UTILS_JSLT).expect("write utils");
-        std::fs::write(dir.path().join("main.jslt"), MAIN_JSLT).expect("write main");
-
-        let (service, socket) = LspService::new(JsltLanguageServer::new);
-        // Nothing reads the client half in tests, and the loopback channel is
-        // bounded, so drain it or notifications would block the handlers.
-        tokio::spawn(async move {
-            let mut socket = socket;
-            while socket.next().await.is_some() {}
-        });
-
-        let mut server = TestServer { service, dir, next_id: 1 };
-
-        let root = Url::from_directory_path(server.dir.path()).expect("root uri");
-        server
-            .request(
-                "initialize",
-                json!({
-                    "capabilities": {},
-                    "workspaceFolders": [{ "uri": root, "name": "fixture" }],
-                }),
-            )
-            .await;
-        server.notify("initialized", json!({})).await;
-
-        server
-    }
-
-    fn path(&self, name: &str) -> PathBuf {
-        self.dir.path().join(name)
-    }
-
-    fn uri(&self, name: &str) -> Url {
-        file_uri(&self.path(name))
-    }
-
-    async fn request(&mut self, method: &'static str, params: Value) -> Value {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        let request = Request::build(method).params(params).id(id).finish();
-        let response = self
-            .service
-            .ready()
-            .await
-            .expect("service ready")
-            .call(request)
-            .await
-            .expect("call succeeded")
-            .expect("response");
-
-        let value = serde_json::to_value(response).expect("serializable response");
-        assert!(value.get("error").is_none(), "{} failed: {}", method, value);
-        value.get("result").cloned().unwrap_or(Value::Null)
-    }
-
-    async fn notify(&mut self, method: &'static str, params: Value) {
-        let request = Request::build(method).params(params).finish();
-        let _ = self.service.ready().await.expect("service ready").call(request).await;
-    }
-
-    async fn open(&mut self, name: &str, text: &str) {
-        let uri = self.uri(name);
-        self.notify(
-            "textDocument/didOpen",
-            json!({
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": "jslt",
-                    "version": 1,
-                    "text": text,
-                }
-            }),
-        )
-        .await;
-    }
-
-    async fn position_request(
-        &mut self,
-        method: &'static str,
-        name: &str,
-        line: u32,
-        ch: u32,
-    ) -> Value {
-        let uri = self.uri(name);
-        let mut params = json!({
-            "textDocument": { "uri": uri },
-            "position": { "line": line, "character": ch },
-        });
-
-        if method == "textDocument/references" {
-            params["context"] = json!({ "includeDeclaration": true });
-        }
-
-        self.request(method, params).await
-    }
-}
-
-use tower_lsp::lsp_types::Url;
-
-fn file_uri(path: &Path) -> Url {
-    Url::from_file_path(path.canonicalize().expect("canonical path")).expect("file uri")
+/// A server over the two-file fixture workspace.
+async fn fixture_server() -> TestServer {
+    TestServer::with_files(&[("utils.jslt", UTILS_JSLT), ("main.jslt", MAIN_JSLT)]).await
 }
 
 #[tokio::test]
 async fn initialize_advertises_the_implemented_capabilities() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let (service, socket) = LspService::new(JsltLanguageServer::new);
-    tokio::spawn(async move {
-        let mut socket = socket;
-        while socket.next().await.is_some() {}
-    });
-    let mut server = TestServer { service, dir, next_id: 1 };
+    let mut server = TestServer::uninitialized();
     let capabilities = server.request("initialize", json!({ "capabilities": {} })).await;
     let capabilities = &capabilities["capabilities"];
 
@@ -159,7 +38,7 @@ async fn initialize_advertises_the_implemented_capabilities() {
 
 #[tokio::test]
 async fn completion_offers_local_symbols_imports_and_builtins() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     let result = server.position_request("textDocument/completion", "main.jslt", 5, 13).await;
@@ -173,7 +52,7 @@ async fn completion_offers_local_symbols_imports_and_builtins() {
 
 #[tokio::test]
 async fn hover_describes_an_import_alias() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     let result = server.position_request("textDocument/hover", "main.jslt", 0, 25).await;
@@ -184,7 +63,7 @@ async fn hover_describes_an_import_alias() {
 
 #[tokio::test]
 async fn signature_help_reports_the_active_parameter() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("utils.jslt", UTILS_JSLT).await;
 
     // Inside `double(.value)` on the final line.
@@ -197,7 +76,7 @@ async fn signature_help_reports_the_active_parameter() {
 
 #[tokio::test]
 async fn definition_jumps_into_the_imported_module() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     // Cursor on the `double` half of `utils:double`.
@@ -210,7 +89,7 @@ async fn definition_jumps_into_the_imported_module() {
 
 #[tokio::test]
 async fn definition_on_the_alias_half_opens_the_module_file() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     // Cursor on the `utils` half of `utils:double`.
@@ -222,7 +101,7 @@ async fn definition_on_the_alias_half_opens_the_module_file() {
 
 #[tokio::test]
 async fn references_span_the_declaring_and_importing_files() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("utils.jslt", UTILS_JSLT).await;
 
     // Cursor on `double` in `def double(x)`.
@@ -245,7 +124,7 @@ async fn references_span_the_declaring_and_importing_files() {
 
 #[tokio::test]
 async fn prepare_rename_selects_just_the_alias_identifier() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     let result = server.position_request("textDocument/prepareRename", "main.jslt", 0, 25).await;
@@ -257,7 +136,7 @@ async fn prepare_rename_selects_just_the_alias_identifier() {
 
 #[tokio::test]
 async fn renaming_an_alias_leaves_the_path_and_function_names_alone() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     let uri = server.uri("main.jslt");
@@ -305,7 +184,7 @@ async fn renaming_an_alias_leaves_the_path_and_function_names_alone() {
 
 #[tokio::test]
 async fn renaming_an_exported_def_updates_importing_files() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("utils.jslt", UTILS_JSLT).await;
 
     let utils_uri = server.uri("utils.jslt");
@@ -342,7 +221,7 @@ async fn renaming_an_exported_def_updates_importing_files() {
 
 #[tokio::test]
 async fn renaming_from_a_call_site_renames_the_imported_definition() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     let main_uri = server.uri("main.jslt");
@@ -365,7 +244,7 @@ async fn renaming_from_a_call_site_renames_the_imported_definition() {
 
 #[tokio::test]
 async fn rename_rejects_invalid_identifiers() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", MAIN_JSLT).await;
 
     let uri = server.uri("main.jslt");
@@ -385,7 +264,7 @@ async fn rename_rejects_invalid_identifiers() {
 
 #[tokio::test]
 async fn formatting_returns_edits_for_unformatted_source() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
     server.open("main.jslt", "{\"a\"   :    1}\n").await;
 
     let uri = server.uri("main.jslt");
@@ -406,7 +285,7 @@ async fn formatting_returns_edits_for_unformatted_source() {
 
 #[tokio::test]
 async fn handlers_stay_quiet_on_unopened_and_malformed_documents() {
-    let mut server = TestServer::start().await;
+    let mut server = fixture_server().await;
 
     // Never opened.
     let result = server.position_request("textDocument/hover", "main.jslt", 0, 0).await;

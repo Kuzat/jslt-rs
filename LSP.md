@@ -5,12 +5,41 @@
 Deliver a modern, full-featured JSLT language server with the same baseline developer experience users expect from
 mature LSP servers (navigation, editing intelligence, refactoring, semantic highlighting, and workspace-aware tooling).
 
-## Current Baseline (as of 2026-02-18)
+## Current Baseline (as of 2026-08-19)
 
-- Implemented: push diagnostics (`didOpen`/`didChange`), import-not-found diagnostics, binder/parser diagnostics, full
-  document formatting.
-- Not yet implemented: completion, hover, signature help, go-to-definition, references, rename, symbols, semantic
-  tokens, code actions, inlay hints, folding, selection ranges, call hierarchy, workspace search.
+Milestone A is complete. See [Supported capabilities](#supported-capabilities) for the shipped surface and
+[Known gaps](#known-gaps) for what is deliberately still missing.
+
+### Supported capabilities
+
+| Capability | Method | Notes |
+| --- | --- | --- |
+| Diagnostics | `textDocument/publishDiagnostics` | Push on `didOpen`/`didChange`; parse, binder, import-not-found, and module errors |
+| Formatting | `textDocument/formatting` | Whole document, honours `.jsltfmt` |
+| Completion | `textDocument/completion`, `completionItem/resolve` | In-scope symbols, import aliases, stdlib builtins, keywords; triggers on `.`, `$`, `"`, `:` |
+| Hover | `textDocument/hover` | Local symbols, import aliases, stdlib signatures and docs |
+| Signature help | `textDocument/signatureHelp` | Active-parameter tracking through nested calls |
+| Go to definition | `textDocument/definition` | Local symbols; `alias:function` resolves into the imported module, the alias half opens the module file |
+| References | `textDocument/references` | Includes `alias:function` call sites in every importing file |
+| Rename | `textDocument/prepareRename`, `textDocument/rename` | Workspace edits across importers; alias renames touch only the alias identifier |
+
+Cross-file features are backed by a workspace index built from `workspaceFolders` (falling back to `rootUri`) at
+`initialized`. Entries are keyed by canonicalized URI so an open buffer and an import-resolved path are the same file.
+Discovery is bounded to 2,000 files and 16 directory levels, and skips `target`, `node_modules`, `dist`, `build`, and
+dot-directories. Editor buffers take precedence over disk content until the document is closed.
+
+Module resolution roots are configurable — see [docs/lsp-config.md](docs/lsp-config.md).
+
+### Known gaps
+
+- Document and workspace symbols, semantic tokens, code actions, document highlight, range/on-type formatting
+  (Milestone B).
+- Folding ranges, selection ranges, inlay hints, call hierarchy, document links, file-operation awareness
+  (Milestone C).
+- No `workspace/didChangeWatchedFiles` handling: files changed outside the editor are only picked up when opened or
+  when the server restarts.
+- No incremental text sync; the server requests full document sync.
+- Comments are not preserved by the formatter (the parser does not collect trivia yet).
 
 ## Design Principles
 
@@ -282,7 +311,7 @@ mature LSP servers (navigation, editing intelligence, refactoring, semantic high
 
 ## Suggested Delivery Milestones
 
-### Milestone A (Core IDE, must-have)
+### Milestone A (Core IDE, must-have) — shipped
 
 - F0, F1
 - Completion
@@ -319,6 +348,36 @@ mature LSP servers (navigation, editing intelligence, refactoring, semantic high
 - Golden tests for semantic tokens and code actions.
 - Workspace integration tests with multi-file import graphs and rename scenarios.
 - Performance checks on large synthetic workspace (latency and memory thresholds).
+
+### Running the tests
+
+```bash
+# Unit tests plus protocol-level integration tests over a two-file workspace.
+cargo test -p jslt-lsp
+
+# Performance harness: 500-def document and a 60-module workspace. Ignored by
+# default because it asserts on wall-clock time.
+cargo test -p jslt-lsp --test perf_tests --release -- --ignored --nocapture
+```
+
+Request latency is traced per method; run the server with `RUST_LOG=jslt_lsp=debug` to see it.
+
+### Editor smoke checklist
+
+Run through this against a multi-module sample workspace before cutting a release:
+
+1. Open a file with a syntax error — diagnostics appear, and disappear once fixed.
+2. Format the document — output is stable when formatted twice.
+3. Type `.` and `$` — completion offers members, in-scope variables, and stdlib builtins.
+4. Hover a stdlib call and an import alias — signature/doc and module path show.
+5. Start typing call arguments — signature help highlights the active parameter.
+6. Go to definition on a local `def`, on `alias:function`, and on the alias half — the last opens the module file.
+7. Find references on an exported `def` — call sites in importing files are listed.
+8. Rename that `def` — every importer is updated; rename the alias — only the alias identifier changes.
+9. Edit an imported module without saving — cross-file results reflect the unsaved buffer.
+10. Close the modified module without saving — cross-file results fall back to disk content.
+
+Baseline clients: VS Code (via `editors/vscode`) and Neovim's built-in LSP client.
 
 ## Observability and Quality Gates
 

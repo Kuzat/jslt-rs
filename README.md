@@ -257,6 +257,8 @@ This project is organized as a Rust workspace with the following crates and dire
 - `crates/stdlib/` - Built-in functions registry and implementations (45+ functions)
 - `crates/engine/` - Public API for compile/apply operations
 - `crates/cli/` - Command-line interface
+- `crates/formatter/` - JSLT code formatter
+- `crates/lsp/` - Language server (diagnostics, formatting, navigation, rename)
 - `crates/wasm/` - wasm-bindgen wrapper for browser/WASM deployment
 
 **Additional directories:**
@@ -278,10 +280,12 @@ This project is in active development with most core features completed:
 - CI/CD pipeline with automated builds and deployments
 - Module import system design 
 - CLI improvements (pretty printing, eval mode)
+- Language server with diagnostics, formatting, completion, hover, signature help, and workspace-aware
+  go-to-definition, references, and rename (see [LSP.md](LSP.md))
 
 🚧 **In Progress:**
 - Error message polish and code frame display
-- Language Server Protocol (LSP) support
+- Language server: document/workspace symbols, semantic tokens, and code actions
 
 📋 **Planned:**
 - Node.js, JVM, Python bindings

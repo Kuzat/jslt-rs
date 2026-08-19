@@ -1,5 +1,5 @@
 use tower_lsp::lsp_types::{
-    OneOf, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionOptions, OneOf, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
 pub(crate) fn build_server_capabilities() -> ServerCapabilities {
@@ -9,6 +9,17 @@ pub(crate) fn build_server_capabilities() -> ServerCapabilities {
 
         // Code formatting support.
         document_formatting_provider: Some(OneOf::Left(true)),
+
+        completion_provider: Some(CompletionOptions {
+            resolve_provider: Some(true),
+            trigger_characters: Some(vec![
+                ".".to_string(),
+                "$".to_string(),
+                "\"".to_string(),
+                ":".to_string(),
+            ]),
+            ..Default::default()
+        }),
 
         // Add more capabilities here as we implement features.
         ..Default::default()

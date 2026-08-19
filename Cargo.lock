@@ -789,6 +789,7 @@ dependencies = [
  "parser",
  "serde",
  "serde_json",
+ "stdlib",
  "tokio",
  "toml",
  "tower-lsp",

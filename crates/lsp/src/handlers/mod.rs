@@ -1,3 +1,4 @@
+mod completion;
 mod documents;
 mod formatting;
 mod lifecycle;
@@ -36,5 +37,13 @@ impl LanguageServer for JsltLanguageServer {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         formatting::formatting(self, params).await
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        completion::completion(self, params).await
+    }
+
+    async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
+        completion::completion_resolve(self, params).await
     }
 }

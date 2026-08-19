@@ -1,4 +1,5 @@
 mod completion;
+mod definition;
 mod documents;
 mod formatting;
 mod hover;
@@ -54,5 +55,12 @@ impl LanguageServer for JsltLanguageServer {
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         hover::signature_help(self, params).await
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        definition::definition(self, params).await
     }
 }

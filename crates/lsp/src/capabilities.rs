@@ -27,6 +27,7 @@ pub(crate) fn build_server_capabilities() -> ServerCapabilities {
             retrigger_characters: Some(vec![",".to_string()]),
             ..Default::default()
         }),
+        definition_provider: Some(OneOf::Left(true)),
 
         // Add more capabilities here as we implement features.
         ..Default::default()

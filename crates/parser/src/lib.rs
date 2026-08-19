@@ -897,7 +897,7 @@ impl<'a> Parser<'a> {
                 // per spec, identifiers alone are not variables (only $ident)
                 // We still allow bare ident as "function refernce" primary so call can follow.
                 if let Token::Ident(name) = &self.cur.tok {
-                    let s = self.cur.span;
+                    let mut s = self.cur.span;
                     let mut v = name.clone();
                     self.bump()?;
 
@@ -906,6 +906,9 @@ impl<'a> Parser<'a> {
                         v.push(':');
                         let ident = self.expect_ident()?;
                         v.push_str(&ident.name);
+                        // Keep the span over the whole `prefix:name` so tooling
+                        // can highlight and rename either half.
+                        s = Span::join(s, ident.span);
                     }
 
                     Ok(Expr::FunctionRef { name: v, span: s })
@@ -1453,5 +1456,22 @@ let nested = [for ($obj)
             eprintln!("Parse error: {:?}", e);
         }
         assert!(res.is_ok(), "expected parsing to succeed");
+    }
+
+    #[test]
+    fn qualified_function_ref_span_covers_both_halves() {
+        let input = "utils:double(.n)";
+        let mut parser = Parser::new(input).expect("lexer should initialize");
+        let program = parser.parse_program().expect("expected parsing to succeed");
+
+        let Some(Expr::Call { callee, .. }) = program.body.as_ref() else {
+            panic!("expected a call, got {:?}", program.body);
+        };
+        let Expr::FunctionRef { name, span } = callee.as_ref() else {
+            panic!("expected a function reference, got {:?}", callee);
+        };
+
+        assert_eq!(name, "utils:double");
+        assert_eq!(&input[span.start..span.end], "utils:double");
     }
 }

@@ -16,6 +16,18 @@ pub(crate) struct QualifiedRef {
     pub(crate) function_span: Span,
 }
 
+impl QualifiedRef {
+    /// The full `alias:function` span this reference was split from.
+    pub(crate) fn span(&self) -> Span {
+        Span {
+            start: self.alias_span.start,
+            end: self.function_span.end,
+            line: self.alias_span.line,
+            column: self.alias_span.column,
+        }
+    }
+}
+
 /// Split a reference span into alias and function parts.
 ///
 /// Aliases may themselves contain `:` (`import "x.jslt" as a:b`), so the

@@ -1,8 +1,10 @@
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{Location, Range, ReferenceParams};
+use tower_lsp::lsp_types::{Location, Range, ReferenceParams, Url};
 
 use crate::JsltLanguageServer;
-use crate::context::{AnalysisSnapshot, Symbol, byte_offset_to_position};
+use crate::context::{AnalysisSnapshot, ScopeId, Symbol, SymbolKind, byte_offset_to_position};
+use crate::naming::split_qualified;
+use crate::workspace::IndexedFile;
 
 pub(crate) async fn references(
     server: &JsltLanguageServer,
@@ -27,9 +29,11 @@ pub(crate) async fn references(
 
     let mut locations =
         symbol_locations(&snapshot, &uri, symbol, params.context.include_declaration);
+    locations.extend(imported_usages(server, &uri, symbol).await);
 
     locations.sort_by_key(|loc| {
         (
+            loc.uri.to_string(),
             loc.range.start.line,
             loc.range.start.character,
             loc.range.end.line,
@@ -64,6 +68,57 @@ pub(crate) fn symbol_locations(
     }
 
     out
+}
+
+/// Usages of an exported `def` in files that import it.
+async fn imported_usages(server: &JsltLanguageServer, uri: &Url, symbol: &Symbol) -> Vec<Location> {
+    if !is_exported_function(symbol) {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for (dependent_uri, alias) in server.dependents_of(uri).await {
+        let Some(file) = server.indexed_file(&dependent_uri).await else {
+            continue;
+        };
+
+        for usage in qualified_usages(&file, &alias, &symbol.name) {
+            out.push(Location {
+                uri: file.uri.clone(),
+                range: span_to_range(&file.snapshot.text, usage.span()),
+            });
+        }
+    }
+    out
+}
+
+/// Whether this symbol is a top-level `def`, i.e. callable by importers.
+pub(crate) fn is_exported_function(symbol: &Symbol) -> bool {
+    symbol.kind == SymbolKind::Function && symbol.scope == ScopeId(0)
+}
+
+/// Every `alias:function` reference in `file` naming this imported function.
+pub(crate) fn qualified_usages(
+    file: &IndexedFile,
+    alias: &str,
+    function: &str,
+) -> Vec<crate::naming::QualifiedRef> {
+    let aliases = file.snapshot.import_aliases();
+    let Some(alias_symbol) = file
+        .snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.kind == SymbolKind::ImportAlias && symbol.name == alias)
+    else {
+        return Vec::new();
+    };
+
+    alias_symbol
+        .references
+        .iter()
+        .filter_map(|span| split_qualified(&file.snapshot.text, *span, &aliases))
+        .filter(|usage| usage.alias == alias && usage.function == function)
+        .collect()
 }
 
 pub(crate) fn span_to_range(text: &str, span: ast::Span) -> Range {

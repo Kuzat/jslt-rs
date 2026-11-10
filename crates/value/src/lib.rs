@@ -92,6 +92,14 @@ impl JsltValue {
     }
 
     // Numeric helper: reject NaN/Inf as per spec intent
+    /// Returns the value as `i64` if it is an integer number (not a float like `1.0`).
+    pub fn as_i64(&self) -> Option<i64> {
+        match self.0.as_ref() {
+            Value::Number(n) => n.as_i64(),
+            _ => None,
+        }
+    }
+
     pub fn as_f64_checked(&self) -> Option<f64> {
         match self.0.as_ref() {
             Value::Number(n) => n.as_f64().and_then(|f| if f.is_finite() { Some(f) } else { None }),

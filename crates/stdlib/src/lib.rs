@@ -342,36 +342,71 @@ impl JsltFunction for NumberFn {
         self.arity().check(args.len())?;
         let v = &args[0];
         let fallback = args.get(1);
-        // null => null
-        if v.is_null() {
-            return Ok(JsltValue::null());
-        }
-        // numbers => as-is
         if v.is_number() {
             return Ok(v.clone());
         }
-        // strings => parse (allow leading zeros)
-        if let Some(s) = v.as_json().as_str() {
-            let s_trim = s.trim();
-            match s_trim.parse::<f64>() {
-                Ok(n) => Ok(JsltValue::number_f64(n)),
-                Err(_) => {
-                    if let Some(fb) = fallback {
-                        Ok(fb.clone())
-                    } else {
-                        Err(StdlibError::Type("number: cannot parse string to number".to_string()))
-                    }
-                }
-            }
-        } else {
-            // wrong type
-            if let Some(fb) = fallback {
-                Ok(fb.clone())
-            } else {
-                Err(StdlibError::Type(format!("number: unsupported type {}", v.type_of())))
-            }
+        if v.is_null() {
+            return Ok(fallback.cloned().unwrap_or_else(JsltValue::null));
+        }
+        let Some(s) = v.as_json().as_str() else {
+            return match fallback {
+                Some(fb) => Ok(fb.clone()),
+                None => Err(StdlibError::Type(format!(
+                    "number: can't convert {} to number",
+                    v.type_of()
+                ))),
+            };
+        };
+        match (parse_number(s), fallback) {
+            (Some(n), _) => Ok(n),
+            (None, Some(fb)) => Ok(fb.clone()),
+            (None, None) => Err(StdlibError::Type(format!("number({s}) failed: not a number"))),
         }
     }
+}
+
+/// Parses a number with the same grammar as the Java implementation:
+/// `-? digits* ('.' digits+)? ([eE] [+-]? digits+)?`. Digit-only input becomes an
+/// integer; anything with a fraction or exponent becomes a float.
+fn parse_number(s: &str) -> Option<JsltValue> {
+    let b = s.as_bytes();
+    let digits_end =
+        |from: usize| from + b[from..].iter().take_while(|c| c.is_ascii_digit()).count();
+
+    let mut pos = usize::from(b.first() == Some(&b'-'));
+    let int_end = digits_end(pos);
+    if int_end == b.len() {
+        if int_end == pos {
+            return None;
+        }
+        return Some(match s.parse::<i64>() {
+            Ok(i) => JsltValue::number_i64(i),
+            Err(_) => JsltValue::number_f64(s.parse::<f64>().ok()?),
+        });
+    }
+    pos = int_end;
+    if b[pos] == b'.' {
+        let frac_end = digits_end(pos + 1);
+        if frac_end == pos + 1 {
+            return None;
+        }
+        pos = frac_end;
+    }
+    if pos < b.len() {
+        if b[pos] != b'e' && b[pos] != b'E' {
+            return None;
+        }
+        pos += 1;
+        if matches!(b.get(pos), Some(b'+' | b'-')) {
+            pos += 1;
+        }
+        let exp_end = digits_end(pos);
+        if exp_end == pos || exp_end != b.len() {
+            return None;
+        }
+    }
+    let f = s.parse::<f64>().ok().filter(|f| f.is_finite())?;
+    Some(JsltValue::number_f64(f))
 }
 
 struct BooleanFn;
@@ -1001,7 +1036,10 @@ impl JsltFunction for SumFn {
 
         if any_float {
             let total = float_acc + int_acc as f64;
-            Ok(JsltValue::number(total))
+            if !total.is_finite() {
+                return Err(StdlibError::Type("sum: result is not a finite number".to_string()));
+            }
+            Ok(JsltValue::number_f64(total))
         } else if int_acc >= i64::MIN as i128 && int_acc <= i64::MAX as i128 {
             Ok(JsltValue::number_i64(int_acc as i64))
         } else {
@@ -1931,9 +1969,10 @@ mod tests {
     #[test]
     fn number_parses_and_respects_fallback() {
         let f = NumberFn;
-        // parse numeric string
-        let ok = f.call(&[j(json!("  42 "))]).unwrap();
-        assert_eq!(ok, JsltValue::number_f64(42.0));
+        // parse numeric string; surrounding whitespace is not allowed
+        let ok = f.call(&[j(json!("42"))]).unwrap();
+        assert_eq!(ok, JsltValue::number_i64(42));
+        assert!(f.call(&[j(json!("  42 "))]).is_err());
 
         // preserve numbers
         let ok2 = f.call(&[j(json!(4.14))]).unwrap();
@@ -1946,7 +1985,7 @@ mod tests {
         // bad string without fallback => error
         let err = f.call(&[j(json!("nope"))]).unwrap_err();
         match err {
-            StdlibError::Type(msg) => assert!(msg.contains("cannot parse")),
+            StdlibError::Type(msg) => assert!(msg.contains("not a number")),
             _ => panic!("wrong err"),
         }
 
@@ -2031,9 +2070,10 @@ mod tests {
     }
 
     #[test]
-    fn sum_with_float_summing_to_int_result_should_return_int() {
+    fn sum_with_floats_returns_float_even_if_whole() {
         let arr = j(json!([1.5, 1.5]));
         let out = SumFn.call(&[arr]).unwrap();
-        assert_eq!(out, j(json!(3)));
+        assert_eq!(out.as_json(), &json!(3.0));
+        assert!(out.as_i64().is_none());
     }
 }

@@ -29,8 +29,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y hyperfine jq default-jdk
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust (version from rust-toolchain.toml)
+        run: rustup toolchain install
 
       - name: Run bench suite
         id: bench

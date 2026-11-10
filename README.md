@@ -8,6 +8,11 @@ A Rust implementation of the [JSLT](https://github.com/schibsted/jslt) (JSON Sel
 
 This is a workspace-based Rust project. To build:
 
+The Rust version is pinned in `rust-toolchain.toml`, and CI uses the same file, so local
+`cargo clippy` gives the same lints as CI. `rustup` picks it up automatically (run
+`rustup toolchain install` if it is not installed yet). To upgrade Rust, change the version in
+that file and fix any new lints in the same PR.
+
 ```bash
 # Check all crates for compilation errors
 cargo check --workspace

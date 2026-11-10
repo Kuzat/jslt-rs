@@ -2,46 +2,38 @@
 # crates/engine/tests/upstream_tests.rs; regenerate with:
 #   UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests
 #
-# query-tests.json                    114/148 
+# query-tests.json                    122/148 
 # query-tests.yaml                     10/45  
-# function-tests.json                 258/278 
+# function-tests.json                 267/278 
 # experimental-tests.json               0/8   
 # function-declaration-tests.yaml      16/24  
 # query-error-tests.json               19/22  
-# function-error-tests.json            37/42  
+# function-error-tests.json            40/42  
 # json-parse-tests.json                44/44  
 # json-parse-error-tests.json          13/13  
-# TOTAL                               511/624  (81.9%)
+# TOTAL                               531/624  (85.1%)
 
 query-tests.json#10  # .foo or false => expected true, got "bar"
 query-tests.json#16  # "foo" + null => expected "foonull", got error: runtime error: type error at Span { start: 0, end: 12, line: 1, colum…
-query-tests.json#18  # [for (split("1,2,3,4", ",")) { "number" : number(.) }] => expected [{"number":1},{"number":2},{"number":3},{"number":4}], got [{"number":1.0},{"number":2.0},{…
 query-tests.json#19  # [for (null) number(.)] => expected null, got []
 query-tests.json#21  # .foo // comment and false => expected false, got null
-query-tests.json#34  # [for (.) number(.)] => expected [1,2,3], got [1.0,2.0,3.0]
-query-tests.json#43  # 2.2 + 1.8 => expected 4.0, got 4
 query-tests.json#44  # 2 >= null => expected true, got error: runtime error: type error at Span { start: 0, end: 9, line: 1, column: 1 }…
 query-tests.json#53  # $foo => external variables are not supported
 query-tests.json#57  # 2 + null => expected null, got error: runtime error: type error at Span { start: 0, end: 8, line: 1, column: 1 }…
 query-tests.json#62  # 2 > null => expected true, got error: runtime error: type error at Span { start: 0, end: 8, line: 1, column: 1 }…
 query-tests.json#65  # .foo and true and 22 => expected true, got 22
-query-tests.json#68  # 2.5 * 4.0 => expected 10.0, got 10
 query-tests.json#77  # "foo" * 3 => expected "foofoofoo", got error: runtime error: type error at Span { start: 0, end: 9, line: 1, colu…
 query-tests.json#80  # null >= 2 => expected false, got error: runtime error: type error at Span { start: 0, end: 9, line: 1, column: 1 …
 query-tests.json#81  # 2 - null => expected null, got error: runtime error: type error at Span { start: 0, end: 8, line: 1, column: 1 }…
 query-tests.json#89  # number( $num ) => external variables are not supported
 query-tests.json#90  # null > 2 => expected false, got error: runtime error: type error at Span { start: 0, end: 8, line: 1, column: 1 …
 query-tests.json#92  # .foo and false or .bar and true => expected false, got null
-query-tests.json#93  # 2.5 * 4 => expected 10.0, got 10
-query-tests.json#94  # number("22") => expected 22, got 22.0
 query-tests.json#100  # false or .foo => expected true, got "bar"
 query-tests.json#102  # null >= null => expected true, got error: runtime error: type error at Span { start: 0, end: 12, line: 1, column: 1 …
 query-tests.json#110  # 2.5 * null => expected null, got error: runtime error: type error at Span { start: 0, end: 10, line: 1, column: 1 …
 query-tests.json#113  # .foo or true => expected true, got "bar"
 query-tests.json#119  # null > null => expected false, got error: runtime error: type error at Span { start: 0, end: 11, line: 1, column: 1…
 query-tests.json#125  # [for (.) let v = . $v] => expected [{"key":"foo","value":1},{"key":"bar","value":2}], got [{"key":"bar","value":2},{"key":"foo…
-query-tests.json#127  # 5 * 2.5 * 4 => expected 50.0, got 50
-query-tests.json#129  # 5 + 2.5 + 4 + 3 + 1.5 => expected 16.0, got 16
 query-tests.json#135  # let x = 1 ["h" + $x + 1] => expected ["h11"], got null
 query-tests.json#137  # [for (.) .] => expected [{"key":"foo","value":1},{"key":"bar","value":2}], got [{"key":"bar","value":2},{"key":"foo…
 query-tests.json#138  # {for (.foo) .key : .value} => expected null, got {}
@@ -91,15 +83,6 @@ function-tests.json#35  # format-time(., "yyyy-MM-dd HH:mm:ssz", "CET") => expec
 function-tests.json#36  # format-time(., "yyyy-MM-dd HH:mm:ssz") => expected "1973-12-25 04:21:33UTC", got "1973-12-25 04:21:33z"
 function-tests.json#87  # round(parse-time(., "yyyy-MM-dd HH:mm:ss.S") * 100) => expected 12564129312, got error: runtime error: internal error: builtin `parse-time` failed: parse-t…
 function-tests.json#104  # fallback(22, true + not(false)) => expected 22, got error: runtime error: type error at Span { start: 13, end: 30, line: 1, column: 14 …
-function-tests.json#126  # [for (split("1,2,3,4", ",")) { "number" : number(.) }] => expected [{"number":1},{"number":2},{"number":3},{"number":4}], got [{"number":1.0},{"number":2.0},{…
-function-tests.json#129  # number(null, 243) => expected 243, got null
-function-tests.json#130  # number("42") => expected 42, got 42.0
-function-tests.json#137  # number("01") => expected 1, got 1.0
-function-tests.json#139  # number("-10") => expected -10, got -10.0
-function-tests.json#155  # number("0") => expected 0, got 0.0
-function-tests.json#158  # number("1534663342000") => expected 1534663342000, got 1534663342000.0
-function-tests.json#159  # number("-1534663342000") => expected -1534663342000, got -1534663342000.0
-function-tests.json#163  # number("-72915539138.234933") => expected -72915539138.23492, got -72915539138.23494
 function-tests.json#241  # uuid(null, 9223372036854775807) => expected "00000000-0000-1000-bfff-ffffffffffff", got error: runtime error: type error at Span { star…
 function-tests.json#242  # uuid(9223372036854775807, null) => expected "7fffffff-ffff-1fff-8000-000000000000", got error: runtime error: type error at Span { star…
 experimental-tests.json#0  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [], got error: module errors: imported module not found: http://jslt.schibsted.com/2018/exp…
@@ -121,8 +104,5 @@ function-declaration-tests.yaml#22  # let other = 5 let other = 2 $other + 5 => 
 query-error-tests.json#0  # [for (32323) number(.)] => expected error containing "loop", got []
 query-error-tests.json#5  # .[7] => expected error containing "index", got null
 query-error-tests.json#15  # def func1(o) { * : . } func1(.) => expected error containing "matcher", got {}
-function-error-tests.json#11  # number("123.") => expected error containing "not a number", got 123.0
-function-error-tests.json#14  # number("-NaN") => panic: called `Option::unwrap()` on a `None` value
-function-error-tests.json#16  # number("Infinity") => panic: called `Option::unwrap()` on a `None` value
 function-error-tests.json#20  # format-time(125641293.0, "yyyy-MM-dd dfkdfjkdf HH:mm:ss") => expected error containing "Couldn't parse format", got "1973-12-25 25fk25fjk25f 04:21:33"
 function-error-tests.json#23  # parse-time("1973-12-25 05:22:33", "yyyy-MM-dd gnugugg HH:mm:… => expected error containing "Couldn't parse format", got null

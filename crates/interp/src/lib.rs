@@ -400,23 +400,30 @@ impl<'p> Evaluator<'p> {
             }
             Neg(inner, sp) => {
                 let v = self.eval_expr(inner)?;
+                if let Some(i) = v.as_i64() {
+                    return Ok(JsltValue::number_i64(i.wrapping_neg()));
+                }
                 let n = v.as_f64_checked().ok_or_else(|| RuntimeError::TypeError {
                     msg: "unary '-' expects number".into(),
                     span: *sp,
                 })?;
-                let res = -n;
-                if !res.is_finite() {
-                    return Err(RuntimeError::NonFiniteNumber { span: *sp });
-                }
-                Ok(JsltValue::number(res))
+                Ok(JsltValue::number_f64(-n))
             }
 
             Add(l, r, sp) => self.eval_add(l, r, *sp),
-            Sub(l, r, sp) => self.eval_num_binop(l, r, *sp, |a, b| a - b),
-            Mul(l, r, sp) => self.eval_num_binop(l, r, *sp, |a, b| a * b),
+            Sub(l, r, sp) => self.eval_num_binop(l, r, *sp, i64::wrapping_sub, |a, b| a - b),
+            Mul(l, r, sp) => self.eval_num_binop(l, r, *sp, i64::wrapping_mul, |a, b| a * b),
             Div(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
+                if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
+                    if b == 0 {
+                        return Err(RuntimeError::DivByZero { span: *sp });
+                    }
+                    if a.wrapping_rem(b) == 0 {
+                        return Ok(JsltValue::number_i64(a.wrapping_div(b)));
+                    }
+                }
                 let a = lv.as_f64_checked().ok_or_else(|| RuntimeError::TypeError {
                     msg: "division expects number".into(),
                     span: *sp,
@@ -432,11 +439,17 @@ impl<'p> Evaluator<'p> {
                 if !res.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
                 }
-                Ok(JsltValue::number(res))
+                Ok(JsltValue::number_f64(res))
             }
             Mod(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
+                if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
+                    if b == 0 {
+                        return Err(RuntimeError::DivByZero { span: *sp });
+                    }
+                    return Ok(JsltValue::number_i64(a.wrapping_rem(b)));
+                }
                 let a = lv.as_f64_checked().ok_or_else(|| RuntimeError::TypeError {
                     msg: "modulo expects number".into(),
                     span: *sp,
@@ -452,7 +465,7 @@ impl<'p> Evaluator<'p> {
                 if !res.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
                 }
-                Ok(JsltValue::number(res))
+                Ok(JsltValue::number_f64(res))
             }
 
             Eq(l, r, _) => {
@@ -775,13 +788,8 @@ impl<'p> Evaluator<'p> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
         match (lv.as_json(), rv.as_json()) {
-            (Value::Number(a), Value::Number(b)) => {
-                let (af, bf) = (a.as_f64().unwrap(), b.as_f64().unwrap());
-                let res = af + bf;
-                if !res.is_finite() {
-                    return Err(RuntimeError::NonFiniteNumber { span });
-                }
-                Ok(JsltValue::number(res))
+            (Value::Number(_), Value::Number(_)) => {
+                numeric_op(&lv, &rv, span, i64::wrapping_add, |a, b| a + b)
             }
             (Value::String(a), Value::String(b)) => {
                 let mut s = String::with_capacity(a.len() + b.len());
@@ -828,23 +836,12 @@ impl<'p> Evaluator<'p> {
         l: &BoundExpr,
         r: &BoundExpr,
         span: Span,
-        op: impl FnOnce(f64, f64) -> f64,
+        int_op: fn(i64, i64) -> i64,
+        float_op: fn(f64, f64) -> f64,
     ) -> Result<JsltValue, RuntimeError> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
-        let a = lv.as_f64_checked().ok_or_else(|| RuntimeError::TypeError {
-            msg: "numeric operation expects number".into(),
-            span,
-        })?;
-        let b = rv.as_f64_checked().ok_or_else(|| RuntimeError::TypeError {
-            msg: "numeric operation expects number".into(),
-            span,
-        })?;
-        let res = op(a, b);
-        if !res.is_finite() {
-            return Err(RuntimeError::NonFiniteNumber { span });
-        }
-        Ok(JsltValue::number(res))
+        numeric_op(&lv, &rv, span, int_op, float_op)
     }
 
     fn eval_cmp(
@@ -1127,6 +1124,28 @@ fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> Runtim
             RuntimeError::Internal(format!("builtin `{}` failed: {}", fname, msg))
         }
     }
+}
+
+/// Integer operands use (wrapping, like Java `long`) integer math; anything else uses f64.
+fn numeric_op(
+    lv: &JsltValue,
+    rv: &JsltValue,
+    span: Span,
+    int_op: fn(i64, i64) -> i64,
+    float_op: fn(f64, f64) -> f64,
+) -> Result<JsltValue, RuntimeError> {
+    if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
+        return Ok(JsltValue::number_i64(int_op(a, b)));
+    }
+    let expect_num =
+        || RuntimeError::TypeError { msg: "numeric operation expects number".into(), span };
+    let a = lv.as_f64_checked().ok_or_else(expect_num)?;
+    let b = rv.as_f64_checked().ok_or_else(expect_num)?;
+    let res = float_op(a, b);
+    if !res.is_finite() {
+        return Err(RuntimeError::NonFiniteNumber { span });
+    }
+    Ok(JsltValue::number_f64(res))
 }
 
 #[cfg(test)]

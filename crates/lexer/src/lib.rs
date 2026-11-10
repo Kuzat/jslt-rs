@@ -181,7 +181,7 @@ impl<'a> Lexer<'a> {
 
         let mut content = String::new();
         while let Some(ch) = self.peek_char() {
-            if ch == '\n' {
+            if ch == '\n' || ch == '\r' {
                 break;
             }
             content.push(ch);
@@ -891,6 +891,23 @@ mod tests {
             toks_with_comments,
             vec![Token::NumberInt(1), Token::Comment(" tail".to_string()), Token::Eof]
         );
+    }
+
+    #[test]
+    fn comments_end_at_crlf_and_lone_cr() {
+        for src in ["1 // comment\r\n2", "1 // comment\r2"] {
+            let toks = collect_tokens(Lexer::new(src));
+            assert_eq!(
+                toks,
+                vec![
+                    Token::NumberInt(1),
+                    Token::Comment(" comment".to_string()),
+                    Token::NumberInt(2),
+                    Token::Eof
+                ],
+                "source: {src:?}"
+            );
+        }
     }
 
     #[test]

@@ -72,7 +72,11 @@ fn normalize(v: &Value) -> Value {
 
 fn run_jslt(query: &str, input: &Value) -> Result<Result<Value, String>, String> {
     panic::catch_unwind(AssertUnwindSafe(|| {
-        engine::compile(query).and_then(|p| p.apply(input, None)).map_err(|e| e.to_string())
+        // Upstream fixtures import modules relative to the resources directory.
+        let main_path = resources_dir().join("main.jslt");
+        engine::compile_with_import_path(query, &main_path.to_string_lossy())
+            .and_then(|p| p.apply(input, None))
+            .map_err(|e| e.to_string())
     }))
     .map_err(|p| {
         let msg = p

@@ -75,6 +75,30 @@ cargo test -p engine --test conformance_tests
 ./conformance/scripts/regenerate_expected.sh
 ```
 
+### Upstream Java JSLT test suites
+
+`crates/engine/tests/upstream_tests.rs` runs the data-driven suites from the
+Java implementation (`java-jslt/core/src/test/resources/*.json` and `*.yaml`)
+against the Rust engine. Outputs are compared the way the Java runner does:
+`1` and `1.0` are different values, and object key order is ignored. Error tests
+check only that an error is raised, not what the error message says.
+
+Cases that fail today are listed in `conformance/upstream-known-failures.txt`.
+The header of that file shows the current coverage. The test fails when:
+
+- a case that is not in the list fails (a regression), or
+- a case in the list now passes (remove it, so that coverage cannot go back down).
+
+```bash
+# Run and print coverage per suite
+cargo test -p engine --test upstream_tests -- --nocapture
+
+# Regenerate the known-failures list after fixing cases
+UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests
+```
+
+The goal is an empty known-failures file.
+
 ## Performance Benchmarks
 
 This repo includes lightweight performance checks to compare the Rust implementation against the Java reference.

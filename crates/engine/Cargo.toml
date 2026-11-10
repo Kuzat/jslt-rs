@@ -20,6 +20,7 @@ interp = { path = "../interp" }
 
 [dev-dependencies]
 tempfile = "3.8"
+yaml_serde = "0.10"
 criterion = { version = "0.7.0" }
 
 [[bench]]

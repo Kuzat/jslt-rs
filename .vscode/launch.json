@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run JSLT VS Code extension",
+      "detail": "Opens the sample workspace in an Extension Development Host.",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode",
+        "--disable-extensions",
+        "${workspaceFolder}/examples/lsp-sample"
+      ],
+      "outFiles": ["${workspaceFolder}/editors/vscode/out/**/*.js"],
+      "preLaunchTask": "build jslt vscode extension"
+    }
+  ]
+}

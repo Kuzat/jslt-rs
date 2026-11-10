@@ -1,0 +1,18 @@
+// The entry point. Module paths resolve relative to this file, so the same
+// program runs under the CLI and the language server.
+import "modules/strings.jslt" as str
+import "modules/numbers.jslt" as num
+
+let name = .user.name
+let score = .user.score
+
+def label(user)
+  str:shout($user.name)
+
+{
+  "slug": str:slug($name),
+  "label": label(.user),
+  "score": num:clamp($score, 0, 100),
+  "percent": num:percent($score, 200),
+  "tags": [for (.tags) str:slug(.)]
+}

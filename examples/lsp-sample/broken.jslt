@@ -1,0 +1,7 @@
+// Deliberately broken, to show diagnostics. Two problems:
+//   1. the imported module does not exist
+//   2. the object literal is never closed
+import "nope.jslt" as missing
+
+{
+  "oops": missing:thing(.value)

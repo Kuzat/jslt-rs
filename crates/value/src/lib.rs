@@ -102,7 +102,7 @@ impl JsltValue {
 
     pub fn as_f64_checked(&self) -> Option<f64> {
         match self.0.as_ref() {
-            Value::Number(n) => n.as_f64().and_then(|f| if f.is_finite() { Some(f) } else { None }),
+            Value::Number(n) => n.as_f64().filter(|f| f.is_finite()),
             _ => None,
         }
     }

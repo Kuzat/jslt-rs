@@ -93,7 +93,11 @@ fn check_query_case(test: &Value) -> Result<(), String> {
     if test.get("variables").is_some() {
         return Err("external variables are not supported".into());
     }
-    let input = json_field(&test["input"])?;
+    // Jackson parses an empty input as a missing node, which JSLT treats as null.
+    let input = match &test["input"] {
+        Value::String(s) if s.trim().is_empty() => Value::Null,
+        other => json_field(other)?,
+    };
     let result = run_jslt(query, &input)?;
 
     if let Some(expected_err) = test.get("error") {

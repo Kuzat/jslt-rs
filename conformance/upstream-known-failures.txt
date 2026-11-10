@@ -2,16 +2,16 @@
 # crates/engine/tests/upstream_tests.rs; regenerate with:
 #   UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests
 #
-# query-tests.json                    113/148 
+# query-tests.json                    114/148 
 # query-tests.yaml                     10/45  
-# function-tests.json                 257/278 
+# function-tests.json                 258/278 
 # experimental-tests.json               0/8   
 # function-declaration-tests.yaml      16/24  
 # query-error-tests.json               19/22  
 # function-error-tests.json            37/42  
 # json-parse-tests.json                44/44  
 # json-parse-error-tests.json          13/13  
-# TOTAL                               509/624  (81.6%)
+# TOTAL                               511/624  (81.9%)
 
 query-tests.json#10  # .foo or false => expected true, got "bar"
 query-tests.json#16  # "foo" + null => expected "foonull", got error: runtime error: type error at Span { start: 0, end: 12, line: 1, colum…
@@ -38,7 +38,6 @@ query-tests.json#100  # false or .foo => expected true, got "bar"
 query-tests.json#102  # null >= null => expected true, got error: runtime error: type error at Span { start: 0, end: 12, line: 1, column: 1 …
 query-tests.json#110  # 2.5 * null => expected null, got error: runtime error: type error at Span { start: 0, end: 10, line: 1, column: 1 …
 query-tests.json#113  # .foo or true => expected true, got "bar"
-query-tests.json#117  # .foo => bad JSON "": EOF while parsing a value at line 1 column 0
 query-tests.json#119  # null > null => expected false, got error: runtime error: type error at Span { start: 0, end: 11, line: 1, column: 1…
 query-tests.json#125  # [for (.) let v = . $v] => expected [{"key":"foo","value":1},{"key":"bar","value":2}], got [{"key":"bar","value":2},{"key":"foo…
 query-tests.json#127  # 5 * 2.5 * 4 => expected 50.0, got 50
@@ -103,7 +102,6 @@ function-tests.json#159  # number("-1534663342000") => expected -1534663342000, 
 function-tests.json#163  # number("-72915539138.234933") => expected -72915539138.23492, got -72915539138.23494
 function-tests.json#241  # uuid(null, 9223372036854775807) => expected "00000000-0000-1000-bfff-ffffffffffff", got error: runtime error: type error at Span { star…
 function-tests.json#242  # uuid(9223372036854775807, null) => expected "7fffffff-ffff-1fff-8000-000000000000", got error: runtime error: type error at Span { star…
-function-tests.json#261  # hash-int([1,2]) == hash-int([2,1]) => bad JSON "": EOF while parsing a value at line 1 column 0
 experimental-tests.json#0  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [], got error: module errors: imported module not found: http://jslt.schibsted.com/2018/exp…
 experimental-tests.json#1  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected null, got error: module errors: imported module not found: http://jslt.schibsted.com/2018/e…
 experimental-tests.json#2  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [{"key":"a","values":[1]}], got error: module errors: imported module not found: http://jsl…

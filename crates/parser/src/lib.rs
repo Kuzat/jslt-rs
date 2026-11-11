@@ -1133,14 +1133,17 @@ impl<'a> Parser<'a> {
                                 self.bump()?;
                                 ObjectKey::Ident(Ident { name, span })
                             } else {
-                                let mut key_expr = self.parse_if_or_expr()?;
+                                let key_expr = self.parse_if_or_expr()?;
                                 // A parenthesized string literal is still a static key.
-                                while let Expr::Group { expr, .. } = key_expr {
-                                    key_expr = *expr;
+                                let mut inner = &key_expr;
+                                while let Expr::Group { expr, .. } = inner {
+                                    inner = expr;
                                 }
-                                match key_expr {
-                                    Expr::String { value, span } => ObjectKey::Str { value, span },
-                                    other => ObjectKey::Expr(Box::new(other)),
+                                match inner {
+                                    Expr::String { value, span } => {
+                                        ObjectKey::Str { value: value.clone(), span: *span }
+                                    }
+                                    _ => ObjectKey::Expr(Box::new(key_expr)),
                                 }
                             };
                             let kspan = match &key {

@@ -575,4 +575,8 @@ fn test_format_computed_object_keys() {
     assert_eq!(format_source(&formatted).unwrap(), formatted);
     assert!(formatted.contains("string(.id): .v"), "{formatted}");
     assert!(formatted.contains("\"a\" + \"b\": 1"), "{formatted}");
+
+    let formatted = format_source("{(ns:key()): 1}").unwrap();
+    assert!(formatted.contains("(ns:key()): 1"), "{formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
 }

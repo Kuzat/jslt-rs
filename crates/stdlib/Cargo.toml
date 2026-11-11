@@ -7,7 +7,7 @@ license = "Apache-2.0"
 [features]
 default = ["regex", "chrono"]
 regex = ["dep:regex"]
-chrono = ["dep:chrono"]
+chrono = ["dep:chrono", "dep:chrono-tz"]
 
 [dependencies]
 serde_json = { workspace = true }
@@ -17,6 +17,7 @@ sha2 = { workspace = true }
 regex = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 value = { path = "../value" }
+chrono-tz = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true }

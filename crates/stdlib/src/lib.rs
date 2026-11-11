@@ -3,7 +3,9 @@
 mod time;
 mod url;
 
-use crate::time::{now_seconds_portable, parse_time_utc_seconds, ParseTimeErr};
+use crate::time::now_seconds_portable;
+#[cfg(feature = "chrono")]
+use crate::time::{JavaPattern, Zone};
 #[cfg(feature = "regex")]
 use regex::Regex;
 use serde_json::{from_str, to_string, Map, Value};
@@ -1741,6 +1743,25 @@ impl JsltFunction for NowFn {
     }
 }
 
+/// Java `NodeUtils.toString(node, false)`: strings as-is, anything else (null too) as JSON.
+#[cfg(feature = "chrono")]
+fn to_java_string(v: &JsltValue) -> std::borrow::Cow<'_, str> {
+    match v.as_json() {
+        Value::String(s) => std::borrow::Cow::Borrowed(s),
+        other => std::borrow::Cow::Owned(other.to_string()),
+    }
+}
+
+#[cfg(feature = "chrono")]
+/// Start of Java's two-digit year window: 80 years before now, in epoch milliseconds.
+fn two_digit_century_start_ms() -> i64 {
+    now_seconds_portable()
+        .ok()
+        .and_then(|s| chrono::DateTime::from_timestamp(s as i64, 0))
+        .and_then(|d| d.checked_sub_months(chrono::Months::new(80 * 12)))
+        .map_or(0, |d| d.timestamp_millis())
+}
+
 #[cfg(feature = "chrono")]
 struct ParseTimeFn;
 #[cfg(feature = "chrono")]
@@ -1753,57 +1774,18 @@ impl JsltFunction for ParseTimeFn {
     }
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
-        let time_v = &args[0];
-        let format_v = &args[1];
-        let fallback = args.get(2);
-
-        if time_v.is_null() {
+        let Some(text) = to_string_or_null(&args[0]) else {
             return Ok(JsltValue::null());
-        }
-
-        // Expect strings (time and format)
-        let time_s = match time_v.as_json().as_str() {
-            Some(s) => s,
-            None => {
-                return if let Some(fb) = fallback {
-                    Ok(fb.clone())
-                } else {
-                    Err(StdlibError::Type(format!(
-                        "parse-time: argument #1 must be string, got {}",
-                        time_v.type_of()
-                    )))
-                }
-            }
         };
-        let fmt_s = match format_v.as_json().as_str() {
-            Some(s) => s,
-            None => {
-                return if let Some(fb) = fallback {
-                    Ok(fb.clone())
-                } else {
-                    Err(StdlibError::Type(format!(
-                        "parse-time: argument #2 must be string, got {}",
-                        format_v.type_of()
-                    )))
-                }
-            }
-        };
-
-        match parse_time_utc_seconds(time_s, fmt_s) {
-            Ok(secs) => Ok(JsltValue::number_f64(secs)),
-            Err(ParseTimeErr::BadFormat(msg)) => {
-                // Mirrors SimpleDateFormat bad pattern -> hard error
-                Err(StdlibError::Semantic(format!(
-                    "parse-time: Couldn't parse format '{}' : {}",
-                    fmt_s, msg
-                )))
-            }
-            Err(ParseTimeErr::ParseFailed(_msg)) => {
-                if let Some(fb) = fallback {
-                    Ok(fb.clone())
-                } else {
-                    Err(StdlibError::Semantic(format!("parse-time: {}", _msg)))
-                }
+        let fmt = to_java_string(&args[1]);
+        let pattern = JavaPattern::compile(&fmt).map_err(|e| {
+            StdlibError::Semantic(format!("parse-time: Couldn't parse format '{fmt}': {e}"))
+        })?;
+        match (pattern.parse(&text, two_digit_century_start_ms()), args.get(2)) {
+            (Some(ms), _) => Ok(JsltValue::number_f64(ms as f64 / 1000.0)),
+            (None, Some(fallback)) => Ok(fallback.clone()),
+            (None, None) => {
+                Err(StdlibError::Semantic(format!("parse-time: Unparseable date: \"{text}\"")))
             }
         }
     }
@@ -1821,40 +1803,34 @@ impl JsltFunction for FormatTimeFn {
     }
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
+        let seconds = match args[0].as_json() {
+            Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
+            Value::String(s) => parse_number(s)
+                .and_then(|n| n.as_json().as_f64())
+                .ok_or_else(|| StdlibError::Type(format!("number({s}) failed: not a number")))?,
+            _ => return Ok(JsltValue::null()),
+        };
 
-        let ts = &args[0];
-        let fmt = &args[1];
-        let tz_v = args.get(2);
-
-        if ts.is_null() {
-            return Ok(JsltValue::null());
-        }
-
-        // Expect timestamp as number -> seconds since epoch (can be integer or decimal)
-        let seconds = match ts.as_json() {
-            Value::Number(n) => n.as_f64().ok_or_else(|| {
-                StdlibError::Type("format-time: timestamp must be a number".to_string())
-            })?,
-            _ => {
-                return Err(StdlibError::Type(format!(
-                    "format-time: timestamp must be a number, got {}",
-                    ts.type_of()
-                )))
+        let fmt = to_java_string(&args[1]);
+        let zone = match args.get(2) {
+            Some(v) => {
+                let name = to_java_string(v);
+                Zone::from_id(&name).ok_or_else(|| {
+                    StdlibError::Semantic(format!("format-time: Unknown timezone {name}"))
+                })?
             }
+            None => Zone::Utc,
         };
-
-        // Expect format string
-        let fmt_s = expect_string(fmt, "format-time", 2)?;
-
-        // Optional timezone string; default UTC if omitted or null
-        let tz_opt: Option<&str> = match tz_v {
-            Some(v) if !v.is_null() => Some(expect_string(v, "format-time", 3)?),
-            _ => None,
-        };
-
-        // Delegate to chrono-based formatter (UTC default; optional timezone override)
-        let out = time::format_time_with_chrono(seconds, fmt_s, tz_opt)
-            .map_err(|e| StdlibError::Semantic(format!("format-time: {}", e)))?;
+        let pattern = JavaPattern::compile(&fmt).map_err(|e| {
+            StdlibError::Semantic(format!("format-time: Couldn't parse format '{fmt}': {e}"))
+        })?;
+        let epoch_ms = (seconds * 1000.0 + 0.5).floor();
+        if !epoch_ms.is_finite() || epoch_ms.abs() > i64::MAX as f64 {
+            return Err(StdlibError::Semantic("format-time: timestamp out of range".into()));
+        }
+        let out = pattern
+            .format(epoch_ms as i64, &zone)
+            .map_err(|e| StdlibError::Semantic(format!("format-time: {e}")))?;
         Ok(JsltValue::string(out))
     }
 }

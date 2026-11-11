@@ -525,7 +525,7 @@ impl Binder {
         let mut env = Env::new();
 
         // Seed built-in functions from stdlib registry
-        let registry = stdlib::Registry::with_default();
+        let registry = stdlib::Registry::shared();
         for name in registry.names() {
             if let Some(id) = registry.get_id(name) {
                 env.define_fun(name, FunctionId(id));

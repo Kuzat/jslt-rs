@@ -270,7 +270,8 @@ pub enum BinaryOp {
     Eq,
     Ne, // == !=
     And,
-    Or, // and or
+    Or,   // and or
+    Pipe, // |
 }
 
 impl Expr {
@@ -376,6 +377,7 @@ impl fmt::Display for Expr {
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 enum Prec {
     Lowest,
+    Pipe,
     If,
     Or,
     And,
@@ -478,15 +480,17 @@ impl<'a, 'b> Pretty<'a, 'b> {
                     Ne => (Prec::Cmp, "!="),
                     And => (Prec::And, "and"),
                     Or => (Prec::Or, "or"),
+                    Pipe => (Prec::Pipe, "|"),
                 };
                 let need_paren = parent > me;
                 if need_paren {
                     write!(self.f, "(")?;
                 }
-                self.expr(left, me)?;
+                // Pipe operands are or-expressions; an `if` operand needs parentheses.
+                let child = if *op == Pipe { Prec::Or } else { me };
+                self.expr(left, child)?;
                 write!(self.f, " {} ", kw)?;
-                // left-associative operators: pass strictly higher precedence to right child
-                self.expr(right, me)?;
+                self.expr(right, child)?;
                 if need_paren {
                     write!(self.f, ")")?;
                 }

@@ -96,3 +96,40 @@ fn and_or_short_circuit() {
     assert_jslt(r#"false and error("not evaluated")"#, "false");
     assert_jslt(r#"true or error("not evaluated")"#, "true");
 }
+
+fn run_on(src: &str, input: &str) -> String {
+    let input: Value = serde_json::from_str(input).unwrap();
+    let out = engine::compile(src).unwrap().apply(&input, None).unwrap();
+    serde_json::to_string(&out).unwrap()
+}
+
+#[test]
+fn pipe_binds_dot_to_left_value() {
+    assert_jslt("1 + 3 | . * 5", "20");
+    assert_jslt("1 | [., .] | {\"a\": .}", r#"{"a":[1,1]}"#);
+    assert_eq!(run_on(".a | .b", r#"{"a": {"b": 2}}"#), "2");
+    // `.` is restored after the pipe.
+    assert_eq!(run_on("[.a | .b, .c]", r#"{"a": {"b": 2}, "c": 3}"#), "[2,3]");
+}
+
+#[test]
+fn pipe_has_lowest_precedence() {
+    assert_jslt("false or false | {\"a\": .}", r#"{"a":false}"#);
+    assert_jslt("1 == 3 | {\"a\": .}", r#"{"a":false}"#);
+    // The else branch extends over the pipe.
+    assert_jslt("if (true) 1 else 2 | . * 10", "1");
+    assert_jslt("if (false) 1 else 2 | . * 10", "20");
+    assert_jslt("(if (false) 1 else 2) | . * 10", "20");
+    assert_jslt("5 | if (. > 1) \"big\" else \"small\"", r#""big""#);
+}
+
+#[test]
+fn pipe_feeds_object_matcher() {
+    assert_eq!(run_on(".foo | {\"x\": 1, * : .}", r#"{"foo": {"a": 2}}"#), r#"{"a":2,"x":1}"#);
+}
+
+#[test]
+fn matcher_on_left_of_pipe_uses_parent_key() {
+    let out = run_on(r#"{"foo": {* : .} | {"n": 1, * : .}}"#, r#"{"foo": {"a": 2}, "bar": 3}"#);
+    assert_eq!(out, r#"{"foo":{"a":2,"n":1}}"#);
+}

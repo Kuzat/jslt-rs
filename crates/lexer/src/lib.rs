@@ -27,6 +27,7 @@ pub enum Token {
     Star,
     Slash,
     Percent,
+    Pipe,
     EqEq,
     BangEq,
     Lt,
@@ -630,6 +631,10 @@ impl<'a> Lexer<'a> {
             '%' => {
                 self.consume_char();
                 return Ok((Token::Percent, self.make_span(start)));
+            }
+            '|' => {
+                self.consume_char();
+                return Ok((Token::Pipe, self.make_span(start)));
             }
             '$' => {
                 self.consume_char();

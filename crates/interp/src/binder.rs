@@ -110,6 +110,8 @@ pub enum BoundExpr {
     Ge(Box<BoundExpr>, Box<BoundExpr>, Span),
     And(Box<BoundExpr>, Box<BoundExpr>, Span),
     Or(Box<BoundExpr>, Box<BoundExpr>, Span),
+    // `l | r`: evaluate r with '.' bound to the value of l
+    Pipe(Box<BoundExpr>, Box<BoundExpr>, Span),
 
     // Conditional
     If {
@@ -185,7 +187,8 @@ impl BoundExpr {
             | Gt(_, _, s)
             | Ge(_, _, s)
             | And(_, _, s)
-            | Or(_, _, s) => *s,
+            | Or(_, _, s)
+            | Pipe(_, _, s) => *s,
             If { span, .. } => *span,
             ArrayLiteral(_, s) => *s,
             ObjectLiteral(_, s) => *s,
@@ -784,6 +787,7 @@ impl Binder {
                     Ne => BoundExpr::Ne(l, r, *span),
                     And => BoundExpr::And(l, r, *span),
                     Or => BoundExpr::Or(l, r, *span),
+                    Pipe => BoundExpr::Pipe(l, r, *span),
                 })
             }
 

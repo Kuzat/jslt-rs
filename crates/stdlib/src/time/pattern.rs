@@ -107,7 +107,10 @@ impl JavaPattern {
         let utc = DateTime::<Utc>::from_timestamp_millis(epoch_ms)
             .ok_or_else(|| "timestamp out of range".to_string())?;
         let zi = zone.info_at(&utc);
-        let local = utc.naive_utc() + chrono::Duration::seconds(zi.offset_secs as i64);
+        let local = utc
+            .naive_utc()
+            .checked_add_signed(chrono::Duration::seconds(zi.offset_secs as i64))
+            .ok_or_else(|| "timestamp out of range".to_string())?;
         let date = local.date();
         let (bc, era_year) =
             if date.year() <= 0 { (true, 1 - date.year()) } else { (false, date.year()) };
@@ -214,11 +217,12 @@ impl JavaPattern {
                 pos += sign_len + digits;
                 match c {
                     'y' | 'Y' => {
-                        let ambiguous = n <= 2 && !neg && digits == 2;
-                        if ambiguous {
+                        let mut ambiguous = false;
+                        if n <= 2 && !neg && digits == 2 {
                             let start_year =
                                 DateTime::<Utc>::from_timestamp_millis(century_start_ms)?.year()
                                     as i64;
+                            ambiguous = v == start_year.rem_euclid(100);
                             v += start_year.div_euclid(100) * 100;
                             if v < start_year {
                                 v += 100;
@@ -668,6 +672,11 @@ mod tests {
 
     #[test]
     fn formats_fields_like_java() {
+        let tokyo = Zone::from_id("Asia/Tokyo").unwrap();
+        assert!(JavaPattern::compile("yyyy")
+            .unwrap()
+            .format(8_210_266_873_200_000, &tokyo)
+            .is_err());
         let ms = 1_514_764_800_005;
         assert_eq!(fmt("y yy yyy yyyy yyyyy G", ms), "2018 18 2018 2018 02018 AD");
         assert_eq!(fmt("M MM MMM MMMM L LLL", ms), "1 01 Jan January 1 Jan");
@@ -687,6 +696,7 @@ mod tests {
 
     #[test]
     fn parses_leniently_like_java() {
+        assert_eq!(parse("yy-MM-dd", "47--02-01"), Some(-733_795_200_000));
         assert_eq!(parse("yyyy-MM-dd HH:mm:ss", "2018-13-32 25:61:61"), Some(1_549_072_921_000));
         assert_eq!(parse("yyyyMMdd", "20180102"), Some(1_514_851_200_000));
         assert_eq!(parse("yy-MM-dd", "18-01-01"), Some(1_514_764_800_000));

@@ -33,6 +33,7 @@ impl JsltLanguageServer {
     const CODE_BIND_UNKNOWN_VARIABLE: &'static str = "JSLT_BIND_UNKNOWN_VARIABLE";
     const CODE_BIND_NON_FUNCTION_CALLEE: &'static str = "JSLT_BIND_NON_FUNCTION_CALLEE";
     const CODE_BIND_DUPLICATE_VARIABLE: &'static str = "JSLT_BIND_DUPLICATE_VARIABLE";
+    const CODE_BIND_MATCHER_NOT_ALLOWED: &'static str = "JSLT_BIND_MATCHER_NOT_ALLOWED";
     const CODE_MODULE: &'static str = "JSLT_MODULE";
     const DIAGNOSTIC_DOCS_BASE: &'static str =
         "https://github.com/Kuzat/jslt-rs/blob/main/docs/diagnostics.md";
@@ -438,6 +439,26 @@ impl JsltLanguageServer {
                     }),
                     source: Some("jslt-binder".to_string()),
                     message: format!("variable `{name}` is already declared in this scope"),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }
+            }
+            BindError::MatcherNotAllowed { location, span } => {
+                let start = Self::byte_offset_to_position(text, span.start);
+                let end = Self::byte_offset_to_position(text, span.end);
+
+                Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: Some(NumberOrString::String(
+                        Self::CODE_BIND_MATCHER_NOT_ALLOWED.to_string(),
+                    )),
+                    code_description: Some(CodeDescription {
+                        href: Self::diagnostic_href(Self::CODE_BIND_MATCHER_NOT_ALLOWED),
+                    }),
+                    source: Some("jslt-binder".to_string()),
+                    message: format!("Object matcher used inside {location}"),
                     related_information: None,
                     tags: None,
                     data: None,

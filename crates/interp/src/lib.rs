@@ -540,7 +540,7 @@ impl<'p> Evaluator<'p> {
                 Ok(JsltValue::from_json(Value::Array(out)))
             }
 
-            ObjectLiteral(entries, _sp) => self.eval_object_literal(entries, None),
+            ObjectLiteral(entries, _sp) => self.eval_object_literal(entries),
 
             ArrayFor { seq, lets, elem, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
@@ -693,13 +693,21 @@ impl<'p> Evaluator<'p> {
             Index(target, index, _) => {
                 let tv = self.eval_expr(target)?;
                 match tv.as_json() {
-                    Value::Array(_) | Value::String(_) => {
-                        let iv = self.eval_expr(index)?;
-                        if let Some(i) = iv.as_f64_checked() {
-                            Ok(tv.index(i.trunc() as i64))
-                        } else {
-                            Ok(JsltValue::null())
+                    Value::Array(_) => {
+                        let i = self.eval_sequence_index(index)?;
+                        Ok(tv.index(i))
+                    }
+                    Value::String(s) => {
+                        let i = self.eval_sequence_index(index)?;
+                        let len = s.chars().count() as i64;
+                        let resolved = if i < 0 { len.saturating_add(i) } else { i };
+                        if !(0..len).contains(&resolved) {
+                            return Err(RuntimeError::TypeError {
+                                msg: format!("String index out of range: {resolved}"),
+                                span: index.span(),
+                            });
                         }
+                        Ok(tv.index(resolved))
                     }
                     _ => Ok(JsltValue::null()),
                 }
@@ -709,23 +717,13 @@ impl<'p> Evaluator<'p> {
                 let tv = self.eval_expr(target)?;
                 match tv.as_json() {
                     Value::Array(_) | Value::String(_) => {
-                        let sidx = if let Some(s) = start {
-                            let sv = self.eval_expr(s)?;
-                            match sv.as_f64_checked() {
-                                Some(f) => Some(f.trunc() as i64),
-                                None => return Ok(JsltValue::null()),
-                            }
-                        } else {
-                            None
+                        let sidx = match start {
+                            Some(s) => Some(self.eval_sequence_index(s)?),
+                            None => None,
                         };
-                        let eidx = if let Some(e2) = end {
-                            let ev = self.eval_expr(e2)?;
-                            match ev.as_f64_checked() {
-                                Some(f) => Some(f.trunc() as i64),
-                                None => return Ok(JsltValue::null()),
-                            }
-                        } else {
-                            None
+                        let eidx = match end {
+                            Some(e2) => Some(self.eval_sequence_index(e2)?),
+                            None => None,
                         };
                         Ok(tv.slice(sidx, eidx))
                     }
@@ -1065,18 +1063,15 @@ impl<'p> Evaluator<'p> {
         Ok(())
     }
 
-    fn eval_object_value(
-        &mut self,
-        expr: &BoundExpr,
-        match_source: Option<Value>,
-    ) -> Result<JsltValue, RuntimeError> {
-        match expr {
-            BoundExpr::ObjectLiteral(entries, _) => self.eval_object_literal(entries, match_source),
-            BoundExpr::Pipe(l, r, _) => {
-                let lv = self.eval_object_value(l, match_source)?;
-                self.eval_piped(lv, r)
-            }
-            _ => self.eval_expr(expr),
+    /// Evaluates an array or string index, which must be a number.
+    fn eval_sequence_index(&mut self, expr: &BoundExpr) -> Result<i64, RuntimeError> {
+        let v = self.eval_expr(expr)?;
+        match v.as_f64_checked() {
+            Some(f) => Ok(f.trunc() as i64),
+            None => Err(RuntimeError::TypeError {
+                msg: format!("Can't index array/string with {}", v.as_json()),
+                span: expr.span(),
+            }),
         }
     }
 
@@ -1091,14 +1086,8 @@ impl<'p> Evaluator<'p> {
     fn eval_object_literal(
         &mut self,
         entries: &[BoundObjectEntry],
-        explicit_match_source: Option<Value>,
     ) -> Result<JsltValue, RuntimeError> {
         let mut obj = Map::new();
-        let active_match_source =
-            explicit_match_source.or_else(|| match self.current_frame().this_val.as_json() {
-                Value::Object(m) => Some(Value::Object(m.clone())),
-                _ => None,
-            });
 
         // Wildcard copies should skip explicitly-defined keys.
         let explicit_keys: std::collections::HashSet<std::string::String> = entries
@@ -1123,11 +1112,7 @@ impl<'p> Evaluator<'p> {
                         }
                     };
 
-                    let nested_source = match &active_match_source {
-                        Some(Value::Object(m)) => m.get(&s).cloned(),
-                        _ => None,
-                    };
-                    let val = self.eval_object_value(vexpr, nested_source)?;
+                    let val = self.eval_expr(vexpr)?;
 
                     let val_json = val.into_json();
                     if should_omit_object_field(&val_json) {
@@ -1135,12 +1120,16 @@ impl<'p> Evaluator<'p> {
                     }
                     obj.insert(s, val_json);
                 }
-                BoundObjectEntry::Wildcard { value, exclude_keys } => {
-                    if let Some(Value::Object(m)) = &active_match_source {
+                BoundObjectEntry::Wildcard { value, exclude_keys, path } => {
+                    let mut source = Some(self.current_frame().this_val.as_json());
+                    for key in path {
+                        source = source.and_then(|v| v.get(key.as_str()));
+                    }
+                    if let Some(Value::Object(m)) = source.cloned() {
                         let excluded: std::collections::HashSet<&str> =
                             exclude_keys.iter().map(std::string::String::as_str).collect();
                         let saved_this = self.current_frame().this_val.clone();
-                        for (k, v) in m {
+                        for (k, v) in &m {
                             if explicit_keys.contains(k) || excluded.contains(k.as_str()) {
                                 continue;
                             }

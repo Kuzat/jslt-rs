@@ -281,13 +281,15 @@ Used by `if`, `and`, `or` and filters:
 
 * Arrays: zero‑based integer index. Negative indices count from the end (`-1` last element).
 * Strings: index by code point. Negative indices allowed.
-* Out‑of‑range → `null`.
+* The index must be a number, otherwise it is a runtime error. Fractions are truncated.
+* Out‑of‑range on an array → `null`. Out‑of‑range on a string is a runtime error.
 
 ### 7.2 Slicing `[start:end]`
 
 * Applies to arrays and strings.
 * `start` and `end` are optional; missing `start`=0, missing `end`=length.
 * Negative indices offset from end.
+* `start` and `end` must be numbers when given, otherwise it is a runtime error.
 * Result uses **half‑open** range `[start, end)`.
 
 ### 7.3 Comprehensions
@@ -304,6 +306,17 @@ Used by `if`, `and`, `or` and filters:
 
   * `key` must evaluate to a string; `value` yields the mapped value.
   * Duplicate keys: last assignment wins.
+
+### 7.4 Object matcher `* : expr`
+
+* The matcher copies every field of its context object that the template does not set and that
+  is not excluded with `* - a, b : expr`. `expr` is evaluated with `.` set to the field value.
+* The context is `.` followed by the keys of the enclosing object pairs. In
+  `{"a": {"b": {* : .}}}` the matcher copies the fields of `.a.b`. If the context is not an
+  object, nothing is copied.
+* The body of a `for` and the right side of a pipe start the path again at their own `.`.
+  Operators, function arguments, `let`s and `if` branches keep the path of the enclosing pair.
+* A matcher inside an array, or inside a function declaration, is a compile error.
 
 ---
 

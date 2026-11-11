@@ -544,6 +544,16 @@ impl<'p> Evaluator<'p> {
 
             ArrayFor { seq, lets, elem, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
+                match seq_val.as_json() {
+                    Value::Null => return Ok(JsltValue::null()),
+                    Value::Array(_) | Value::Object(_) => {}
+                    other => {
+                        return Err(RuntimeError::TypeError {
+                            msg: format!("For loop can't iterate over {other}"),
+                            span: seq.span(),
+                        });
+                    }
+                }
                 let mut out = Vec::new();
                 let caller_frame = self.current_frame().clone();
                 // Reuse a single frame for all iterations to avoid cloning locals repeatedly.
@@ -584,7 +594,7 @@ impl<'p> Evaluator<'p> {
                             }
                         }
                     }
-                    _ => { /* nothing */ }
+                    _ => unreachable!(),
                 }
                 self.pop_frame();
                 Ok(JsltValue::from_json(Value::Array(out)))
@@ -592,6 +602,16 @@ impl<'p> Evaluator<'p> {
 
             ObjectFor { seq, lets, key, value, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
+                match seq_val.as_json() {
+                    Value::Null => return Ok(JsltValue::null()),
+                    Value::Array(_) | Value::Object(_) => {}
+                    other => {
+                        return Err(RuntimeError::TypeError {
+                            msg: format!("Object comprehension can't loop over {other}"),
+                            span: seq.span(),
+                        });
+                    }
+                }
                 let mut out = Map::new();
                 let caller_frame = self.current_frame().clone();
                 self.push_frame(Frame {
@@ -659,7 +679,7 @@ impl<'p> Evaluator<'p> {
                             }
                         }
                     }
-                    _ => { /* nothing */ }
+                    _ => unreachable!(),
                 }
                 self.pop_frame();
                 Ok(JsltValue::from_json(Value::Object(out)))

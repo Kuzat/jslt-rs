@@ -294,16 +294,16 @@ Used by `if`, `and`, `or` and filters:
 
 * Both forms accept `let`s after `for (seq)`. They are evaluated once per element, before the
   filter, and are visible in the filter and the body (`key` and `value` for objects).
+* `seq` may be an array or an object. Each element of an array becomes the context. An object is
+  iterated as `{"key": k, "value": v}` pairs.
+* If `seq` is `null`, the result is `null`. Any other value is a runtime error.
 * **Array:** `[for (seq) expr]` optionally `[for (seq) expr if cond]`
 
-  * `seq` is any expression evaluating to an array; each element becomes the new context.
   * The body `expr` evaluates per element; `if cond` filters by truthiness.
 * **Object:** `{for (seq) key : value}` optionally `{for (seq) key : value if cond}`
 
   * `key` must evaluate to a string; `value` yields the mapped value.
   * Duplicate keys: last assignment wins.
-
-> **OPEN:** Confirm whether `seq` may be object (iterate values) or must be array. Proposed: arrays only; add `values(obj)` as stdlib to iterate objects.
 
 ---
 

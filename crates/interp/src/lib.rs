@@ -5,7 +5,7 @@ use crate::binder::{
 use ast::{Program, Span};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 use stdlib::Registry;
 use thiserror::Error;
 use value::JsltValue;
@@ -82,10 +82,10 @@ pub enum RuntimeError {
 }
 
 #[derive(Debug, Clone)]
-struct Closure {
-    fun: Arc<BoundFunction>,
+struct Closure<'p> {
+    fun: &'p BoundFunction,
+    // Values for `fun.captures`, in the same order.
     captures: Vec<JsltValue>,
-    capture_map: HashMap<(usize, usize), usize>, // (depth, slot) -> index in captures
 }
 
 #[derive(Debug, Clone)]
@@ -96,42 +96,42 @@ struct Frame {
 }
 
 #[derive(Debug, Clone)]
-struct ModuleRuntime {
+struct ModuleRuntime<'p> {
     top_frame: Frame,
-    closures: Vec<Option<Closure>>,
+    closures: Rc<Vec<Option<Closure<'p>>>>,
     // Body of the module program (used when the module is imported as a callable)
-    body: BoundExpr,
+    body: &'p BoundExpr,
     // Sub-modules imported by this module (preserves hierarchy)
-    sub_modules: HashMap<String, ModuleRuntime>,
+    sub_modules: Rc<HashMap<String, ModuleRuntime<'p>>>,
 }
 
 struct Evaluator<'p> {
     prog: &'p BoundProgram,
-    closures: Vec<Option<Closure>>,
+    closures: Rc<Vec<Option<Closure<'p>>>>,
     cfg: EvalConfig,
     steps: u64,
     budget_check_at: u64,
     call_depth: usize,
     stack: Vec<Frame>,
-    registry: Registry,
+    registry: &'static Registry,
     builtin_count: usize,
     // Builtin `fallback` is evaluated lazily, like the Java macro.
     fallback_id: Option<usize>,
-    modules: HashMap<String, ModuleRuntime>,
+    modules: Rc<HashMap<String, ModuleRuntime<'p>>>,
     // Values for undeclared variables, supplied by the caller.
     variables: HashMap<String, JsltValue>,
 }
 
 impl<'p> Evaluator<'p> {
     fn new(prog: &'p BoundProgram, cfg: EvalConfig) -> Self {
-        // Initialize builtin registry once. ids 0..builtin_coutn must match binding seeding
-        let registry = Registry::with_default();
+        // ids 0..builtin_count must match binding seeding
+        let registry = Registry::shared();
         let builtin_count = prog.builtin_count;
         let fallback_id = registry.get_id("fallback").filter(|id| *id < builtin_count);
 
         Self {
             prog,
-            closures: Vec::new(),
+            closures: Rc::default(),
             budget_check_at: cfg.budget_check_at.unwrap_or(u64::MAX),
             cfg,
             steps: 0,
@@ -140,7 +140,7 @@ impl<'p> Evaluator<'p> {
             registry,
             builtin_count,
             fallback_id,
-            modules: HashMap::new(),
+            modules: Rc::default(),
             variables: HashMap::new(),
         }
     }
@@ -199,9 +199,9 @@ impl<'p> Evaluator<'p> {
 
     fn init_module_runtime(
         &mut self,
-        child: &BoundProgram,
+        child: &'p BoundProgram,
         input: &JsltValue,
-    ) -> Result<ModuleRuntime, RuntimeError> {
+    ) -> Result<ModuleRuntime<'p>, RuntimeError> {
         let mut sub_modules = HashMap::new();
         for (k, (sub_prog, _callable)) in &child.imported_modules {
             sub_modules.insert(k.clone(), self.init_module_runtime(sub_prog, input)?);
@@ -214,7 +214,7 @@ impl<'p> Evaluator<'p> {
 
         // Module lets run in the module's own function and import context.
         let saved_closures = std::mem::take(&mut self.closures);
-        let saved_modules = std::mem::replace(&mut self.modules, sub_modules);
+        let saved_modules = std::mem::replace(&mut self.modules, Rc::new(sub_modules));
         let result = self.eval_top_lets(child);
         let closures = std::mem::replace(&mut self.closures, saved_closures);
         let sub_modules = std::mem::replace(&mut self.modules, saved_modules);
@@ -226,13 +226,13 @@ impl<'p> Evaluator<'p> {
         let module_top = self.stack.pop().expect("module frame present");
         debug_assert_eq!(self.stack.len(), saved_len);
 
-        Ok(ModuleRuntime { top_frame: module_top, closures, body: child.body.clone(), sub_modules })
+        Ok(ModuleRuntime { top_frame: module_top, closures, body: &child.body, sub_modules })
     }
 
     /// Evaluates `prog`'s lets into the top frame and leaves its closures in `self.closures`.
     /// Captures are refreshed before each let so a let can call functions that read earlier lets.
-    fn eval_top_lets(&mut self, prog: &BoundProgram) -> Result<(), RuntimeError> {
-        self.closures = self.build_closures_for(prog)?;
+    fn eval_top_lets(&mut self, prog: &'p BoundProgram) -> Result<(), RuntimeError> {
+        self.closures = Rc::new(self.build_closures_for(prog)?);
         for (i, (_name, expr)) in prog.lets.iter().enumerate() {
             if i > 0 {
                 self.refresh_captures()?;
@@ -249,7 +249,7 @@ impl<'p> Evaluator<'p> {
     /// Re-reads every closure's captured values from the stack.
     fn refresh_captures(&mut self) -> Result<(), RuntimeError> {
         let mut closures = std::mem::take(&mut self.closures);
-        let result = closures.iter_mut().flatten().try_for_each(|c| {
+        let result = Rc::make_mut(&mut closures).iter_mut().flatten().try_for_each(|c| {
             for (val, cap) in c.captures.iter_mut().zip(&c.fun.captures) {
                 *val = self.lookup_captures_from_stack(*cap)?;
             }
@@ -261,24 +261,22 @@ impl<'p> Evaluator<'p> {
 
     fn build_closures_for(
         &mut self,
-        child: &BoundProgram,
-    ) -> Result<Vec<Option<Closure>>, RuntimeError> {
+        child: &'p BoundProgram,
+    ) -> Result<Vec<Option<Closure<'p>>>, RuntimeError> {
         let mut out = Self::closure_slots(&child.functions);
         for f in &child.functions {
-            let mut captures = Vec::with_capacity(f.captures.len());
-            let mut capture_map = HashMap::new();
-            for (i, cap) in f.captures.iter().enumerate() {
-                let val = self.lookup_captures_from_stack(*cap)?;
-                capture_map.insert((cap.depth, cap.slot), i);
-                captures.push(val);
-            }
-            out[f.id.0] = Some(Closure { fun: Arc::new(f.clone()), captures, capture_map });
+            let captures = f
+                .captures
+                .iter()
+                .map(|cap| self.lookup_captures_from_stack(*cap))
+                .collect::<Result<Vec<_>, _>>()?;
+            out[f.id.0] = Some(Closure { fun: f, captures });
         }
         Ok(out)
     }
 
     // Pre-size closure slots so ids index directly.
-    fn closure_slots(functions: &[BoundFunction]) -> Vec<Option<Closure>> {
+    fn closure_slots(functions: &[BoundFunction]) -> Vec<Option<Closure<'p>>> {
         let max_id = functions.iter().map(|f| f.id.0).max().unwrap_or(0);
         vec![None; max_id + 1]
     }
@@ -301,7 +299,7 @@ impl<'p> Evaluator<'p> {
         Ok(v)
     }
 
-    fn closure(&self, id: &FunctionId) -> Option<&Closure> {
+    fn closure(&self, id: &FunctionId) -> Option<&Closure<'p>> {
         self.closures.get(id.0).and_then(|c| c.as_ref())
     }
 
@@ -393,12 +391,17 @@ impl<'p> Evaluator<'p> {
                     RuntimeError::Internal("captured var without active function".into())
                 })?;
                 let clo = self.closure(&fid).ok_or(RuntimeError::UnknownFunction(fid))?;
-                let idx = clo.capture_map.get(&(*depth, *slot)).copied().ok_or_else(|| {
-                    RuntimeError::Internal(format!(
-                        "missing caputre mapping for {:?}:{:?}",
-                        *depth, *slot
-                    ))
-                })?;
+                let idx = clo
+                    .fun
+                    .captures
+                    .iter()
+                    .position(|c| c.depth == *depth && c.slot == *slot)
+                    .ok_or_else(|| {
+                        RuntimeError::Internal(format!(
+                            "missing caputre mapping for {:?}:{:?}",
+                            *depth, *slot
+                        ))
+                    })?;
                 let val = clo.captures.get(idx).cloned().ok_or_else(|| {
                     RuntimeError::Internal(format!("capture index OOB for {:?}", (*depth, *slot)))
                 })?;
@@ -767,7 +770,7 @@ impl<'p> Evaluator<'p> {
                     // user or synthetic imported
                     let fun_arc = self
                         .closure(id)
-                        .map(|c| c.fun.clone())
+                        .map(|c| c.fun)
                         .ok_or(RuntimeError::UnknownFunction(*id))?;
                     let fun_id = fun_arc.id;
 
@@ -935,8 +938,7 @@ impl<'p> Evaluator<'p> {
                 .get(target_id.0)
                 .and_then(|c| c.as_ref())
                 .ok_or(RuntimeError::UnknownFunction(*target_id))?
-                .fun
-                .clone();
+                .fun;
             (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), target)
         };
 
@@ -1002,7 +1004,7 @@ impl<'p> Evaluator<'p> {
             let mr = self.modules.get(module_key).ok_or_else(|| {
                 RuntimeError::Internal(format!("missing ModuleRuntime for module `{}`", module_key))
             })?;
-            (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), mr.body.clone())
+            (mr.top_frame.clone(), mr.closures.clone(), mr.sub_modules.clone(), mr.body)
         };
 
         // Build call
@@ -1017,7 +1019,7 @@ impl<'p> Evaluator<'p> {
         let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
         let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
         self.enter_call()?;
-        let result = self.eval_expr(&fun_body);
+        let result = self.eval_expr(fun_body);
         // restore
         self.closures = saved_closures;
         self.modules = saved_modules;
@@ -1277,11 +1279,11 @@ pub fn apply_with_variables(
         variables.iter().map(|(k, v)| (k.clone(), JsltValue::from_json_ref(v))).collect();
 
     let input_val = JsltValue::from_json_ref(input);
+    let mut runtimes = HashMap::with_capacity(modules.len());
     for (key, (child, _callable)) in modules {
-        let mr = ev.init_module_runtime(child, &input_val)?;
-
-        ev.modules.insert(key.clone(), mr);
+        runtimes.insert(key.clone(), ev.init_module_runtime(child, &input_val)?);
     }
+    ev.modules = Rc::new(runtimes);
 
     ev.eval_program(input_val)
 }

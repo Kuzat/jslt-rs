@@ -86,4 +86,4 @@ outputs match.
 | numeric | 5.19 ms | 3.53 ms | 1.47× |
 | fib | 1.74 ms | 1.27 ms | 1.37× |
 | queens | 889.16 ms | 707.96 ms | 1.26× |
-| cdp | 11.55 µs | 841 ns | 13.73× |
+| cdp | 7.72 µs | 841 ns | 9.18× |

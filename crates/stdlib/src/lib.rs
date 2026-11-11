@@ -163,6 +163,12 @@ impl Registry {
         r
     }
 
+    /// The default registry, built once per process.
+    pub fn shared() -> &'static Registry {
+        static SHARED: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+        SHARED.get_or_init(Registry::with_default)
+    }
+
     pub fn register<F: JsltFunction + Send + Sync + 'static>(&mut self, f: F) {
         let name = f.name();
         if self.by_name.contains_key(name) {

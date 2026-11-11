@@ -125,11 +125,11 @@ fn pipe_has_lowest_precedence() {
 
 #[test]
 fn pipe_feeds_object_matcher() {
-    assert_eq!(run_on(".foo | {\"x\": 1, * : .}", r#"{"foo": {"a": 2}}"#), r#"{"a":2,"x":1}"#);
+    assert_eq!(run_on(".foo | {\"x\": 1, * : .}", r#"{"foo": {"a": 2}}"#), r#"{"x":1,"a":2}"#);
 }
 
 #[test]
 fn matcher_on_left_of_pipe_uses_parent_key() {
     let out = run_on(r#"{"foo": {* : .} | {"n": 1, * : .}}"#, r#"{"foo": {"a": 2}, "bar": 3}"#);
-    assert_eq!(out, r#"{"foo":{"a":2,"n":1}}"#);
+    assert_eq!(out, r#"{"foo":{"n":1,"a":2}}"#);
 }

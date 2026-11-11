@@ -284,41 +284,32 @@ fn edit_distance(a: &str, b: &str) -> usize {
     dp[n]
 }
 
+fn let_names(lets: &[ast::Let]) -> impl Iterator<Item = (&str, Span)> {
+    lets.iter().flat_map(|l| &l.bindings).map(|b| (b.name.name.as_str(), b.name.span))
+}
+
 #[derive(Debug, Default)]
 struct VarFrame {
-    // Order matters: slot is index in 'order'
+    // Slot is the index in 'order'. A shadowing declaration gets a new slot, so an inner scope
+    // never overwrites the outer variable.
     order: Vec<String>,
-    // Quick lookup by name -> slot
-    slots: HashMap<String, usize>,
 }
 
 impl VarFrame {
     fn new() -> Self {
-        Self { order: Vec::new(), slots: HashMap::new() }
+        Self { order: Vec::new() }
     }
     fn define(&mut self, name: &str) -> usize {
-        if let Some(&slot) = self.slots.get(name) {
-            return slot;
-        }
-        let slot = self.order.len();
         self.order.push(name.to_string());
-        self.slots.insert(name.to_string(), slot);
-        slot
+        self.order.len() - 1
     }
     fn lookup(&self, name: &str) -> Option<usize> {
-        self.slots.get(name).copied()
+        self.order.iter().rposition(|n| n == name)
     }
     fn len(&self) -> usize {
         self.order.len()
     }
     fn truncate(&mut self, len: usize) {
-        if len >= self.order.len() {
-            return;
-        }
-        // Remove slots beyond len
-        for name in self.order[len..].iter() {
-            self.slots.remove(name);
-        }
         self.order.truncate(len);
     }
 }
@@ -603,7 +594,8 @@ impl Binder {
                 self.env.define_var(&param.name);
             }
             // predeclare let names in order so their slots follow params
-            self.check_duplicate_lets(&d.lets);
+            let param_names = d.params.iter().map(|p| (p.name.as_str(), p.span));
+            self.check_duplicate_names(param_names.chain(let_names(&d.lets)));
             for l in &d.lets {
                 for b in &l.bindings {
                     self.env.define_var(&b.name.name);
@@ -669,13 +661,14 @@ impl Binder {
 
     /// Like Java JSLT, a name may only be declared once in a let list. Inner scopes may shadow it.
     fn check_duplicate_lets(&mut self, lets: &[ast::Let]) {
+        self.check_duplicate_names(let_names(lets));
+    }
+
+    fn check_duplicate_names<'a>(&mut self, names: impl Iterator<Item = (&'a str, Span)>) {
         let mut seen = std::collections::HashSet::new();
-        for b in lets.iter().flat_map(|l| &l.bindings) {
-            if !seen.insert(b.name.name.as_str()) {
-                self.errors.push(BindError::DuplicateVariable {
-                    name: b.name.name.clone(),
-                    span: b.name.span,
-                });
+        for (name, span) in names {
+            if !seen.insert(name) {
+                self.errors.push(BindError::DuplicateVariable { name: name.to_string(), span });
             }
         }
     }

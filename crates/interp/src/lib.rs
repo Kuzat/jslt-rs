@@ -999,15 +999,21 @@ impl<'p> Evaluator<'p> {
 
     /// Evaluates an object field value. A nested object literal, or one on the left of a
     /// pipe, matches against `match_source` (the parent's value for this key).
-    /// Evaluates per-element comprehension lets into their slots in the current frame.
+    /// Evaluates per-element comprehension lets into their slots in the current frame. The slots
+    /// are cleared first so no value carries over from the previous element.
     fn eval_iteration_lets(&mut self, lets: &[(usize, BoundExpr)]) -> Result<(), RuntimeError> {
+        let locals = &mut self.current_frame_mut().locals;
+        if let Some(max) = lets.iter().map(|(slot, _)| *slot).max() {
+            if max >= locals.len() {
+                locals.resize(max + 1, JsltValue::null());
+            }
+        }
+        for (slot, _) in lets {
+            locals[*slot] = JsltValue::null();
+        }
         for (slot, expr) in lets {
             let v = self.eval_expr(expr)?;
-            let locals = &mut self.current_frame_mut().locals;
-            if *slot >= locals.len() {
-                locals.resize(*slot + 1, JsltValue::null());
-            }
-            locals[*slot] = v;
+            self.current_frame_mut().locals[*slot] = v;
         }
         Ok(())
     }

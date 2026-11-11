@@ -266,7 +266,9 @@ Used by `if`, `and`, `or` and filters:
 * `let` introduces **lexical** bindings visible in its body and nested expressions.
 * Function parameters shadow outer variables.
 * A name may be declared only once in one list of `let`s (program, function body, let block or
-  comprehension); a second declaration is a bind error. Nested scopes may shadow it.
+  comprehension); a second declaration is a bind error. A function's parameters and its `let`s
+  share one scope. Nested scopes may shadow a name; the new name is in scope in its own
+  initializer.
 * `def` defined at top level introduces a function binding visible **after** its declaration; inner `def` is allowed but discouraged (implementation may hoist or keep block‑local).
 
 > **OPEN:** Confirm whether inner `def` is legal in the reference. Safe default: allow and scope to declaration region.

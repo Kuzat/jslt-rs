@@ -45,3 +45,19 @@ fn duplicate_let_in_same_scope_is_an_error() {
         assert!(err.contains("`a`"), "{src}: {err}");
     }
 }
+
+#[test]
+fn comprehension_lets_do_not_carry_over_between_elements() {
+    // The inner `v` is in scope in its own initializer (as in Java), so `$v` there is the
+    // unassigned inner variable, never the previous element's value.
+    let src = "let v = (0) [for ([1, 2, 3]) let v = ($v + 1) $v]";
+    assert_eq!(run_jslt(src, json!(null)), Ok(json!([null, null, null])));
+    let src = "let v = 1 [for ([1, 2]) let v = . * 10 $v] + [$v]";
+    assert_eq!(run_jslt(src, json!(null)), Ok(json!([10, 20, 1])));
+}
+
+#[test]
+fn function_let_may_not_redeclare_parameter() {
+    let err = run_jslt("def f(a) let a = 1 $a f(2)", json!(null)).unwrap_err();
+    assert!(err.contains("`a`"), "{err}");
+}

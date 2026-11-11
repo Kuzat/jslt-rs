@@ -223,17 +223,33 @@ impl<'p> Evaluator<'p> {
     }
 
     /// Evaluates `prog`'s lets into the top frame and leaves its closures in `self.closures`.
-    /// Closures are rebuilt before each let so a let can call functions that read earlier lets.
+    /// Captures are refreshed before each let so a let can call functions that read earlier lets.
     fn eval_top_lets(&mut self, prog: &BoundProgram) -> Result<(), RuntimeError> {
+        self.closures = self.build_closures_for(prog)?;
         for (i, (_name, expr)) in prog.lets.iter().enumerate() {
-            if !prog.functions.is_empty() {
-                self.closures = self.build_closures_for(prog)?;
+            if i > 0 {
+                self.refresh_captures()?;
             }
             let v = self.eval_expr(expr)?;
             self.current_frame_mut().locals[i] = v;
         }
-        self.closures = self.build_closures_for(prog)?;
+        if !prog.lets.is_empty() {
+            self.refresh_captures()?;
+        }
         Ok(())
+    }
+
+    /// Re-reads every closure's captured values from the stack.
+    fn refresh_captures(&mut self) -> Result<(), RuntimeError> {
+        let mut closures = std::mem::take(&mut self.closures);
+        let result = closures.iter_mut().flatten().try_for_each(|c| {
+            for (val, cap) in c.captures.iter_mut().zip(&c.fun.captures) {
+                *val = self.lookup_captures_from_stack(*cap)?;
+            }
+            Ok(())
+        });
+        self.closures = closures;
+        result
     }
 
     fn build_closures_for(

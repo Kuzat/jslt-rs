@@ -33,6 +33,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"
+# Copy the baseline first: it may be the rust.tsv this run overwrites.
+if [[ -n "$BASELINE" ]]; then
+  BASELINE_COPY="$(mktemp)"
+  trap 'rm -f "$BASELINE_COPY"' EXIT
+  cp "$BASELINE" "$BASELINE_COPY"
+  BASELINE="$BASELINE_COPY"
+fi
 cd "$REPO_ROOT"
 
 echo "Building Rust bench runner (release)..." >&2

@@ -366,10 +366,9 @@ impl Fields {
     /// roll over, and the most recently set date fields win. Weeks start on Sunday and
     /// week 1 holds January 1.
     fn resolve(&self) -> Option<i64> {
-        let mut year = self.get(F::Year, 1970);
-        if self.stamp(F::Era) != 0 && self.vals[F::Era as usize] == 0 {
-            year = 1 - year;
-        }
+        let bc = self.stamp(F::Era) != 0 && self.vals[F::Era as usize] == 0;
+        let era_year = |y: i128| if bc { 1 - y } else { y };
+        let year = era_year(self.get(F::Year, 1970));
         let days = if self.stamp(F::WeekYear) > self.stamp(F::Year) {
             // Java's CalendarBuilder moves an out-of-range weekday into the next or previous
             // week, then reads the result as an ISO day number.
@@ -387,7 +386,7 @@ impl Fields {
                 }
                 dow = dow % 7 + 1;
             }
-            week1_start(self.get(F::WeekYear, 0)) + 7 * (week - 1) + (dow - 1)
+            week1_start(era_year(self.get(F::WeekYear, 0))) + 7 * (week - 1) + (dow - 1)
         } else {
             self.resolve_date(year, (self.get(F::DayOfWeek, 1) - 1).rem_euclid(7))
         };
@@ -761,6 +760,10 @@ mod tests {
         assert_eq!(parse("yyyy-MM-dd z", "1990-07-01 MSK"), Some(646_776_000_000));
         assert_eq!(parse("yyyy-MM-dd z", "2018-07-01 CET"), Some(1_530_399_600_000));
         assert_eq!(parse("yyyy-MM-dd z", "1950-07-01 CEST"), Some(-615_520_800_000));
+        // Long names force standard time; China and Japan had DST in these years.
+        assert_eq!(parse("yyyy-MM-dd z", "1988-07-01 China Standard Time"), Some(583_689_600_000));
+        assert_eq!(parse("yyyy-MM-dd z", "1990-07-01 Moscow Standard Time"), Some(646_779_600_000));
+        assert_eq!(parse("yyyy-MM-dd z", "1948-07-01 JST"), Some(-678_618_000_000));
         assert_eq!(parse("yyyy-MM-dd HH:mm X", "2018-01-02 00:00 Z"), Some(base));
         assert_eq!(parse("yyyy-MM-dd HH:mm X", "2018-01-02 00:00 +0130"), Some(base - 3_600_000));
         assert_eq!(

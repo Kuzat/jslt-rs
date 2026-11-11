@@ -38,7 +38,8 @@ const JAVA_SHORT_IDS: &[(&str, &str)] = &[
 ];
 
 /// Names Java uses for a group of zones. An empty short name means Java has none and
-/// prints the `GMT+hh:mm` form.
+/// prints the `GMT+hh:mm` form. Some zones use one short name for both standard and
+/// daylight time.
 struct ZoneNames {
     short_std: &'static str,
     long_std: &'static str,
@@ -205,23 +206,35 @@ const ZONE_NAMES: &[ZoneNames] = &[
     names(
         "MSK",
         "Moscow Standard Time",
-        "",
-        "",
+        "MSK",
+        "Moscow Summer Time",
         &["Europe/Moscow", "W-SU", "Europe/Simferopol", "Europe/Kirov", "Europe/Volgograd"],
     ),
     names("", "Gulf Standard Time", "", "", &["Asia/Dubai", "Asia/Muscat"]),
-    names("IST", "India Standard Time", "", "", &["Asia/Kolkata", "Asia/Calcutta"]),
+    names(
+        "IST",
+        "India Standard Time",
+        "IST",
+        "Kolkata Daylight Time",
+        &["Asia/Kolkata", "Asia/Calcutta"],
+    ),
     names("", "Singapore Standard Time", "", "", &["Asia/Singapore", "Singapore"]),
-    names("HKT", "Hong Kong Standard Time", "", "", &["Asia/Hong_Kong", "Hongkong"]),
+    names(
+        "HKT",
+        "Hong Kong Standard Time",
+        "HKST",
+        "Hong Kong Summer Time",
+        &["Asia/Hong_Kong", "Hongkong"],
+    ),
     names(
         "AWST",
         "Australian Western Standard Time",
-        "",
-        "",
+        "AWDT",
+        "Australian Western Daylight Time",
         &["Australia/Perth", "Australia/West"],
     ),
-    names("JST", "Japan Standard Time", "", "", &["Asia/Tokyo", "Japan"]),
-    names("KST", "Korean Standard Time", "", "", &["Asia/Seoul", "ROK"]),
+    names("JST", "Japan Standard Time", "JDT", "Japan Daylight Time", &["Asia/Tokyo", "Japan"]),
+    names("KST", "Korean Standard Time", "KST", "Korean Daylight Time", &["Asia/Seoul", "ROK"]),
     names(
         "ACST",
         "Australian Central Standard Time",
@@ -370,8 +383,8 @@ const ZONE_NAMES: &[ZoneNames] = &[
     names(
         "CST",
         "China Standard Time",
-        "",
-        "",
+        "CDT",
+        "China Daylight Time",
         &["Asia/Shanghai", "PRC", "Asia/Chongqing", "Asia/Harbin"],
     ),
 ];
@@ -404,23 +417,39 @@ impl Zone {
             Zone::Utc => ZONE_NAMES.first(),
             Zone::Named(tz) => ZONE_NAMES.iter().find(|n| n.zones.contains(&tz.name())),
         };
-        let long = names.map(|n| {
-            if !n.short_dst.is_empty() && n.short_dst == abbr {
-                n.long_dst
-            } else if !n.short_std.is_empty() && n.short_std == abbr {
-                n.long_std
-            } else if dst {
-                n.long_dst
-            } else {
-                n.long_std
+        // The tzdata abbreviation says which half applies when it is distinct; otherwise
+        // the DST flag decides.
+        let (short, long) = match names {
+            Some(n) => {
+                let distinct = n.short_std != n.short_dst;
+                let is_dst = if distinct && !n.short_dst.is_empty() && n.short_dst == abbr {
+                    true
+                } else if distinct && !n.short_std.is_empty() && n.short_std == abbr {
+                    false
+                } else {
+                    dst
+                };
+                if is_dst {
+                    (n.short_dst, n.long_dst)
+                } else {
+                    (n.short_std, n.long_std)
+                }
             }
-        });
+            None => ("", ""),
+        };
         let alphabetic = !abbr.is_empty() && abbr.chars().all(|c| c.is_ascii_alphabetic());
         let gmt = gmt_name(offset_secs);
+        let short_name = if !short.is_empty() {
+            short.to_string()
+        } else if alphabetic && names.is_none() {
+            abbr
+        } else {
+            gmt.clone()
+        };
         ZoneInfo {
             offset_secs,
-            short_name: if alphabetic { abbr } else { gmt.clone() },
-            long_name: long.filter(|l| !l.is_empty()).map_or(gmt, str::to_string),
+            short_name,
+            long_name: if long.is_empty() { gmt } else { long.to_string() },
         }
     }
 }
@@ -472,7 +501,9 @@ pub(crate) fn match_zone_name(text: &[char]) -> Option<(ParsedZone, usize)> {
         let Some(tz) = n.zones.first().and_then(|z| z.parse::<Tz>().ok()) else {
             continue;
         };
-        let has_dst_names = !n.short_dst.is_empty() || !n.long_dst.is_empty();
+        // Long names always say standard or daylight time; a short name shared by both
+        // leaves the zone's own DST in effect.
+        let shared_short = n.short_std == n.short_dst;
         for (name, is_dst) in
             [(n.short_std, false), (n.long_std, false), (n.short_dst, true), (n.long_dst, true)]
         {
@@ -481,7 +512,8 @@ pub(crate) fn match_zone_name(text: &[char]) -> Option<(ParsedZone, usize)> {
                 continue;
             }
             if name.chars().zip(text).all(|(a, b)| a.eq_ignore_ascii_case(b)) {
-                let dst = has_dst_names.then_some(is_dst);
+                let is_short = name == n.short_std || name == n.short_dst;
+                let dst = if is_short && shared_short { None } else { Some(is_dst) };
                 best = Some((ParsedZone::Named { tz, dst }, len));
             }
         }

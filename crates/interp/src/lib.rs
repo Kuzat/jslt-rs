@@ -1098,28 +1098,36 @@ impl<'p> Evaluator<'p> {
             })
             .collect();
 
+        let has_dynamic_keys = entries.iter().any(
+            |e| matches!(e, BoundObjectEntry::Pair(k, _) if !matches!(k, BoundExpr::String(..))),
+        );
+
         // Explicit pairs come first, so matcher-copied keys follow them in the output.
         let (pairs, matchers): (Vec<_>, Vec<_>) =
             entries.iter().partition(|e| matches!(e, BoundObjectEntry::Pair(..)));
         for entry in pairs.into_iter().chain(matchers) {
             match entry {
                 BoundObjectEntry::Pair(kexpr, vexpr) => {
+                    let val_json = self.eval_expr(vexpr)?.into_json();
+                    if should_omit_object_field(&val_json) {
+                        continue;
+                    }
+
                     let key = self.eval_expr(kexpr)?;
                     let s = match key.as_json() {
                         Value::String(s) => s.clone(),
                         _ => {
                             return Err(RuntimeError::TypeError {
-                                msg: "object key must be a  string".into(),
+                                msg: "Object key must be string".into(),
                                 span: kexpr.span(),
                             });
                         }
                     };
-
-                    let val = self.eval_expr(vexpr)?;
-
-                    let val_json = val.into_json();
-                    if should_omit_object_field(&val_json) {
-                        continue;
+                    if has_dynamic_keys && obj.contains_key(&s) {
+                        return Err(RuntimeError::TypeError {
+                            msg: format!("Duplicate key '{s}' in object"),
+                            span: kexpr.span(),
+                        });
                     }
                     obj.insert(s, val_json);
                 }

@@ -237,6 +237,10 @@ pub enum BindError {
     DuplicateVariable { name: String, span: Span },
     #[error("Object matcher used inside {location} at {span:?}")]
     MatcherNotAllowed { location: &'static str, span: Span },
+    #[error("Object matcher not allowed in objects which have dynamic keys at {span:?}")]
+    MatcherWithDynamicKeys { span: Span },
+    #[error("Invalid object declaration, duplicate key '{key}' at {span:?}")]
+    DuplicateKey { key: String, span: Span },
 }
 
 impl BindError {
@@ -248,6 +252,8 @@ impl BindError {
             NonFunctionCallee { span } => *span,
             DuplicateVariable { span, .. } => *span,
             MatcherNotAllowed { span, .. } => *span,
+            MatcherWithDynamicKeys { span } => *span,
+            DuplicateKey { span, .. } => *span,
         }
     }
 }
@@ -934,36 +940,54 @@ impl Binder {
             }
 
             Expr::ObjectLiteral { entries, span, .. } => {
-                // Convert entries preserving wildcard semantics.
+                let has_dynamic_keys = entries.iter().any(|e| {
+                    matches!(e, ast::ObjectEntry::Pair { key: ast::ObjectKey::Expr(_), .. })
+                });
+                let mut static_keys = std::collections::HashSet::new();
                 let mut out_entries: Vec<BoundObjectEntry> = Vec::with_capacity(entries.len());
                 for ent in entries {
                     match ent {
                         ast::ObjectEntry::Pair { key, value, .. } => {
-                            let kexpr = match key {
-                                ast::ObjectKey::Ident(id) => {
-                                    BoundExpr::String(id.name.clone(), id.span)
-                                }
-                                ast::ObjectKey::Str { value, span } => {
-                                    BoundExpr::String(value.clone(), *span)
-                                }
+                            let static_key = match key {
+                                ast::ObjectKey::Ident(id) => Some((id.name.clone(), id.span)),
+                                ast::ObjectKey::Str { value, span } => Some((value.clone(), *span)),
+                                ast::ObjectKey::Expr(_) => None,
                             };
-                            let value_ctx = match &self.match_ctx {
-                                MatchContext::Path(path) => {
-                                    let key = match &kexpr {
-                                        BoundExpr::String(k, _) => k.clone(),
-                                        _ => unreachable!("object literal keys are static"),
-                                    };
+                            if let Some((k, span)) = &static_key {
+                                if !has_dynamic_keys && !static_keys.insert(k.clone()) {
+                                    self.errors.push(BindError::DuplicateKey {
+                                        key: k.clone(),
+                                        span: *span,
+                                    });
+                                }
+                            }
+                            let kexpr = match (&static_key, key) {
+                                (Some((k, span)), _) => BoundExpr::String(k.clone(), *span),
+                                (None, ast::ObjectKey::Expr(e)) => self
+                                    .with_match_ctx(MatchContext::Path(Vec::new()), |b| {
+                                        b.bind_expr_recovery(e)
+                                    }),
+                                (None, _) => unreachable!("only computed keys are dynamic"),
+                            };
+                            let value_ctx = match (&self.match_ctx, &static_key) {
+                                (MatchContext::Path(path), Some((k, _))) => {
                                     let mut path = path.clone();
-                                    path.push(key);
+                                    path.push(k.clone());
                                     MatchContext::Path(path)
                                 }
-                                fail => fail.clone(),
+                                (MatchContext::Path(_), None) => {
+                                    MatchContext::Fail("dynamic object")
+                                }
+                                (fail, _) => fail.clone(),
                             };
                             let vexpr =
                                 self.with_match_ctx(value_ctx, |b| b.bind_expr_recovery(value));
                             out_entries.push(BoundObjectEntry::Pair(kexpr, vexpr));
                         }
                         ast::ObjectEntry::Spread { value, exclude_keys, span, .. } => {
+                            if has_dynamic_keys {
+                                self.errors.push(BindError::MatcherWithDynamicKeys { span: *span });
+                            }
                             let path = match &self.match_ctx {
                                 MatchContext::Path(path) => path.clone(),
                                 MatchContext::Fail(location) => {

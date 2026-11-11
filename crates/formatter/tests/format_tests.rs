@@ -568,3 +568,11 @@ def asString(input)
     let reformatted = format_source(&formatted).unwrap();
     assert_eq!(formatted, reformatted);
 }
+
+#[test]
+fn test_format_computed_object_keys() {
+    let formatted = format_source("{string(.id):.v,\"a\"+\"b\":1,c:2}").unwrap();
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+    assert!(formatted.contains("string(.id): .v"), "{formatted}");
+    assert!(formatted.contains("\"a\" + \"b\": 1"), "{formatted}");
+}

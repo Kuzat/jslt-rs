@@ -1122,57 +1122,41 @@ impl<'a> Parser<'a> {
                                 blank_lines_before,
                             }
                         }
-                        Token::String(s) => {
-                            let kspan = self.cur.span;
-                            let key = ObjectKey::Str { value: s.clone(), span: self.cur.span };
-                            self.bump()?;
-                            self.expect(Token::Colon, "':' after object key")?;
-                            let v = match self.parse_if_or_expr() {
-                                Ok(expr) => expr,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    self.synchronize_expression();
-                                    Expr::Null(self.prev_span)
-                                }
-                            };
-                            let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair {
-                                key,
-                                value: v,
-                                span,
-                                trivia: entry_trivia,
-                                blank_lines_before,
-                            }
-                        }
-                        Token::Ident(id) => {
-                            let kspan = self.cur.span;
-                            let key =
-                                ObjectKey::Ident(Ident { name: id.clone(), span: self.cur.span });
-                            self.bump()?;
-                            self.expect(Token::Colon, "':' after object key")?;
-                            let v = match self.parse_if_or_expr() {
-                                Ok(expr) => expr,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    self.synchronize_expression();
-                                    Expr::Null(self.prev_span)
-                                }
-                            };
-                            let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair {
-                                key,
-                                value: v,
-                                span,
-                                trivia: entry_trivia,
-                                blank_lines_before,
-                            }
-                        }
                         _ => {
-                            return Err(ParseError::unexpected(
-                                self.prev_span,
-                                self.cur.tok.clone(),
-                                "object key (identifier or string) or '*'",
-                            ))
+                            let key = if let (Token::Ident(name), Token::Colon) =
+                                (self.cur.tok.clone(), self.peek().clone())
+                            {
+                                let span = self.cur.span;
+                                self.bump()?;
+                                ObjectKey::Ident(Ident { name, span })
+                            } else {
+                                match self.parse_if_or_expr()? {
+                                    Expr::String { value, span } => ObjectKey::Str { value, span },
+                                    other => ObjectKey::Expr(Box::new(other)),
+                                }
+                            };
+                            let kspan = match &key {
+                                ObjectKey::Ident(id) => id.span,
+                                ObjectKey::Str { span, .. } => *span,
+                                ObjectKey::Expr(e) => e.span(),
+                            };
+                            self.expect(Token::Colon, "':' after object key")?;
+                            let v = match self.parse_if_or_expr() {
+                                Ok(expr) => expr,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
+                                    Expr::Null(self.prev_span)
+                                }
+                            };
+                            let span = Span::join(kspan, v.span());
+                            ObjectEntry::Pair {
+                                key,
+                                value: v,
+                                span,
+                                trivia: entry_trivia,
+                                blank_lines_before,
+                            }
                         }
                     };
                     entries.push(entry);
@@ -1222,6 +1206,17 @@ impl<'a> Parser<'a> {
         } else {
             false
         }
+    }
+
+    /// The token after the current one.
+    fn peek(&mut self) -> &Token {
+        if self.peeked.is_none() {
+            let (nt, comments, lex_errors) = next_token_with_comments(&mut self.lx);
+            self.pending_comments.extend(comments);
+            self.errors.extend(lex_errors);
+            self.peeked = Some(nt);
+        }
+        &self.peeked.as_ref().expect("peeked token").tok
     }
 
     fn bump(&mut self) -> ParseResult<Tok> {

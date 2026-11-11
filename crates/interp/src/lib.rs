@@ -212,9 +212,12 @@ impl<'p> Evaluator<'p> {
         let closures = std::mem::replace(&mut self.closures, saved_closures);
         let sub_modules = std::mem::replace(&mut self.modules, saved_modules);
 
+        if let Err(e) = result {
+            self.stack.truncate(saved_len);
+            return Err(e);
+        }
         let module_top = self.stack.pop().expect("module frame present");
         debug_assert_eq!(self.stack.len(), saved_len);
-        result?;
 
         Ok(ModuleRuntime { top_frame: module_top, closures, body: child.body.clone(), sub_modules })
     }
@@ -279,15 +282,11 @@ impl<'p> Evaluator<'p> {
         self.closures.get(id.0).and_then(|c| c.as_ref())
     }
 
-    fn eval_program(mut self, input: &Value) -> Result<Value, RuntimeError> {
+    fn eval_program(mut self, input: JsltValue) -> Result<Value, RuntimeError> {
         self.bump_steps()?;
 
         // Top-Level frame with lets as locals; '.' is input
-        let mut top = Frame {
-            locals: Vec::new(),
-            this_val: JsltValue::from_json(input.clone()),
-            active_fun: None,
-        };
+        let mut top = Frame { locals: Vec::new(), this_val: input, active_fun: None };
         top.locals.resize(self.prog.lets.len(), JsltValue::null());
         self.push_frame(top);
 
@@ -1175,7 +1174,7 @@ pub fn apply(
 ) -> Result<Value, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let ev = Evaluator::new(bound, cfg);
-    ev.eval_program(input)
+    ev.eval_program(JsltValue::from_json(input.clone()))
 }
 
 pub fn apply_with_modules(
@@ -1194,7 +1193,7 @@ pub fn apply_with_modules(
         ev.modules.insert(key.clone(), mr);
     }
 
-    ev.eval_program(input)
+    ev.eval_program(input_val)
 }
 
 fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> RuntimeError {

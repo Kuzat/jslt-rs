@@ -390,3 +390,13 @@ fn module_lets_see_main_input() {
     let prog = compile_file_with_imports(&main_path).unwrap();
     assert_eq!(prog.apply(&json!({"foo": 22}), None).unwrap(), json!([22, 22]));
 }
+
+#[test]
+fn module_let_error_is_reported() {
+    let td = TempDir::new().unwrap();
+    write_file(&td, "module.jslt", "let x = [for ([1]) let a = 1 error(\"boom\")]\ndef f() $x\n");
+    let main_path = write_file(&td, "main.jslt", "import \"module.jslt\" as m\nm:f()\n");
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    let err = prog.apply(&json!({}), None).unwrap_err();
+    assert!(err.to_string().contains("boom"), "{err}");
+}

@@ -421,7 +421,31 @@ impl<'a> Parser<'a> {
         Ok(Let { bindings, span, trivia })
     }
 
+    // Full expression: `operand ('|' operand)*`, left-associative, lowest precedence.
     fn parse_if_or_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_pipe_operand()?;
+        while self.at(&Token::Pipe) {
+            self.bump()?;
+            let right = match self.parse_pipe_operand() {
+                Ok(expr) => expr,
+                Err(err) => {
+                    self.errors.push(err);
+                    self.synchronize_expression();
+                    break;
+                }
+            };
+            let span = Span::join(left.span(), right.span());
+            left = Expr::Binary {
+                op: BinaryOp::Pipe,
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_pipe_operand(&mut self) -> ParseResult<Expr> {
         if self.at(&Token::If) {
             let start = self.cur.span;
             self.bump()?; // 'if'
@@ -1316,6 +1340,7 @@ impl<'a> Parser<'a> {
         matches!(
             tok,
             Token::Or
+                | Token::Pipe
                 | Token::And
                 | Token::Lt
                 | Token::LtEq

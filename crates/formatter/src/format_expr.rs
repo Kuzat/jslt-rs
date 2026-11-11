@@ -329,6 +329,7 @@ fn binary_op_str(op: BinaryOp) -> &'static str {
         BinaryOp::Ne => "!=",
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
+        BinaryOp::Pipe => "|",
     }
 }
 

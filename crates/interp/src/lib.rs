@@ -523,6 +523,10 @@ impl<'p> Evaluator<'p> {
                 let res = self.eval_expr(l)?.truthy() || self.eval_expr(r)?.truthy();
                 Ok(JsltValue::from_json(Value::Bool(res)))
             }
+            Pipe(l, r, _) => {
+                let lv = self.eval_expr(l)?;
+                self.eval_piped(lv, r)
+            }
 
             ArrayLiteral(elems, _) => {
                 let mut out = Vec::with_capacity(elems.len());
@@ -989,6 +993,31 @@ impl<'p> Evaluator<'p> {
         result
     }
 
+    /// Evaluates an object field value. A nested object literal, or one on the left of a
+    /// pipe, matches against `match_source` (the parent's value for this key).
+    fn eval_object_value(
+        &mut self,
+        expr: &BoundExpr,
+        match_source: Option<Value>,
+    ) -> Result<JsltValue, RuntimeError> {
+        match expr {
+            BoundExpr::ObjectLiteral(entries, _) => self.eval_object_literal(entries, match_source),
+            BoundExpr::Pipe(l, r, _) => {
+                let lv = self.eval_object_value(l, match_source)?;
+                self.eval_piped(lv, r)
+            }
+            _ => self.eval_expr(expr),
+        }
+    }
+
+    /// Evaluates `expr` with '.' bound to `this`.
+    fn eval_piped(&mut self, this: JsltValue, expr: &BoundExpr) -> Result<JsltValue, RuntimeError> {
+        let saved_this = std::mem::replace(&mut self.current_frame_mut().this_val, this);
+        let res = self.eval_expr(expr);
+        self.current_frame_mut().this_val = saved_this;
+        res
+    }
+
     fn eval_object_literal(
         &mut self,
         entries: &[BoundObjectEntry],
@@ -1024,16 +1053,11 @@ impl<'p> Evaluator<'p> {
                         }
                     };
 
-                    let val = match vexpr {
-                        BoundExpr::ObjectLiteral(nested_entries, _) => {
-                            let nested_source = match &active_match_source {
-                                Some(Value::Object(m)) => m.get(&s).cloned(),
-                                _ => None,
-                            };
-                            self.eval_object_literal(nested_entries, nested_source)?
-                        }
-                        _ => self.eval_expr(vexpr)?,
+                    let nested_source = match &active_match_source {
+                        Some(Value::Object(m)) => m.get(&s).cloned(),
+                        _ => None,
                     };
+                    let val = self.eval_object_value(vexpr, nested_source)?;
 
                     let val_json = val.into_json();
                     if should_omit_object_field(&val_json) {

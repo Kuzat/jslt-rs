@@ -94,7 +94,8 @@ let_block    = let_stmt, { nl+, let_stmt } ;
 let_stmt     = "let", ws1, ident, ws, "=", ws, expr ;
 
 # ---------- Expressions ----------
-expr         = if_expr | or_expr ;
+expr         = pipe_operand, { ws, "|", ws, pipe_operand } ;
+pipe_operand = if_expr | or_expr ;
 
 if_expr      = "if", ws1, "(", expr, ")", ws, expr, ws1, "else", ws1, expr ;
 
@@ -189,6 +190,9 @@ From highest to lowest (all left‑associative unless stated):
 5. Comparisons: `<` `<=` `>` `>=` `==` `!=`
 6. Logical: `and` `or`
 7. Conditional: `if (...) … else …` (ternary‑like expression)
+8. Pipe: `a | b` evaluates `b` with `.` set to the value of `a`. Each branch of an `if` is a full
+   expression, so `if (c) x else y | z` pipes only `y`. An object matcher (`* : .`) on the right
+   matches the piped value.
 
 ### 5.2 Types & coercion
 

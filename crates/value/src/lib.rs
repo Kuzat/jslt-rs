@@ -1,32 +1,58 @@
-//! Value layer for JSLT: a tiny facade around `serde_json::Value`.
+//! Value layer for JSLT.
 //!
-//! This matches the spec's data model and provides helpers needed by the evaluator.
+//! `JsltValue` is an immutable JSON tree. Strings, arrays and objects are
+//! reference counted, so cloning a value or taking a part of it does not copy.
 //!  - deep equality (object key order-insensitive)
 //!  - numeric extraction with NaN/Inf checks
-//!  - null helpers
 //!  - array/string index & slice with negative indices and null propagation
 //!
 //! String index and slice by Unicode scalar values (code points), not bytes.
 
+use indexmap::IndexMap;
+use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Number, Value};
+use serde_json::{Number, Value};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct JsltValue(pub Arc<Value>);
+/// Object entries in insertion order.
+pub type Map = IndexMap<String, JsltValue>;
+
+#[derive(Clone, Default, PartialEq)]
+pub enum JsltValue {
+    #[default]
+    Null,
+    Bool(bool),
+    Number(Number),
+    String(Arc<str>),
+    Array(Arc<Vec<JsltValue>>),
+    Object(Arc<Map>),
+}
+
+impl std::fmt::Debug for JsltValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.to_json(), f)
+    }
+}
+
+/// Compact JSON text.
+impl std::fmt::Display for JsltValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&serde_json::to_string(self).map_err(|_| std::fmt::Error)?)
+    }
+}
 
 impl JsltValue {
     // Constructors and type guards
     pub fn null() -> Self {
-        Self(Arc::new(Value::Null))
+        JsltValue::Null
     }
 
     pub fn bool(b: bool) -> Self {
-        Self(Arc::new(Value::Bool(b)))
+        JsltValue::Bool(b)
     }
 
-    pub fn string(s: String) -> Self {
-        Self(Arc::new(Value::String(s)))
+    pub fn string(s: impl Into<Arc<str>>) -> Self {
+        JsltValue::String(s.into())
     }
 
     /// Constructs a numeric value from an f64, but prefer an integer
@@ -42,69 +68,137 @@ impl JsltValue {
     }
 
     pub fn number_f64(n: f64) -> Self {
-        Self(Arc::new(Value::Number(Number::from_f64(n).unwrap())))
+        JsltValue::Number(Number::from_f64(n).unwrap())
     }
 
     pub fn number_i64(n: i64) -> Self {
-        Self(Arc::new(Value::Number(Number::from(n))))
+        JsltValue::Number(Number::from(n))
     }
 
     pub fn array(a: Vec<JsltValue>) -> Self {
-        let items: Vec<Value> = a.into_iter().map(|v| v.into_json()).collect();
-        Self(Arc::new(Value::Array(items)))
+        JsltValue::Array(Arc::new(a))
+    }
+
+    pub fn object(m: Map) -> Self {
+        JsltValue::Object(Arc::new(m))
     }
 
     pub fn is_null(&self) -> bool {
-        matches!(self.0.as_ref(), Value::Null)
+        matches!(self, JsltValue::Null)
     }
 
     pub fn is_boolean(&self) -> bool {
-        matches!(self.0.as_ref(), Value::Bool(_))
+        matches!(self, JsltValue::Bool(_))
     }
 
     pub fn is_number(&self) -> bool {
-        matches!(self.0.as_ref(), Value::Number(_))
+        matches!(self, JsltValue::Number(_))
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(self.0.as_ref(), Value::String(_))
+        matches!(self, JsltValue::String(_))
     }
 
     pub fn is_array(&self) -> bool {
-        matches!(self.0.as_ref(), Value::Array(_))
+        matches!(self, JsltValue::Array(_))
     }
 
     pub fn is_object(&self) -> bool {
-        matches!(self.0.as_ref(), Value::Object(_))
+        matches!(self, JsltValue::Object(_))
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            JsltValue::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_number(&self) -> Option<&Number> {
+        match self {
+            JsltValue::Number(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            JsltValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[JsltValue]> {
+        match self {
+            JsltValue::Array(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Map> {
+        match self {
+            JsltValue::Object(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// The member `key` of an object; None for a missing key or a non-object.
+    pub fn get(&self, key: &str) -> Option<&JsltValue> {
+        self.as_object()?.get(key)
     }
 
     // Conversion helpers
-    pub fn as_json(&self) -> &Value {
-        self.0.as_ref()
+    pub fn to_json(&self) -> Value {
+        match self {
+            JsltValue::Null => Value::Null,
+            JsltValue::Bool(b) => Value::Bool(*b),
+            JsltValue::Number(n) => Value::Number(n.clone()),
+            JsltValue::String(s) => Value::String(s.to_string()),
+            JsltValue::Array(a) => Value::Array(a.iter().map(JsltValue::to_json).collect()),
+            JsltValue::Object(o) => {
+                Value::Object(o.iter().map(|(k, v)| (k.clone(), v.to_json())).collect())
+            }
+        }
     }
 
     pub fn into_json(self) -> Value {
-        Arc::try_unwrap(self.0).unwrap_or_else(|arc| (*arc).clone())
+        self.to_json()
     }
 
     pub fn from_json(value: Value) -> Self {
-        JsltValue(Arc::new(value))
+        match value {
+            Value::Null => JsltValue::Null,
+            Value::Bool(b) => JsltValue::Bool(b),
+            Value::Number(n) => JsltValue::Number(n),
+            Value::String(s) => JsltValue::String(s.into()),
+            Value::Array(a) => JsltValue::array(a.into_iter().map(JsltValue::from_json).collect()),
+            Value::Object(o) => JsltValue::object(
+                o.into_iter().map(|(k, v)| (k, JsltValue::from_json(v))).collect(),
+            ),
+        }
+    }
+
+    pub fn from_json_ref(value: &Value) -> Self {
+        match value {
+            Value::Null => JsltValue::Null,
+            Value::Bool(b) => JsltValue::Bool(*b),
+            Value::Number(n) => JsltValue::Number(n.clone()),
+            Value::String(s) => JsltValue::String(s.as_str().into()),
+            Value::Array(a) => JsltValue::array(a.iter().map(JsltValue::from_json_ref).collect()),
+            Value::Object(o) => JsltValue::object(
+                o.iter().map(|(k, v)| (k.clone(), JsltValue::from_json_ref(v))).collect(),
+            ),
+        }
     }
 
     // Numeric helper: reject NaN/Inf as per spec intent
     /// Returns the value as `i64` if it is an integer number (not a float like `1.0`).
     pub fn as_i64(&self) -> Option<i64> {
-        match self.0.as_ref() {
-            Value::Number(n) => n.as_i64(),
-            _ => None,
-        }
+        self.as_number()?.as_i64()
     }
 
     pub fn as_f64_checked(&self) -> Option<f64> {
-        match self.0.as_ref() {
-            Value::Number(n) => n.as_f64().filter(|f| f.is_finite()),
-            _ => None,
-        }
+        self.as_number()?.as_f64().filter(|f| f.is_finite())
     }
 
     // Deep structural equality
@@ -113,22 +207,21 @@ impl JsltValue {
     // - arrays: element-wise deep compare
     // - other same-type exact equality
     pub fn deep_eq(&self, other: &JsltValue) -> bool {
-        use Value::*;
-        match (self.0.as_ref(), other.0.as_ref()) {
+        use JsltValue::*;
+        match (self, other) {
             (Null, Null) => true,
             (Bool(a), Bool(b)) => a == b,
             (Number(a), Number(b)) => number_eq(a, b),
             (String(a), String(b)) => a == b,
             (Array(a), Array(b)) => {
-                if a.len() != b.len() {
-                    return false;
-                }
-                a.iter().zip(b.iter()).all(|(x, y)| {
-                    JsltValue::from_json(x.clone()).deep_eq(&JsltValue::from_json(y.clone()))
-                })
+                Arc::ptr_eq(a, b)
+                    || (a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.deep_eq(y)))
             }
-            (Object(a), Object(b)) => object_deep_eq(a, b),
-            // Different types are never equal
+            (Object(a), Object(b)) => {
+                Arc::ptr_eq(a, b)
+                    || (a.len() == b.len()
+                        && a.iter().all(|(k, va)| b.get(k).is_some_and(|vb| va.deep_eq(vb))))
+            }
             _ => false,
         }
     }
@@ -138,23 +231,19 @@ impl JsltValue {
     // - Strings: by Unicode scalar index; negativ from end; OOB -> null; result is 1-char string
     // - Other types: null propagation
     pub fn index(&self, idx: i64) -> JsltValue {
-        match self.0.as_ref() {
-            Value::Array(arr) => {
-                let len = arr.len() as i64;
-                if let Some(i) = normalize_index(idx, len) {
-                    JsltValue::from_json(arr[i as usize].clone())
-                } else {
-                    JsltValue::null()
-                }
-            }
-            Value::String(s) => {
-                let chars: Vec<char> = s.chars().collect();
-                let len = chars.len() as i64;
-                if let Some(i) = normalize_index(idx, len) {
-                    let ch = chars[i as usize];
-                    JsltValue::from_json(Value::String(ch.to_string()))
-                } else {
-                    JsltValue::null()
+        match self {
+            JsltValue::Array(arr) => match normalize_index(idx, arr.len() as i64) {
+                Some(i) => arr[i as usize].clone(),
+                None => JsltValue::null(),
+            },
+            JsltValue::String(s) => {
+                let len = s.chars().count() as i64;
+                match normalize_index(idx, len) {
+                    Some(i) => {
+                        let ch = s.chars().nth(i as usize).expect("index within char count");
+                        JsltValue::string(ch.to_string())
+                    }
+                    None => JsltValue::null(),
                 }
             }
             _ => JsltValue::null(),
@@ -168,18 +257,18 @@ impl JsltValue {
     // - If start > end, empty ([}, "")
     // - Wrong types: null propagation
     pub fn slice(&self, start: Option<i64>, end: Option<i64>) -> JsltValue {
-        match self.0.as_ref() {
-            Value::Array(arr) => {
+        match self {
+            JsltValue::Array(arr) => {
                 let (lo, hi) = compute_slice_bounds(start, end, arr.len());
                 let slice = if lo <= hi { arr[lo..hi].to_vec() } else { Vec::new() };
-                JsltValue::from_json(Value::Array(slice))
+                JsltValue::array(slice)
             }
-            Value::String(s) => {
+            JsltValue::String(s) => {
                 let chars: Vec<char> = s.chars().collect();
                 let (lo, hi) = compute_slice_bounds(start, end, chars.len());
                 let out: String =
                     if lo <= hi { chars[lo..hi].iter().collect() } else { String::new() };
-                JsltValue::from_json(Value::String(out))
+                JsltValue::string(out)
             }
             _ => JsltValue::null(),
         }
@@ -187,35 +276,35 @@ impl JsltValue {
 
     // Helper function to find the type of a value.
     pub fn type_of(&self) -> &'static str {
-        match self.as_json() {
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Array(_) => "array",
-            Value::Object(_) => "object",
+        match self {
+            JsltValue::Null => "null",
+            JsltValue::Bool(_) => "boolean",
+            JsltValue::Number(_) => "number",
+            JsltValue::String(_) => "string",
+            JsltValue::Array(_) => "array",
+            JsltValue::Object(_) => "object",
         }
     }
 
     // Helper function to check if a value is truthy.
     pub fn truthy(&self) -> bool {
-        match self.as_json() {
-            Value::Null => false,
-            Value::Bool(b) => *b,
-            Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
-            Value::String(s) => !s.is_empty(),
-            Value::Array(a) => !a.is_empty(),
-            Value::Object(o) => !o.is_empty(),
+        match self {
+            JsltValue::Null => false,
+            JsltValue::Bool(b) => *b,
+            JsltValue::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
+            JsltValue::String(s) => !s.is_empty(),
+            JsltValue::Array(a) => !a.is_empty(),
+            JsltValue::Object(o) => !o.is_empty(),
         }
     }
 
     // helper function to turn value to string representation
     pub fn stringify(&self) -> String {
-        match self.as_json() {
-            Value::Null => "null".to_string(),
-            Value::Bool(true) => "true".to_string(),
-            Value::Bool(false) => "false".to_string(),
-            Value::Number(n) => {
+        match self {
+            JsltValue::Null => "null".to_string(),
+            JsltValue::Bool(true) => "true".to_string(),
+            JsltValue::Bool(false) => "false".to_string(),
+            JsltValue::Number(n) => {
                 // Prefer integer formatting when the numeric value is integral
                 if let Some(i) = n.as_i64() {
                     i.to_string()
@@ -231,14 +320,13 @@ impl JsltValue {
                         f.to_string()
                     }
                 } else {
-                    // fallback: default JSON rendering
-                    self.as_json().to_string()
+                    n.to_string()
                 }
             }
-            Value::String(s) => s.clone(),
+            JsltValue::String(s) => s.to_string(),
             // For arrays/objects: JSON rendering to match typical JSLT behavior for string()
-            Value::Array(_) | Value::Object(_) => {
-                serde_json::to_string(self.as_json()).unwrap_or_default()
+            JsltValue::Array(_) | JsltValue::Object(_) => {
+                serde_json::to_string(self).unwrap_or_default()
             }
         }
     }
@@ -249,7 +337,26 @@ impl Serialize for JsltValue {
     where
         S: Serializer,
     {
-        self.as_json().serialize(serializer)
+        match self {
+            JsltValue::Null => serializer.serialize_unit(),
+            JsltValue::Bool(b) => serializer.serialize_bool(*b),
+            JsltValue::Number(n) => n.serialize(serializer),
+            JsltValue::String(s) => serializer.serialize_str(s),
+            JsltValue::Array(a) => {
+                let mut seq = serializer.serialize_seq(Some(a.len()))?;
+                for v in a.iter() {
+                    seq.serialize_element(v)?;
+                }
+                seq.end()
+            }
+            JsltValue::Object(o) => {
+                let mut map = serializer.serialize_map(Some(o.len()))?;
+                for (k, v) in o.iter() {
+                    map.serialize_entry(k, v)?;
+                }
+                map.end()
+            }
+        }
     }
 }
 
@@ -275,22 +382,6 @@ fn number_eq(a: &Number, b: &Number) -> bool {
         }
         _ => false,
     }
-}
-
-fn object_deep_eq(a: &Map<String, Value>, b: &Map<String, Value>) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-
-    // key order-insensitive: compare by keys
-    for (ka, va) in a.iter() {
-        let Some(vb) = b.get(ka) else { return false };
-        if !JsltValue::from_json(va.clone()).deep_eq(&JsltValue::from_json(vb.clone())) {
-            return false;
-        }
-    }
-
-    true
 }
 
 // Normalize a possibly negative index into [0, len-1]. Returns None if OOB.
@@ -436,6 +527,35 @@ mod tests {
         let v = JsltValue::from_json(json!({"a": 1}));
         assert!(v.index(0).is_null());
         assert!(v.slice(None, None).is_null());
+    }
+
+    #[test]
+    fn members_and_elements_share_storage() {
+        let v = JsltValue::from_json(json!({"a": {"b": [1, {"c": "x"}]}}));
+        let (JsltValue::Object(a1), JsltValue::Object(a2)) =
+            (v.get("a").unwrap().clone(), v.get("a").unwrap().clone())
+        else {
+            panic!("expected objects");
+        };
+        assert!(Arc::ptr_eq(&a1, &a2));
+
+        let arr = v.get("a").unwrap().get("b").unwrap();
+        let (JsltValue::Object(e1), JsltValue::Object(e2)) = (arr.index(1), arr.index(-1)) else {
+            panic!("expected objects");
+        };
+        assert!(Arc::ptr_eq(&e1, &e2));
+    }
+
+    #[test]
+    fn json_round_trip_keeps_key_order_and_numbers() {
+        let src = json!({"z": 1, "a": [1.5, -0.0, 2, null, true], "m": {"y": "s", "b": {}}});
+        let v = JsltValue::from_json_ref(&src);
+        assert_eq!(v.to_json(), src);
+        assert_eq!(v.to_string(), serde_json::to_string(&src).unwrap());
+        assert_eq!(
+            v.to_json().as_object().unwrap().keys().collect::<Vec<_>>(),
+            vec!["z", "a", "m"]
+        );
     }
 
     #[test]

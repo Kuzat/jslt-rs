@@ -3,12 +3,13 @@ use crate::binder::{
     FunctionId, ObjectKey, ResolvedVar, SyntheticFun,
 };
 use ast::{Program, Span};
-use serde_json::{json, Map, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use stdlib::Registry;
 use thiserror::Error;
 use value::JsltValue;
+use value::Map;
 
 pub mod binder;
 
@@ -327,7 +328,7 @@ impl<'p> Evaluator<'p> {
         use BoundExpr::*;
         match e {
             Null(_) => Ok(JsltValue::null()),
-            Bool(b, _) => Ok(JsltValue::from_json(Value::Bool(*b))),
+            Bool(b, _) => Ok(JsltValue::bool(*b)),
             NumberFloat(n, sp) => {
                 if !n.is_finite() {
                     return Err(RuntimeError::NonFiniteNumber { span: *sp });
@@ -335,7 +336,7 @@ impl<'p> Evaluator<'p> {
                 Ok(JsltValue::number_f64(*n))
             }
             NumberInt(n, _) => Ok(JsltValue::number_i64(*n)),
-            String(s, _) => Ok(JsltValue::from_json(Value::String(s.clone()))),
+            String(s, _) => Ok(JsltValue::string(s.as_str())),
             LetBlock(bindings, body, _) => {
                 // Create a temporary frame cloning current locals to support shadowing and new lets
                 let cur = self.current_frame().clone();
@@ -415,7 +416,7 @@ impl<'p> Evaluator<'p> {
 
             Not(inner, _) => {
                 let v = self.eval_expr(inner)?;
-                Ok(JsltValue::from_json(Value::Bool(!v.truthy())))
+                Ok(JsltValue::bool(!v.truthy()))
             }
             Neg(inner, sp) => {
                 let v = self.eval_expr(inner)?;
@@ -434,14 +435,14 @@ impl<'p> Evaluator<'p> {
             Mul(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
-                let (text, count) = match (lv.as_json(), rv.as_json()) {
-                    (Value::String(_), Value::String(_)) => {
+                let (text, count) = match (&lv, &rv) {
+                    (JsltValue::String(_), JsltValue::String(_)) => {
                         return Err(RuntimeError::TypeError {
                             msg: "can't multiply two strings".into(),
                             span: *sp,
                         })
                     }
-                    (Value::String(t), other) | (other, Value::String(t)) => (t, other),
+                    (JsltValue::String(t), other) | (other, JsltValue::String(t)) => (t, other),
                     _ => return numeric_op(&lv, &rv, *sp, i64::wrapping_mul, |a, b| a * b),
                 };
                 let n = repeat_count(count);
@@ -515,12 +516,12 @@ impl<'p> Evaluator<'p> {
             Eq(l, r, _) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
-                Ok(JsltValue::from_json(Value::Bool(lv.deep_eq(&rv))))
+                Ok(JsltValue::bool(lv.deep_eq(&rv)))
             }
             Ne(l, r, _) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
-                Ok(JsltValue::from_json(Value::Bool(!lv.deep_eq(&rv))))
+                Ok(JsltValue::bool(!lv.deep_eq(&rv)))
             }
             Lt(l, r, sp) => self.eval_cmp(l, r, *sp, |o| o.is_lt()),
             Le(l, r, sp) => self.eval_cmp(l, r, *sp, |o| o.is_le()),
@@ -529,11 +530,11 @@ impl<'p> Evaluator<'p> {
 
             And(l, r, _) => {
                 let res = self.eval_expr(l)?.truthy() && self.eval_expr(r)?.truthy();
-                Ok(JsltValue::from_json(Value::Bool(res)))
+                Ok(JsltValue::bool(res))
             }
             Or(l, r, _) => {
                 let res = self.eval_expr(l)?.truthy() || self.eval_expr(r)?.truthy();
-                Ok(JsltValue::from_json(Value::Bool(res)))
+                Ok(JsltValue::bool(res))
             }
             Pipe(l, r, _) => {
                 let lv = self.eval_expr(l)?;
@@ -543,18 +544,18 @@ impl<'p> Evaluator<'p> {
             ArrayLiteral(elems, _) => {
                 let mut out = Vec::with_capacity(elems.len());
                 for e in elems {
-                    out.push(self.eval_expr(e)?.into_json());
+                    out.push(self.eval_expr(e)?);
                 }
-                Ok(JsltValue::from_json(Value::Array(out)))
+                Ok(JsltValue::array(out))
             }
 
             ObjectLiteral(entries, _sp) => self.eval_object_literal(entries),
 
             ArrayFor { seq, lets, elem, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
-                match seq_val.as_json() {
-                    Value::Null => return Ok(JsltValue::null()),
-                    Value::Array(_) | Value::Object(_) => {}
+                match &seq_val {
+                    JsltValue::Null => return Ok(JsltValue::null()),
+                    JsltValue::Array(_) | JsltValue::Object(_) => {}
                     other => {
                         return Err(RuntimeError::TypeError {
                             msg: format!("For loop can't iterate over {other}"),
@@ -570,11 +571,11 @@ impl<'p> Evaluator<'p> {
                     this_val: JsltValue::null(),
                     active_fun: caller_frame.active_fun,
                 });
-                match seq_val.as_json() {
-                    Value::Array(items) => {
+                match &seq_val {
+                    JsltValue::Array(items) => {
                         out.reserve(items.len());
-                        for item in items {
-                            self.current_frame_mut().this_val = JsltValue::from_json(item.clone());
+                        for item in items.iter() {
+                            self.current_frame_mut().this_val = item.clone();
                             self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
@@ -582,15 +583,14 @@ impl<'p> Evaluator<'p> {
                                 true
                             };
                             if pass {
-                                out.push(self.eval_expr(elem)?.into_json());
+                                out.push(self.eval_expr(elem)?);
                             }
                         }
                     }
-                    Value::Object(map) => {
+                    JsltValue::Object(map) => {
                         out.reserve(map.len());
-                        for (k, v) in map {
-                            self.current_frame_mut().this_val =
-                                JsltValue::from_json(json!({ "key": k, "value": v }));
+                        for (k, v) in map.iter() {
+                            self.current_frame_mut().this_val = key_value_pair(k, v);
                             self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
@@ -598,21 +598,21 @@ impl<'p> Evaluator<'p> {
                                 true
                             };
                             if pass {
-                                out.push(self.eval_expr(elem)?.into_json());
+                                out.push(self.eval_expr(elem)?);
                             }
                         }
                     }
                     _ => unreachable!(),
                 }
                 self.pop_frame();
-                Ok(JsltValue::from_json(Value::Array(out)))
+                Ok(JsltValue::array(out))
             }
 
             ObjectFor { seq, lets, key, value, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
-                match seq_val.as_json() {
-                    Value::Null => return Ok(JsltValue::null()),
-                    Value::Array(_) | Value::Object(_) => {}
+                match &seq_val {
+                    JsltValue::Null => return Ok(JsltValue::null()),
+                    JsltValue::Array(_) | JsltValue::Object(_) => {}
                     other => {
                         return Err(RuntimeError::TypeError {
                             msg: format!("Object comprehension can't loop over {other}"),
@@ -627,10 +627,10 @@ impl<'p> Evaluator<'p> {
                     this_val: JsltValue::null(),
                     active_fun: caller_frame.active_fun,
                 });
-                match seq_val.as_json() {
-                    Value::Array(items) => {
-                        for item in items {
-                            self.current_frame_mut().this_val = JsltValue::from_json(item.clone());
+                match &seq_val {
+                    JsltValue::Array(items) => {
+                        for item in items.iter() {
+                            self.current_frame_mut().this_val = item.clone();
                             self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
@@ -639,8 +639,8 @@ impl<'p> Evaluator<'p> {
                             };
                             if pass {
                                 let k = self.eval_expr(key)?;
-                                let kstr = match k.as_json() {
-                                    Value::String(s) => s.clone(),
+                                let kstr = match &k {
+                                    JsltValue::String(s) => s.to_string(),
                                     _ => {
                                         return Err(RuntimeError::TypeError {
                                             msg: "object key must be a  string".into(),
@@ -649,7 +649,7 @@ impl<'p> Evaluator<'p> {
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
-                                let v_json = v.into_json();
+                                let v_json = v;
                                 if should_omit_object_field(&v_json) {
                                     continue;
                                 }
@@ -657,10 +657,9 @@ impl<'p> Evaluator<'p> {
                             }
                         }
                     }
-                    Value::Object(map) => {
-                        for (k_raw, v_raw) in map {
-                            self.current_frame_mut().this_val =
-                                JsltValue::from_json(json!({ "key": k_raw, "value": v_raw }));
+                    JsltValue::Object(map) => {
+                        for (k_raw, v_raw) in map.iter() {
+                            self.current_frame_mut().this_val = key_value_pair(k_raw, v_raw);
                             self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
@@ -669,8 +668,8 @@ impl<'p> Evaluator<'p> {
                             };
                             if pass {
                                 let k = self.eval_expr(key)?;
-                                let kstr = match k.as_json() {
-                                    Value::String(s) => s.clone(),
+                                let kstr = match &k {
+                                    JsltValue::String(s) => s.to_string(),
                                     _ => {
                                         return Err(RuntimeError::TypeError {
                                             msg: "object key must be a  string".into(),
@@ -679,7 +678,7 @@ impl<'p> Evaluator<'p> {
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
-                                let v_json = v.into_json();
+                                let v_json = v;
                                 if should_omit_object_field(&v_json) {
                                     continue;
                                 }
@@ -690,7 +689,7 @@ impl<'p> Evaluator<'p> {
                     _ => unreachable!(),
                 }
                 self.pop_frame();
-                Ok(JsltValue::from_json(Value::Object(out)))
+                Ok(JsltValue::object(out))
             }
 
             Member(target, key, _) => {
@@ -700,12 +699,12 @@ impl<'p> Evaluator<'p> {
 
             Index(target, index, _) => {
                 let tv = self.eval_expr(target)?;
-                match tv.as_json() {
-                    Value::Array(_) => {
+                match &tv {
+                    JsltValue::Array(_) => {
                         let i = self.eval_sequence_index(index)?;
                         Ok(tv.index(i))
                     }
-                    Value::String(s) => {
+                    JsltValue::String(s) => {
                         let i = self.eval_sequence_index(index)?;
                         let len = s.chars().count() as i64;
                         let resolved = if i < 0 { len.saturating_add(i) } else { i };
@@ -723,8 +722,8 @@ impl<'p> Evaluator<'p> {
 
             Slice { target, start, end, .. } => {
                 let tv = self.eval_expr(target)?;
-                match tv.as_json() {
-                    Value::Array(_) | Value::String(_) => {
+                match &tv {
+                    JsltValue::Array(_) | JsltValue::String(_) => {
                         let sidx = match start {
                             Some(s) => Some(self.eval_sequence_index(s)?),
                             None => None,
@@ -852,27 +851,27 @@ impl<'p> Evaluator<'p> {
     ) -> Result<JsltValue, RuntimeError> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
-        match (lv.as_json(), rv.as_json()) {
-            (Value::String(_), _) | (_, Value::String(_)) => {
+        match (&lv, &rv) {
+            (JsltValue::String(_), _) | (_, JsltValue::String(_)) => {
                 let mut out = concat_part(&lv);
                 out.push_str(&concat_part(&rv));
                 Ok(JsltValue::string(out))
             }
-            (Value::Object(a), Value::Object(b)) => {
+            (JsltValue::Object(a), JsltValue::Object(b)) => {
                 // Object addition: merge with left operand winning on key conflicts
-                let mut merged = b.clone();
-                merged.extend(a.clone());
-                Ok(JsltValue::from_json(Value::Object(merged)))
+                let mut merged = Map::clone(b);
+                merged.extend(a.iter().map(|(k, v)| (k.clone(), v.clone())));
+                Ok(JsltValue::object(merged))
             }
-            (Value::Array(a), Value::Array(b)) => {
+            (JsltValue::Array(a), JsltValue::Array(b)) => {
                 // Array addition: concatenate arrays in order (left then right)
                 let mut out = Vec::with_capacity(a.len() + b.len());
-                out.extend(a.clone());
-                out.extend(b.clone());
-                Ok(JsltValue::from_json(Value::Array(out)))
+                out.extend(a.iter().cloned());
+                out.extend(b.iter().cloned());
+                Ok(JsltValue::array(out))
             }
-            (Value::Object(_) | Value::Array(_), Value::Null) => Ok(lv),
-            (Value::Null, Value::Object(_) | Value::Array(_)) => Ok(rv),
+            (JsltValue::Object(_) | JsltValue::Array(_), JsltValue::Null) => Ok(lv),
+            (JsltValue::Null, JsltValue::Object(_) | JsltValue::Array(_)) => Ok(rv),
             _ => numeric_op(&lv, &rv, span, i64::wrapping_add, |a, b| a + b),
         }
     }
@@ -899,15 +898,15 @@ impl<'p> Evaluator<'p> {
     ) -> Result<JsltValue, RuntimeError> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
-        let res = match (lv.as_json(), rv.as_json()) {
-            (Value::Number(a), Value::Number(b)) => {
+        let res = match (&lv, &rv) {
+            (JsltValue::Number(a), JsltValue::Number(b)) => {
                 let (af, bf) = (a.as_f64().unwrap(), b.as_f64().unwrap());
                 pred(af.partial_cmp(&bf).ok_or(RuntimeError::NonFiniteNumber { span })?)
             }
-            (Value::String(a), Value::String(b)) => pred(a.cmp(b)),
-            (Value::Null, Value::Null) => pred(std::cmp::Ordering::Equal),
-            (Value::Null, _) => pred(std::cmp::Ordering::Less),
-            (_, Value::Null) => pred(std::cmp::Ordering::Greater),
+            (JsltValue::String(a), JsltValue::String(b)) => pred(a.cmp(b)),
+            (JsltValue::Null, JsltValue::Null) => pred(std::cmp::Ordering::Equal),
+            (JsltValue::Null, _) => pred(std::cmp::Ordering::Less),
+            (_, JsltValue::Null) => pred(std::cmp::Ordering::Greater),
             _ => {
                 return Err(RuntimeError::TypeError {
                     msg: "comparison expects number vs number or string vs string".into(),
@@ -915,7 +914,7 @@ impl<'p> Evaluator<'p> {
                 })
             }
         };
-        Ok(JsltValue::from_json(Value::Bool(res)))
+        Ok(JsltValue::bool(res))
     }
 
     // Helper to call a function inside a ModuleRuntime (ImportedLocal)
@@ -1045,7 +1044,7 @@ impl<'p> Evaluator<'p> {
         }
         for a in args {
             let v = self.eval_expr(a)?;
-            if !should_omit_object_field(v.as_json()) {
+            if !should_omit_object_field(&v) {
                 return Ok(v);
             }
         }
@@ -1077,7 +1076,7 @@ impl<'p> Evaluator<'p> {
         match v.as_f64_checked() {
             Some(f) => Ok(f.trunc() as i64),
             None => Err(RuntimeError::TypeError {
-                msg: format!("Can't index array/string with {}", v.as_json()),
+                msg: format!("Can't index array/string with {}", v),
                 span: expr.span(),
             }),
         }
@@ -1093,13 +1092,10 @@ impl<'p> Evaluator<'p> {
         span: Span,
     ) -> Result<JsltValue, RuntimeError> {
         let arr = self.eval_expr(array)?;
-        let elems: Vec<JsltValue> = match arr.as_json() {
-            Value::Null => return Ok(JsltValue::null()),
-            Value::Array(items) => items.iter().cloned().map(JsltValue::from_json).collect(),
-            Value::Object(map) => map
-                .iter()
-                .map(|(k, v)| JsltValue::from_json(json!({ "key": k, "value": v })))
-                .collect(),
+        let elems: Vec<JsltValue> = match &arr {
+            JsltValue::Null => return Ok(JsltValue::null()),
+            JsltValue::Array(items) => items.to_vec(),
+            JsltValue::Object(map) => map.iter().map(|(k, v)| key_value_pair(k, v)).collect(),
             other => {
                 return Err(RuntimeError::TypeError {
                     msg: format!("Can't group-by on {other}"),
@@ -1108,11 +1104,11 @@ impl<'p> Evaluator<'p> {
             }
         };
 
-        let mut groups: Vec<(Value, Vec<Value>)> = Vec::new();
+        let mut groups: Vec<(JsltValue, Vec<JsltValue>)> = Vec::new();
         let mut index: HashMap<u64, Vec<usize>> = HashMap::new();
         for elem in elems {
-            let k = self.eval_piped(elem.clone(), key)?.into_json();
-            let v = self.eval_piped(elem, value)?.into_json();
+            let k = self.eval_piped(elem.clone(), key)?;
+            let v = self.eval_piped(elem, value)?;
             let bucket = index.entry(json_hash(&k)).or_default();
             match bucket.iter().find(|&&ix| groups[ix].0 == k) {
                 Some(&ix) => groups[ix].1.push(v),
@@ -1122,9 +1118,16 @@ impl<'p> Evaluator<'p> {
                 }
             }
         }
-        let out =
-            groups.into_iter().map(|(k, vs)| json!({ "key": k, "values": vs })).collect::<Vec<_>>();
-        Ok(JsltValue::from_json(Value::Array(out)))
+        let out = groups
+            .into_iter()
+            .map(|(k, vs)| {
+                let mut group = Map::with_capacity(2);
+                group.insert("key".to_string(), k);
+                group.insert("values".to_string(), JsltValue::array(vs));
+                JsltValue::object(group)
+            })
+            .collect();
+        Ok(JsltValue::array(out))
     }
 
     /// Evaluates `expr` with '.' bound to `this`.
@@ -1161,14 +1164,14 @@ impl<'p> Evaluator<'p> {
         for entry in pairs.into_iter().chain(matchers) {
             match entry {
                 BoundObjectEntry::Pair { key: kexpr, value: vexpr, .. } => {
-                    let val_json = self.eval_expr(vexpr)?.into_json();
+                    let val_json = self.eval_expr(vexpr)?;
                     if should_omit_object_field(&val_json) {
                         continue;
                     }
 
                     let key = self.eval_expr(kexpr)?;
-                    let s = match key.as_json() {
-                        Value::String(s) => s.clone(),
+                    let s = match &key {
+                        JsltValue::String(s) => s.to_string(),
                         _ => {
                             return Err(RuntimeError::TypeError {
                                 msg: "Object key must be string".into(),
@@ -1185,20 +1188,21 @@ impl<'p> Evaluator<'p> {
                     obj.insert(s, val_json);
                 }
                 BoundObjectEntry::Wildcard { value, exclude_keys, path } => {
-                    let mut source = Some(self.current_frame().this_val.as_json());
+                    let this = self.current_frame().this_val.clone();
+                    let mut source = Some(&this);
                     for key in path {
                         source = source.and_then(|v| v.get(key.as_str()));
                     }
-                    if let Some(Value::Object(m)) = source.cloned() {
+                    if let Some(JsltValue::Object(m)) = source.cloned() {
                         let excluded: std::collections::HashSet<&str> =
                             exclude_keys.iter().map(std::string::String::as_str).collect();
                         let saved_this = self.current_frame().this_val.clone();
-                        for (k, v) in &m {
+                        for (k, v) in m.iter() {
                             if explicit_keys.contains(k) || excluded.contains(k.as_str()) {
                                 continue;
                             }
-                            self.current_frame_mut().this_val = JsltValue::from_json(v.clone());
-                            let mapped = self.eval_expr(value)?.into_json();
+                            self.current_frame_mut().this_val = v.clone();
+                            let mapped = self.eval_expr(value)?;
                             obj.insert(k.clone(), mapped);
                         }
                         self.current_frame_mut().this_val = saved_this;
@@ -1207,7 +1211,7 @@ impl<'p> Evaluator<'p> {
             }
         }
 
-        Ok(JsltValue::from_json(Value::Object(obj)))
+        Ok(JsltValue::object(obj))
     }
 }
 
@@ -1217,22 +1221,25 @@ fn obj_get(target: &JsltValue, key: &ObjectKey) -> JsltValue {
         ObjectKey::Ident(s, _) => s,
         ObjectKey::String(s, _) => s,
     };
-    match target.as_json() {
-        Value::Object(m) => {
-            m.get(k).cloned().map(JsltValue::from_json).unwrap_or(JsltValue::null())
-        }
-        _ => JsltValue::null(),
-    }
+    target.get(k).cloned().unwrap_or_default()
 }
 
 // In object construction, null/empty object/empty array values are omitted.
-fn should_omit_object_field(value: &Value) -> bool {
+fn should_omit_object_field(value: &JsltValue) -> bool {
     match value {
-        Value::Null => true,
-        Value::Object(m) => m.is_empty(),
-        Value::Array(a) => a.is_empty(),
+        JsltValue::Null => true,
+        JsltValue::Object(m) => m.is_empty(),
+        JsltValue::Array(a) => a.is_empty(),
         _ => false,
     }
+}
+
+/// The `{"key": k, "value": v}` object that iterating over an object binds to `.`.
+fn key_value_pair(k: &str, v: &JsltValue) -> JsltValue {
+    let mut m = Map::with_capacity(2);
+    m.insert("key".to_string(), JsltValue::string(k));
+    m.insert("value".to_string(), v.clone());
+    JsltValue::object(m)
 }
 
 // Public entry point: evaluate a bound program against input JSON.
@@ -1243,7 +1250,7 @@ pub fn apply(
 ) -> Result<Value, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let ev = Evaluator::new(bound, cfg);
-    ev.eval_program(JsltValue::from_json(input.clone()))
+    ev.eval_program(JsltValue::from_json_ref(input))
 }
 
 pub fn apply_with_modules(
@@ -1267,9 +1274,9 @@ pub fn apply_with_variables(
     let cfg = cfg.unwrap_or_default();
     let mut ev = Evaluator::new(bound, cfg);
     ev.variables =
-        variables.iter().map(|(k, v)| (k.clone(), JsltValue::from_json(v.clone()))).collect();
+        variables.iter().map(|(k, v)| (k.clone(), JsltValue::from_json_ref(v))).collect();
 
-    let input_val = JsltValue::from_json(input.clone());
+    let input_val = JsltValue::from_json_ref(input);
     for (key, (child, _callable)) in modules {
         let mr = ev.init_module_runtime(child, &input_val)?;
 
@@ -1293,13 +1300,13 @@ fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> Runtim
 }
 
 /// Hash consistent with `Value` equality: object key order is ignored, and `0.0 == -0.0`.
-fn json_hash(v: &Value) -> u64 {
+fn json_hash(v: &JsltValue) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     match v {
-        Value::Null => 0u8.hash(&mut h),
-        Value::Bool(b) => (1u8, b).hash(&mut h),
-        Value::Number(n) => match (n.as_i64(), n.as_u64()) {
+        JsltValue::Null => 0u8.hash(&mut h),
+        JsltValue::Bool(b) => (1u8, b).hash(&mut h),
+        JsltValue::Number(n) => match (n.as_i64(), n.as_u64()) {
             (Some(i), _) => (2u8, i).hash(&mut h),
             (None, Some(u)) => (3u8, u).hash(&mut h),
             _ => {
@@ -1307,16 +1314,16 @@ fn json_hash(v: &Value) -> u64 {
                 (4u8, if f == 0.0 { 0 } else { f.to_bits() }).hash(&mut h)
             }
         },
-        Value::String(s) => (5u8, s).hash(&mut h),
-        Value::Array(items) => {
+        JsltValue::String(s) => (5u8, s).hash(&mut h),
+        JsltValue::Array(items) => {
             6u8.hash(&mut h);
-            for item in items {
+            for item in items.iter() {
                 json_hash(item).hash(&mut h);
             }
         }
-        Value::Object(map) => {
+        JsltValue::Object(map) => {
             let mut acc = 0u64;
-            for (k, val) in map {
+            for (k, val) in map.iter() {
                 let mut eh = std::collections::hash_map::DefaultHasher::new();
                 (k, json_hash(val)).hash(&mut eh);
                 acc = acc.wrapping_add(eh.finish());
@@ -1329,17 +1336,17 @@ fn json_hash(v: &Value) -> u64 {
 
 /// String concatenation renders non-string operands as JSON (`"a" + null` is `"anull"`).
 fn concat_part(v: &JsltValue) -> String {
-    match v.as_json() {
-        Value::String(s) => s.clone(),
+    match &v {
+        JsltValue::String(s) => s.to_string(),
         other => other.to_string(),
     }
 }
 
 /// Repeat count for `string * n`: numbers truncate toward zero; anything else, or a
 /// negative count, repeats zero times.
-fn repeat_count(v: &Value) -> usize {
+fn repeat_count(v: &JsltValue) -> usize {
     match v {
-        Value::Number(n) => {
+        JsltValue::Number(n) => {
             let count = n.as_i64().unwrap_or_else(|| n.as_f64().unwrap_or(0.0) as i64);
             usize::try_from(count).unwrap_or(0)
         }

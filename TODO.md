@@ -22,7 +22,7 @@ jslt-rs/
 │  ├─ ast/                    # AST types + spans + pretty-printer
 │  ├─ lexer/                  # hand-rolled lexer, no deps
 │  ├─ parser/                 # Pratt parser → AST
-│  ├─ value/                  # JsltValue facade (wraps serde_json::Value)
+│  ├─ value/                  # JsltValue: shared, immutable JSON tree
 │  ├─ interp/                 # evaluator + env + binding/linking
 │  ├─ stdlib/                 # built-ins registry + implementations
 │  ├─ engine/                 # public API: compile/apply, errors; depends on ↑
@@ -66,7 +66,7 @@ unsafe_code = "forbid"
 * `ast`: Lossless AST with `Span { byte_off, line, col }` + `Display`/pretty-print.
 * `lexer`: UTF-8 scanner; emits tokens, handles `.` vs `.5` lookahead; comments/whitespace.
 * `parser`: Pratt parser; produces AST; no eval logic.
-* `value`: `JsltValue` newtype over `serde_json::Value`, plus utilities (borrowed string views later).
+* `value`: `JsltValue`, an immutable JSON tree with reference-counted strings, arrays and objects, plus utilities.
 * `interp`: name resolution (let/def), environments, evaluator, eval budget/recursion guard.
 * `stdlib`: `JsltFunction` trait + registry; string/array/object/regex/time (regex/time behind features).
 * `engine`: public API: `compile(&str) -> Program`, `Program::apply(&self, &JsltValue) -> Result<JsltValue>`.
@@ -150,7 +150,7 @@ unsafe_code = "forbid"
 
 ## 6) Value model
 
-* [x] `JsltValue(serde_json::Value)` facade with helpers:
+* [x] `JsltValue` enum with `Arc`-shared strings, arrays and objects (cloning and sub-access do not copy), with helpers:
 
   * numeric ops (`as_f64_checked`), deep equality, object key order-insensitive eq.
   * null helpers, array/string index & slice with negative indices and bounds → `null`.
@@ -274,7 +274,7 @@ unsafe_code = "forbid"
 ## 12) Performance checks (lightweight)
 
 * [x] Add `criterion` benches over shared workloads, with a Java comparison (see `docs/benchmarks.md`).
-* [ ] Avoid cloning large values; use `Rc` where helpful.
+* [x] Avoid cloning large values: `JsltValue` shares strings, arrays and objects through `Arc`.
 
   * **Accept:** compile+eval of medium templates stays within sane allocations.
 

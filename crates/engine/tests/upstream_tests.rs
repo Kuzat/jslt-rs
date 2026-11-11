@@ -9,7 +9,7 @@
 //! `UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests`
 
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -70,12 +70,16 @@ fn normalize(v: &Value) -> Value {
     serde_json::from_str(&serde_json::to_string(v).unwrap()).unwrap()
 }
 
-fn run_jslt(query: &str, input: &Value) -> Result<Result<Value, String>, String> {
+fn run_jslt(
+    query: &str,
+    input: &Value,
+    variables: &HashMap<String, Value>,
+) -> Result<Result<Value, String>, String> {
     panic::catch_unwind(AssertUnwindSafe(|| {
         // Upstream fixtures import modules relative to the resources directory.
         let main_path = resources_dir().join("main.jslt");
         engine::compile_with_import_path(query, &main_path.to_string_lossy())
-            .and_then(|p| p.apply(input, None))
+            .and_then(|p| p.apply_with_variables(input, variables, None))
             .map_err(|e| e.to_string())
     }))
     .map_err(|p| {
@@ -90,15 +94,16 @@ fn run_jslt(query: &str, input: &Value) -> Result<Result<Value, String>, String>
 
 fn check_query_case(test: &Value) -> Result<(), String> {
     let query = test["query"].as_str().ok_or("missing query")?;
-    if test.get("variables").is_some() {
-        return Err("external variables are not supported".into());
-    }
+    let variables: HashMap<String, Value> = match test.get("variables") {
+        Some(Value::Object(vars)) => vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        _ => HashMap::new(),
+    };
     // Jackson parses an empty input as a missing node, which JSLT treats as null.
     let input = match &test["input"] {
         Value::String(s) if s.trim().is_empty() => Value::Null,
         other => json_field(other)?,
     };
-    let result = run_jslt(query, &input)?;
+    let result = run_jslt(query, &input, &variables)?;
 
     if let Some(expected_err) = test.get("error") {
         return match result {
@@ -115,7 +120,7 @@ fn check_query_case(test: &Value) -> Result<(), String> {
 }
 
 fn check_json_parse_case(json: &str, expect_error: bool) -> Result<(), String> {
-    let result = run_jslt(json, &Value::Null)?;
+    let result = run_jslt(json, &Value::Null, &HashMap::new())?;
     match (result, expect_error) {
         (Err(_), true) => Ok(()),
         (Ok(v), true) => Err(format!("expected parse error, got {v}")),

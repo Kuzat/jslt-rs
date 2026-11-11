@@ -56,6 +56,9 @@ echo '{"name": "alice"}' | cargo run -p cli -- -e '.name'
 
 # Pretty-print output
 cargo run -p cli -- -p <program.jslt> -i <input.json> --pretty
+
+# Pass external variables
+cargo run -p cli -- -e '.items[0 : $limit]' --var limit=2 -i <input.json>
 ```
 
 ### CLI Options
@@ -64,6 +67,7 @@ cargo run -p cli -- -p <program.jslt> -i <input.json> --pretty
 - `-e, --eval <EXPR>` - Inline JSLT expression to evaluate (conflicts with `--program`)
 - `-i, --input <FILE>` - JSON input file (use `-` to read from stdin, or omit to read from stdin)
 - `--pretty` - Pretty-print the output JSON
+- `--var <NAME=JSON>` - Set an external variable (a `$NAME` with no `let`), e.g. `--var limit=10`. Can be repeated
 
 ### Examples with Sample Files
 

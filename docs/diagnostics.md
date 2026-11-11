@@ -16,7 +16,9 @@ A function name could not be resolved during binding.
 
 ## jslt_bind_unknown_variable
 
-A variable name could not be resolved during binding.
+A variable is used but not declared by a `let` or a function parameter. Like Java JSLT, the
+program still compiles: the value must be passed in when the program runs (for example
+`CompiledProgram::apply_with_variables` or `jslt --var name=JSON`). This is a warning.
 
 ## jslt_bind_non_function_callee
 

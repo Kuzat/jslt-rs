@@ -2,19 +2,17 @@
 # crates/engine/tests/upstream_tests.rs; regenerate with:
 #   UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests
 #
-# query-tests.json                    146/148 
+# query-tests.json                    148/148 
 # query-tests.yaml                     45/45  
 # function-tests.json                 278/278 
 # experimental-tests.json               0/8   
-# function-declaration-tests.yaml      23/24  
+# function-declaration-tests.yaml      24/24  
 # query-error-tests.json               22/22  
 # function-error-tests.json            42/42  
 # json-parse-tests.json                44/44  
 # json-parse-error-tests.json          13/13  
-# TOTAL                               613/624  (98.2%)
+# TOTAL                               616/624  (98.7%)
 
-query-tests.json#53  # $foo => external variables are not supported
-query-tests.json#89  # number( $num ) => external variables are not supported
 experimental-tests.json#0  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [], got error: module errors: imported module not found: http://jslt.schibsted.com/2018/exp…
 experimental-tests.json#1  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected null, got error: module errors: imported module not found: http://jslt.schibsted.com/2018/e…
 experimental-tests.json#2  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [{"key":"a","values":[1]}], got error: module errors: imported module not found: http://jsl…
@@ -23,4 +21,3 @@ experimental-tests.json#4  # import "http://jslt.schibsted.com/2018/experimental
 experimental-tests.json#5  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [{"key":null,"values":[null,null,null]}], got error: module errors: imported module not fou…
 experimental-tests.json#6  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected {"exposed":["v_1","v_3","v_5"],"placement":["v_2","v_4","v_6"],"widget":["v_3","v_5","v_7"]…
 experimental-tests.json#7  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [{"key":1,"values":[1]}], got error: module errors: imported module not found: http://jslt.…
-function-declaration-tests.yaml#20  # import "module-as-function-with-global.jslt" as m m("variabl… => external variables are not supported

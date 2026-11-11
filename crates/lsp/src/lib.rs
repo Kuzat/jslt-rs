@@ -73,7 +73,7 @@ impl JsltLanguageServer {
         for root in roots {
             let virtual_main = root.join("__jslt_lsp_virtual__.jslt");
             match engine::compile_with_import_path(text, &virtual_main.to_string_lossy()) {
-                Ok(_) => return Vec::new(),
+                Ok(prog) => return Self::external_variable_warnings(&prog, text),
                 Err(err @ EngineError::ModuleErrors(_))
                 | Err(err @ EngineError::ModuleError(_)) => {
                     last_module_error = Some(err);
@@ -466,6 +466,31 @@ impl JsltLanguageServer {
         }
     }
 
+    /// Undeclared variables compile, but must be supplied when the program is applied.
+    fn external_variable_warnings(prog: &engine::CompiledProgram, text: &str) -> Vec<Diagnostic> {
+        prog.external_variables()
+            .iter()
+            .map(|v| {
+                let mut message = format!(
+                    "variable `{}` is not declared; it must be passed in when the program runs",
+                    v.name
+                );
+                if !v.suggestions.is_empty() {
+                    message.push_str(&format!(", did you mean: {:?}", v.suggestions));
+                }
+                Diagnostic {
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    ..Self::binder_diagnostic(
+                        text,
+                        v.span,
+                        Self::CODE_BIND_UNKNOWN_VARIABLE,
+                        message,
+                    )
+                }
+            })
+            .collect()
+    }
+
     fn binder_diagnostic(text: &str, span: ast::Span, code: &str, message: String) -> Diagnostic {
         Diagnostic {
             range: Range {
@@ -662,6 +687,17 @@ pub async fn run_server() {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn undeclared_variables_are_warnings() {
+        let text = "let total = 1\n$totl";
+        let prog = engine::compile(text).unwrap();
+        let diags = JsltLanguageServer::external_variable_warnings(&prog, text);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert!(diags[0].message.contains("`totl`"), "{}", diags[0].message);
+        assert!(diags[0].message.contains("total"), "{}", diags[0].message);
+    }
 
     #[test]
     fn parse_errors_are_reported_as_multiple_diagnostics() {

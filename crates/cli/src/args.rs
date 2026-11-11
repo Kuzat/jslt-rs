@@ -29,6 +29,10 @@ pub struct Cli {
     /// Pretty-print output JSON.
     #[arg(long = "pretty", action = ArgAction::SetTrue, global = true)]
     pub pretty: bool,
+
+    /// Set an external variable to a JSON value, e.g. `--var limit=10`. Can be repeated.
+    #[arg(long = "var", value_name = "NAME=JSON", global = true)]
+    pub vars: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -57,6 +61,10 @@ pub struct RunArgs {
     /// Pretty-print output JSON.
     #[arg(long = "pretty", action = ArgAction::SetTrue)]
     pub pretty: bool,
+
+    /// Set an external variable to a JSON value, e.g. `--var limit=10`. Can be repeated.
+    #[arg(long = "var", value_name = "NAME=JSON")]
+    pub vars: Vec<String>,
 }
 
 #[derive(Debug, Parser)]

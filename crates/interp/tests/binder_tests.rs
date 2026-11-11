@@ -225,7 +225,7 @@ fn param_shadows_outer_let() {
 }
 
 #[test]
-fn unknown_variable_yields_error_with_span() {
+fn undeclared_variable_binds_as_external() {
     // $nope
     let program = Program {
         trivia: None,
@@ -235,10 +235,9 @@ fn unknown_variable_yields_error_with_span() {
         body: Some(var("nope")),
         span: s(),
     };
-    let err = bind(&program).unwrap_err();
-    let msg = format!("{}", err);
-    assert!(msg.contains("unknown variable"), "msg={}", msg);
-    assert!(msg.contains("nope"), "msg={}", msg);
+    let bound = bind(&program).unwrap();
+    assert_eq!(bound.externals.len(), 1);
+    assert_eq!(bound.externals[0].name, "nope");
 }
 
 #[test]

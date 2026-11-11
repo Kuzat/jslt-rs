@@ -1,6 +1,6 @@
 use ast::Program;
 use interp::binder::{Binder, BoundProgram};
-use interp::{apply_with_modules, binder, EvalConfig, RuntimeError};
+use interp::{apply_with_modules, apply_with_variables, binder, EvalConfig, RuntimeError};
 use parser::{parse_import_header, Parser};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -165,6 +165,21 @@ pub struct CompiledProgram {
 impl CompiledProgram {
     pub fn apply(&self, input: &Value, cfg: Option<EvalConfig>) -> Result<Value, EngineError> {
         Ok(apply_with_modules(&self.bound, &self.modules, input, cfg)?)
+    }
+
+    /// Applies the program with values for its undeclared (external) variables.
+    pub fn apply_with_variables(
+        &self,
+        input: &Value,
+        variables: &HashMap<String, Value>,
+        cfg: Option<EvalConfig>,
+    ) -> Result<Value, EngineError> {
+        Ok(apply_with_variables(&self.bound, &self.modules, input, variables, cfg)?)
+    }
+
+    /// Variables the main program uses without declaring them.
+    pub fn external_variables(&self) -> &[binder::ExternalVar] {
+        &self.bound.externals
     }
 }
 

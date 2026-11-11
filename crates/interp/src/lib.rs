@@ -73,6 +73,9 @@ pub enum RuntimeError {
     #[error("unexpected NaN/Inf at {span:?}:")]
     NonFiniteNumber { span: Span },
 
+    #[error("No such variable '{name}' at {span:?}")]
+    NoSuchVariable { name: String, span: Span },
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -114,6 +117,8 @@ struct Evaluator<'p> {
     // Builtin `fallback` is evaluated lazily, like the Java macro.
     fallback_id: Option<usize>,
     modules: HashMap<String, ModuleRuntime>,
+    // Values for undeclared variables, supplied by the caller.
+    variables: HashMap<String, JsltValue>,
 }
 
 impl<'p> Evaluator<'p> {
@@ -135,6 +140,7 @@ impl<'p> Evaluator<'p> {
             builtin_count,
             fallback_id,
             modules: HashMap::new(),
+            variables: HashMap::new(),
         }
     }
 
@@ -367,6 +373,11 @@ impl<'p> Evaluator<'p> {
             This(_) => Ok(self.current_frame().this_val.clone()),
 
             Var(ResolvedVar::This, _) => Ok(self.current_frame().this_val.clone()),
+            External(name, sp) => self
+                .variables
+                .get(name)
+                .cloned()
+                .ok_or_else(|| RuntimeError::NoSuchVariable { name: name.clone(), span: *sp }),
             Var(ResolvedVar::Local(slot), _) => {
                 let f = self.current_frame();
                 let v = f.locals.get(*slot).cloned().ok_or_else(|| {
@@ -1199,8 +1210,22 @@ pub fn apply_with_modules(
     input: &Value,
     cfg: Option<EvalConfig>,
 ) -> Result<Value, RuntimeError> {
+    apply_with_variables(bound, modules, input, &HashMap::new(), cfg)
+}
+
+/// Like [`apply_with_modules`], with values for the program's undeclared variables. Names the
+/// program does not use are ignored; an undeclared variable with no value is a runtime error.
+pub fn apply_with_variables(
+    bound: &BoundProgram,
+    modules: &HashMap<String, (BoundProgram, bool)>,
+    input: &Value,
+    variables: &HashMap<String, Value>,
+    cfg: Option<EvalConfig>,
+) -> Result<Value, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let mut ev = Evaluator::new(bound, cfg);
+    ev.variables =
+        variables.iter().map(|(k, v)| (k.clone(), JsltValue::from_json(v.clone()))).collect();
 
     let input_val = JsltValue::from_json(input.clone());
     for (key, (child, _callable)) in modules {
@@ -1292,6 +1317,7 @@ mod tests {
             body,
             builtin_count: 0,
             imported_modules: HashMap::new(),
+            externals: Vec::new(),
         }
     }
 

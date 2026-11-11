@@ -2,6 +2,7 @@ use crate::args::{Cli, Command, RunArgs};
 use clap::Parser;
 use engine::compile_with_import_path;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 
@@ -36,6 +37,7 @@ pub fn real_main() -> Result<(), CliError> {
                 eval: cli.eval,
                 input: cli.input,
                 pretty: cli.pretty,
+                vars: cli.vars,
             })
         }
     }
@@ -44,10 +46,11 @@ pub fn real_main() -> Result<(), CliError> {
 fn run_command(args: RunArgs) -> Result<(), CliError> {
     let (program_src, program_path_ctx) =
         read_program_source(args.program.as_deref(), args.eval.as_deref())?;
+    let variables = parse_vars(&args.vars)?;
     let input = read_input_json(args.input.as_deref())?;
 
     let compiled = compile_with_import_path(&program_src, &program_path_ctx)?;
-    let out = compiled.apply(&input, None)?;
+    let out = compiled.apply_with_variables(&input, &variables, None)?;
 
     if args.pretty {
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -55,6 +58,21 @@ fn run_command(args: RunArgs) -> Result<(), CliError> {
         println!("{}", serde_json::to_string(&out)?);
     }
     Ok(())
+}
+
+/// Parses `NAME=JSON` pairs from `--var`.
+fn parse_vars(vars: &[String]) -> Result<HashMap<String, Value>, CliError> {
+    vars.iter()
+        .map(|v| {
+            let (name, json) = v
+                .split_once('=')
+                .ok_or_else(|| CliError::Usage(format!("--var expects NAME=JSON, got `{v}`")))?;
+            let value = serde_json::from_str(json).map_err(|e| {
+                CliError::Usage(format!("--var {name}: value is not valid JSON: {e}"))
+            })?;
+            Ok((name.to_string(), value))
+        })
+        .collect()
 }
 
 /// Reads the program source or an inline expression for evaluation.

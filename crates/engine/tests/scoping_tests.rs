@@ -67,3 +67,26 @@ fn top_level_lets_can_call_functions() {
     let src = "let x = 2 let y = foo($x) def foo(v) $v * $x $y";
     assert_eq!(run_jslt(src, json!(null)).unwrap(), json!(4));
 }
+
+#[test]
+fn external_variables_are_supplied_at_apply_time() {
+    let program = engine::compile("[$foo, number($num)]").unwrap();
+    let names: Vec<_> = program.external_variables().iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["foo", "num"]);
+    let vars = [("foo".to_string(), json!(42)), ("num".to_string(), json!("22"))].into();
+    assert_eq!(program.apply_with_variables(&json!({}), &vars, None).unwrap(), json!([42, 22]));
+}
+
+#[test]
+fn missing_external_variable_is_runtime_error() {
+    let err = run_jslt("$blurgle", json!({})).unwrap_err();
+    assert!(err.contains("No such variable 'blurgle'"), "{err}");
+}
+
+#[test]
+fn declared_variables_shadow_external_values() {
+    let program = engine::compile("let foo = 1 $foo").unwrap();
+    assert!(program.external_variables().is_empty());
+    let vars = [("foo".to_string(), json!(2))].into();
+    assert_eq!(program.apply_with_variables(&json!({}), &vars, None).unwrap(), json!(1));
+}

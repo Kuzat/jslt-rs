@@ -261,7 +261,11 @@ Used by `if`, `and`, `or` and filters:
 
 * `.` evaluates to the **current context value**.
 * The program’s initial context is the input JSON document provided to the evaluator.
-* **Variables** are referenced as `$name` and introduced only via `let` bindings or function parameters.
+* **Variables** are referenced as `$name` and introduced via `let` bindings or function parameters.
+* A `$name` with no declaration in scope is an **external variable**. Like Java JSLT, the program
+  still compiles and the value is supplied when the program is applied
+  (`CompiledProgram::apply_with_variables`). Supplied names the program does not use are ignored.
+  Reading an external variable with no value is a runtime error: `No such variable 'name'`.
 * **Functions** are referenced by bare identifiers and defined via `def`.
 
 ### 6.1 Scopes
@@ -374,7 +378,7 @@ Rust implementation exposes built‑ins via a registry:
 ### 9.2 Runtime errors
 
 * Type mismatch (e.g., string `+` number).
-* Unknown variable/function.
+* Unknown function; an external variable with no value (`No such variable 'name'`).
 * Function arity mismatch.
 * Division by zero.
 * Invalid string escape / malformed Unicode.

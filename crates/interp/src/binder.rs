@@ -24,6 +24,16 @@ pub struct BoundProgram {
     pub builtin_count: usize,
     // Track imported modules for this program: key -> (bound program, callable)
     pub imported_modules: HashMap<String, (BoundProgram, bool)>,
+    /// Variables with no declaration in scope. Like Java JSLT, they are supplied at apply time.
+    pub externals: Vec<ExternalVar>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalVar {
+    pub name: String,
+    pub span: Span,
+    /// Declared names that are close to `name`.
+    pub suggestions: Vec<String>,
 }
 
 // Synthetic function kinds for imports
@@ -84,6 +94,9 @@ pub enum BoundExpr {
 
     // Variables '$name'
     Var(ResolvedVar, Span),
+
+    // Undeclared '$name', read from the variables passed at apply time
+    External(String, Span),
 
     // Function calls 'f(a, b)'
     Call {
@@ -187,6 +200,7 @@ impl BoundExpr {
             LetBlock(_, _, s) => *s,
             This(s) => *s,
             Var(_, s) => *s,
+            External(_, s) => *s,
             Call { span, .. } => *span,
             Not(_, s) => *s,
             Neg(_, s) => *s,
@@ -478,6 +492,7 @@ pub struct Binder {
     modules: HashMap<String, LoadedModule>,
 
     errors: Vec<BindError>,
+    externals: Vec<ExternalVar>,
 
     match_ctx: MatchContext,
 }
@@ -507,6 +522,7 @@ impl Binder {
             builtin_count: registry.len(),
             modules: HashMap::new(),
             errors: Vec::new(),
+            externals: Vec::new(),
             match_ctx: MatchContext::Path(Vec::new()),
         }
     }
@@ -682,6 +698,7 @@ impl Binder {
                 .iter()
                 .map(|(k, lm)| (k.clone(), (lm.bound.clone(), lm.callable)))
                 .collect(),
+            externals: std::mem::take(&mut self.externals),
         })
     }
 
@@ -811,11 +828,12 @@ impl Binder {
                 if let Some(v) = self.env.lookup_var(&name.name) {
                     Ok(BoundExpr::Var(v, name.span))
                 } else {
-                    Err(BindError::UnknownVariable {
+                    self.externals.push(ExternalVar {
                         name: name.name.clone(),
                         span: name.span,
                         suggestions: self.env.var_suggestions(&name.name),
-                    })
+                    });
+                    Ok(BoundExpr::External(name.name.clone(), name.span))
                 }
             }
 

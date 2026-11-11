@@ -15,6 +15,9 @@ pub enum ResolvedVar {
     This,
 }
 
+/// Import path of Java JSLT's built-in experimental module.
+pub const EXPERIMENTAL_MODULE_URI: &str = "http://jslt.schibsted.com/2018/experimental";
+
 // Bound program mirrors the source program but replaces unresolved names with handles.
 #[derive(Debug, Clone)]
 pub struct BoundProgram {
@@ -97,6 +100,14 @@ pub enum BoundExpr {
 
     // Undeclared '$name', read from the variables passed at apply time
     External(String, Span),
+
+    // Experimental module `group-by(array, key, value)`; key and value run per element
+    GroupBy {
+        array: Box<BoundExpr>,
+        key: Box<BoundExpr>,
+        value: Box<BoundExpr>,
+        span: Span,
+    },
 
     // Function calls 'f(a, b)'
     Call {
@@ -201,6 +212,7 @@ impl BoundExpr {
             This(s) => *s,
             Var(_, s) => *s,
             External(_, s) => *s,
+            GroupBy { span, .. } => *span,
             Call { span, .. } => *span,
             Not(_, s) => *s,
             Neg(_, s) => *s,
@@ -252,6 +264,8 @@ pub enum BindError {
     MatcherWithDynamicKeys { span: Span },
     #[error("Invalid object declaration, duplicate key '{key}' at {span:?}")]
     DuplicateKey { key: String, span: Span },
+    #[error("Function '{name}' needs {expected} parameters, got {got} at {span:?}")]
+    ArityMismatch { name: String, expected: usize, got: usize, span: Span },
 }
 
 impl BindError {
@@ -265,6 +279,7 @@ impl BindError {
             MatcherNotAllowed { span, .. } => *span,
             MatcherWithDynamicKeys { span } => *span,
             DuplicateKey { span, .. } => *span,
+            ArityMismatch { span, .. } => *span,
         }
     }
 }
@@ -493,6 +508,8 @@ pub struct Binder {
 
     errors: Vec<BindError>,
     externals: Vec<ExternalVar>,
+    // Aliases of the experimental module
+    experimental_aliases: Vec<String>,
 
     match_ctx: MatchContext,
 }
@@ -523,6 +540,7 @@ impl Binder {
             modules: HashMap::new(),
             errors: Vec::new(),
             externals: Vec::new(),
+            experimental_aliases: Vec::new(),
             match_ctx: MatchContext::Path(Vec::new()),
         }
     }
@@ -543,6 +561,11 @@ impl Binder {
     // Wire import alias:
     // - namespace (not callable): provide alias:name -> target function ids (resuing the imported module function ids offset)
     // - callable: create a new synthetic function id bound to ImportedCallable
+    /// Wires `alias` to the built-in experimental module ([`EXPERIMENTAL_MODULE_URI`]).
+    pub fn wire_experimental_alias(&mut self, alias: &str) {
+        self.experimental_aliases.push(alias.to_string());
+    }
+
     pub fn wire_import_alias(&mut self, alias: &str, module_key: &str) {
         let lm = match self.modules.get(module_key) {
             Some(m) => m,
@@ -700,6 +723,37 @@ impl Binder {
                 .collect(),
             externals: std::mem::take(&mut self.externals),
         })
+    }
+
+    /// Binds `alias:fn(...)` when `alias` is the experimental module.
+    fn bind_experimental_call(
+        &mut self,
+        name: &str,
+        args: &[ast::Expr],
+        span: Span,
+    ) -> Option<Result<BoundExpr, BindError>> {
+        let (alias, fname) = name.split_once(':')?;
+        if !self.experimental_aliases.iter().any(|a| a == alias) {
+            return None;
+        }
+        if fname != "group-by" {
+            return Some(Err(BindError::UnknownFunction {
+                name: name.to_string(),
+                span,
+                suggestions: vec![format!("{alias}:group-by")],
+            }));
+        }
+        if args.len() != 3 {
+            return Some(Err(BindError::ArityMismatch {
+                name: name.to_string(),
+                expected: 3,
+                got: args.len(),
+                span,
+            }));
+        }
+        let mut bound = args.iter().map(|a| Box::new(self.bind_expr_recovery(a)));
+        let (array, key, value) = (bound.next()?, bound.next()?, bound.next()?);
+        Some(Ok(BoundExpr::GroupBy { array, key, value, span }))
     }
 
     /// Like Java JSLT, a name may only be declared once in a let list. Inner scopes may shadow it.
@@ -911,6 +965,9 @@ impl Binder {
             Expr::Call { callee, args, span } => {
                 // Only bare identifiers are functions; they parse as FunctionRef
                 if let Expr::FunctionRef { name, span } = callee.as_ref() {
+                    if let Some(bound) = self.bind_experimental_call(name, args, *span) {
+                        return bound;
+                    }
                     if let Some(fid) = self.env.lookup_fun_any(name) {
                         let mut bargs = Vec::with_capacity(args.len());
                         for a in args {

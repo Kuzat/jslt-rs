@@ -373,6 +373,7 @@ impl<'p> Evaluator<'p> {
             This(_) => Ok(self.current_frame().this_val.clone()),
 
             Var(ResolvedVar::This, _) => Ok(self.current_frame().this_val.clone()),
+            GroupBy { array, key, value, span } => self.eval_group_by(array, key, value, *span),
             External(name, sp) => self
                 .variables
                 .get(name)
@@ -1082,6 +1083,50 @@ impl<'p> Evaluator<'p> {
         }
     }
 
+    /// Experimental `group-by`: groups the elements of `array` (an object counts as its
+    /// key/value pairs) by `key`, collecting `value` for each. Groups keep first-seen order.
+    fn eval_group_by(
+        &mut self,
+        array: &BoundExpr,
+        key: &BoundExpr,
+        value: &BoundExpr,
+        span: Span,
+    ) -> Result<JsltValue, RuntimeError> {
+        let arr = self.eval_expr(array)?;
+        let elems: Vec<JsltValue> = match arr.as_json() {
+            Value::Null => return Ok(JsltValue::null()),
+            Value::Array(items) => items.iter().cloned().map(JsltValue::from_json).collect(),
+            Value::Object(map) => map
+                .iter()
+                .map(|(k, v)| JsltValue::from_json(json!({ "key": k, "value": v })))
+                .collect(),
+            other => {
+                return Err(RuntimeError::TypeError {
+                    msg: format!("Can't group-by on {other}"),
+                    span,
+                })
+            }
+        };
+
+        let mut groups: Vec<(Value, Vec<Value>)> = Vec::new();
+        let mut index: HashMap<u64, Vec<usize>> = HashMap::new();
+        for elem in elems {
+            let k = self.eval_piped(elem.clone(), key)?.into_json();
+            let v = self.eval_piped(elem, value)?.into_json();
+            let bucket = index.entry(json_hash(&k)).or_default();
+            match bucket.iter().find(|&&ix| groups[ix].0 == k) {
+                Some(&ix) => groups[ix].1.push(v),
+                None => {
+                    bucket.push(groups.len());
+                    groups.push((k, vec![v]));
+                }
+            }
+        }
+        let out =
+            groups.into_iter().map(|(k, vs)| json!({ "key": k, "values": vs })).collect::<Vec<_>>();
+        Ok(JsltValue::from_json(Value::Array(out)))
+    }
+
     /// Evaluates `expr` with '.' bound to `this`.
     fn eval_piped(&mut self, this: JsltValue, expr: &BoundExpr) -> Result<JsltValue, RuntimeError> {
         let saved_this = std::mem::replace(&mut self.current_frame_mut().this_val, this);
@@ -1248,6 +1293,41 @@ fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> Runtim
             RuntimeError::Internal(format!("builtin `{}` failed: {}", fname, msg))
         }
     }
+}
+
+/// Hash consistent with `Value` equality: object key order is ignored, and `0.0 == -0.0`.
+fn json_hash(v: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match v {
+        Value::Null => 0u8.hash(&mut h),
+        Value::Bool(b) => (1u8, b).hash(&mut h),
+        Value::Number(n) => match (n.as_i64(), n.as_u64()) {
+            (Some(i), _) => (2u8, i).hash(&mut h),
+            (None, Some(u)) => (3u8, u).hash(&mut h),
+            _ => {
+                let f = n.as_f64().unwrap_or(0.0);
+                (4u8, if f == 0.0 { 0 } else { f.to_bits() }).hash(&mut h)
+            }
+        },
+        Value::String(s) => (5u8, s).hash(&mut h),
+        Value::Array(items) => {
+            6u8.hash(&mut h);
+            for item in items {
+                json_hash(item).hash(&mut h);
+            }
+        }
+        Value::Object(map) => {
+            let mut acc = 0u64;
+            for (k, val) in map {
+                let mut eh = std::collections::hash_map::DefaultHasher::new();
+                (k, json_hash(val)).hash(&mut eh);
+                acc = acc.wrapping_add(eh.finish());
+            }
+            (7u8, acc).hash(&mut h);
+        }
+    }
+    h.finish()
 }
 
 /// String concatenation renders non-string operands as JSON (`"a" + null` is `"anull"`).

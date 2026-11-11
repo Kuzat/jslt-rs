@@ -35,6 +35,7 @@ impl JsltLanguageServer {
     const CODE_BIND_DUPLICATE_VARIABLE: &'static str = "JSLT_BIND_DUPLICATE_VARIABLE";
     const CODE_BIND_MATCHER_NOT_ALLOWED: &'static str = "JSLT_BIND_MATCHER_NOT_ALLOWED";
     const CODE_BIND_DUPLICATE_KEY: &'static str = "JSLT_BIND_DUPLICATE_KEY";
+    const CODE_BIND_ARITY_MISMATCH: &'static str = "JSLT_BIND_ARITY_MISMATCH";
     const CODE_MODULE: &'static str = "JSLT_MODULE";
     const DIAGNOSTIC_DOCS_BASE: &'static str =
         "https://github.com/Kuzat/jslt-rs/blob/main/docs/diagnostics.md";
@@ -176,7 +177,8 @@ impl JsltLanguageServer {
             .imports
             .into_iter()
             .filter_map(|imp| {
-                let exists_anywhere = roots.iter().any(|root| root.join(&imp.path).exists());
+                let exists_anywhere = imp.path == interp::binder::EXPERIMENTAL_MODULE_URI
+                    || roots.iter().any(|root| root.join(&imp.path).exists());
                 if exists_anywhere {
                     None
                 } else {
@@ -462,6 +464,12 @@ impl JsltLanguageServer {
                 span,
                 Self::CODE_BIND_DUPLICATE_KEY,
                 format!("Invalid object declaration, duplicate key '{key}'"),
+            ),
+            BindError::ArityMismatch { name, expected, got, span } => Self::binder_diagnostic(
+                text,
+                span,
+                Self::CODE_BIND_ARITY_MISMATCH,
+                format!("Function '{name}' needs {expected} parameters, got {got}"),
             ),
         }
     }

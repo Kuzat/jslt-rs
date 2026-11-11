@@ -37,6 +37,11 @@ computed key, or an object that has computed keys.
 
 An object literal sets the same static key more than once.
 
+## jslt_bind_arity_mismatch
+
+A call to a built-in module function, such as the experimental `group-by`, has the wrong number
+of arguments.
+
 ## jslt_module
 
 General module-level error not otherwise classified.

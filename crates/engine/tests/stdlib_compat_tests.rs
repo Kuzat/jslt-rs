@@ -72,3 +72,65 @@ fn parse_url_decodes_query_like_java() {
     let out = run_jslt(r#"parse-url("http://x.com/?&")"#).unwrap();
     assert_eq!(out["parameters"], json!({}));
 }
+
+#[test]
+fn format_time_supports_millis_and_zone_names() {
+    let t = "125641293.0";
+    assert_eq!(
+        run_jslt(&format!(r#"format-time({t}, "yyyy-MM-dd HH:mm:ssz")"#)),
+        Ok(json!("1973-12-25 04:21:33UTC"))
+    );
+    assert_eq!(
+        run_jslt(&format!(r#"format-time({t}, "yyyy-MM-dd HH:mm:ssz", "CET")"#)),
+        Ok(json!("1973-12-25 05:21:33CET"))
+    );
+    assert_eq!(
+        run_jslt(r#"format-time(1530000000, "z zzzz XXX", "Europe/Oslo")"#),
+        Ok(json!("CEST Central European Summer Time +02:00"))
+    );
+    assert_eq!(run_jslt(r#"format-time(1514764800, "z", "PST")"#), Ok(json!("PST")));
+    assert_eq!(
+        run_jslt(r#"format-time(1514764800.005, "yyyy-MM-dd HH:mm:ss.SSS")"#),
+        Ok(json!("2018-01-01 00:00:00.005"))
+    );
+    assert_eq!(run_jslt(r#"format-time("1514764800", "yyyy")"#), Ok(json!("2018")));
+    assert_eq!(run_jslt(r#"format-time(true, "yyyy")"#), Ok(json!(null)));
+}
+
+#[test]
+fn format_time_rejects_bad_formats_and_zones() {
+    let err = run_jslt(r#"format-time(0, "yyyy-MM-dd dfkdfjkdf")"#).unwrap_err();
+    assert!(err.contains("Couldn't parse format"), "{err}");
+    assert!(err.contains("Illegal pattern character 'f'"), "{err}");
+    let err = run_jslt(r#"format-time(0, "yyyy", "Foo")"#).unwrap_err();
+    assert!(err.contains("Unknown timezone Foo"), "{err}");
+    let err = run_jslt(r#"format-time(0, "yyyy", null)"#).unwrap_err();
+    assert!(err.contains("Unknown timezone null"), "{err}");
+}
+
+#[test]
+fn parse_time_supports_millis_and_zone_names() {
+    assert_eq!(
+        run_jslt(r#"round(parse-time("1973-12-25 05:21:33CET", "yyyy-MM-dd HH:mm:ssz"))"#),
+        Ok(json!(125641293))
+    );
+    assert_eq!(
+        run_jslt(r#"parse-time("2018-01-01 00:00:00.000", "yyyy-MM-dd HH:mm:ss.SSS")"#),
+        Ok(json!(1514764800.0))
+    );
+    // `S` is a count of milliseconds, not a fraction.
+    assert_eq!(
+        run_jslt(r#"round(parse-time("1973-12-25 04:21:33.123", "yyyy-MM-dd HH:mm:ss.S") * 100)"#),
+        Ok(json!(12564129312_i64))
+    );
+    assert_eq!(run_jslt(r#"parse-time(2018, "yyyy")"#), Ok(json!(1514764800.0)));
+}
+
+#[test]
+fn parse_time_bad_format_errors_even_with_fallback() {
+    let err = run_jslt(r#"parse-time("1973-12-25", "yyyy-MM-dd gnu", null)"#).unwrap_err();
+    assert!(err.contains("Couldn't parse format"), "{err}");
+    assert_eq!(run_jslt(r#"parse-time("1973-12-25", "yyyy-MM-dd HH", "fb")"#), Ok(json!("fb")));
+    let err = run_jslt(r#"parse-time("1973-12-25", "yyyy-MM-dd HH")"#).unwrap_err();
+    assert!(err.contains(r#"Unparseable date: "1973-12-25""#), "{err}");
+}

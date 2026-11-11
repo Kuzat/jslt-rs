@@ -494,26 +494,72 @@ Examples:
 - round(now()) -> 1529677391
 
 ### parse-time(time, format, fallback?) -> number
-Parses time with format (Java date/time format) and returns the number of seconds since epoch in UTC. If no timezone is specified in time, UTC is assumed.
-- If fallback is omitted: wrong type or mismatch => error.
-- If fallback is provided: returned on error.
-- If time is null: returns null.
+Parses time with format and returns the number of seconds since epoch in UTC. The format is a Java `SimpleDateFormat` pattern (see below). If time has no timezone, UTC is assumed.
+- If time is null: returns null. Other non-string values are parsed as their JSON text.
+- Parsing is lenient, as in Java: out-of-range values roll over (month 13 is January of the next year), and text after the end of the pattern is ignored.
+- If time does not match the format: error, or fallback if one is given.
+- An invalid format is always an error, even with a fallback.
 
 Examples:
 - parse-time("2018-05-30T11:46:37Z", "yyyy-MM-dd'T'HH:mm:ssX") => 1.527680797E9
+- parse-time("1973-12-25 05:21:33CET", "yyyy-MM-dd HH:mm:ssz") => 1.25641293E8
 - parse-time("2018-05-30T11:46:37", "yyyy-MM-dd'T'HH:mm:ssX") => error
 - parse-time("2018-05-30T11:46:37", "yyyy-MM-dd'T'HH:mm:ssX", null) => null
+- parse-time("2018-05-30", "yyyy-MM-dd q", null) => error (illegal pattern character)
 - parse-time(null, "yyyy-MM-dd'T'HH:mm:ssX") => null
 
 ### format-time(timestamp, format, timezone?) -> string
-Formats timestamp (seconds since epoch) with format and returns string.
-- Default timezone is UTC; can be overridden by timezone argument.
-- null timestamp => null.
+Formats timestamp (seconds since epoch) with format and returns string. The format is a Java `SimpleDateFormat` pattern (see below).
+- The default timezone is UTC. The timezone argument takes an IANA ID such as `Europe/Oslo`, or one of Java's three-letter IDs such as `CET` or `PST`. An unknown ID (also null) is an error.
+- A string timestamp is converted to a number. A null timestamp returns null, and other non-number values return null.
+- An invalid format is an error.
 
 Examples:
 - format-time(1529677391, "yyyy-MM-dd'T'HH:mm:ss") => "2018-06-22T14:23:11"
+- format-time(1514764800.005, "yyyy-MM-dd HH:mm:ss.SSS z") => "2018-01-01 00:00:00.005 UTC"
+- format-time(125641293, "yyyy-MM-dd HH:mm:ssz", "CET") => "1973-12-25 05:21:33CET"
 - format-time(0, "yyyy-MM-dd") => "1970-01-01"
 - format-time(null, "yyyy-MM-dd") => null
+
+### Date patterns
+`parse-time` and `format-time` use Java `SimpleDateFormat` patterns with English names. Text in single quotes is literal, `''` is a single quote, and any other ASCII letter is an error.
+
+| Letter | Meaning | Example |
+|---|---|---|
+| `G` | Era | `AD` |
+| `y` | Year (`yy` is two digits) | `2018`, `18` |
+| `Y` | Week year | `2018` |
+| `M`, `L` | Month (`MMM` and longer are names) | `1`, `01`, `Jan`, `January` |
+| `w` | Week of year | `27` |
+| `W` | Week of month | `2` |
+| `D` | Day of year | `189` |
+| `d` | Day of month | `10` |
+| `F` | Day of week in month | `2` |
+| `E` | Day name (`EEEE` is the full name) | `Tue`, `Tuesday` |
+| `u` | Day number (1 is Monday) | `1` |
+| `a` | AM/PM | `PM` |
+| `H` | Hour, 0-23 | `0` |
+| `k` | Hour, 1-24 | `24` |
+| `K` | Hour, 0-11 | `0` |
+| `h` | Hour, 1-12 | `12` |
+| `m` | Minute | `30` |
+| `s` | Second | `55` |
+| `S` | Millisecond | `978` |
+| `z` | Zone name (`zzzz` is the long name) | `CET`, `Central European Standard Time` |
+| `Z` | RFC 822 offset | `-0800` |
+| `X` | ISO 8601 offset (`X`, `XX`, `XXX`) | `Z`, `-08`, `-0800`, `-08:00` |
+
+Weeks start on Sunday, and week 1 is the week that contains January 1. When parsing:
+- Numeric fields can be negative, and out-of-range values roll over (`00:00:-1` is one second before midnight).
+- A two-digit year falls in the 100 years that start 80 years ago.
+- When the pattern holds more than one way to give the date (for example `dd` and `D`), the field that comes last wins, as in Java's `Calendar`.
+- A week year (`Y`) selects a week date, so `YYYY-MM-dd` ignores the month and day, as in Java.
+- A zone name selects that zone with its standard offset on the parsed date (`MSK` is UTC+4 in 2012). A daylight name such as `CEST` adds one hour. Ambiguous abbreviations resolve as in Java: `IST` is Israel and `CST` is US Central.
+
+Differences from Java:
+- Long zone names are only known for common zones. Other zones use the `GMT+04:00` form.
+- Dates before October 1582 use the proleptic Gregorian calendar, not the Julian calendar.
+- A field value too large for a date is a parse failure. Java wraps it into a wrong date.
 
 
 ## Miscellaneous functions

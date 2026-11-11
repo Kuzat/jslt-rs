@@ -4,14 +4,14 @@
 #
 # query-tests.json                    141/148 
 # query-tests.yaml                     43/45  
-# function-tests.json                 272/278 
+# function-tests.json                 278/278 
 # experimental-tests.json               0/8   
 # function-declaration-tests.yaml      20/24  
 # query-error-tests.json               19/22  
-# function-error-tests.json            40/42  
+# function-error-tests.json            42/42  
 # json-parse-tests.json                44/44  
 # json-parse-error-tests.json          13/13  
-# TOTAL                               592/624  (94.9%)
+# TOTAL                               600/624  (96.2%)
 
 query-tests.json#19  # [for (null) number(.)] => expected null, got []
 query-tests.json#53  # $foo => external variables are not supported
@@ -22,12 +22,6 @@ query-tests.json#138  # {for (.foo) .key : .value} => expected null, got {}
 query-tests.json#146  # { "foo" : { "a": "b" } + { "type" : "Anonymized-View", * : .… => expected {"foo":{"a":"b","bar":"baz","type":"Anonymized-View"}}, got {"foo":{"a":"b","foo":{"bar":"b…
 query-tests.yaml#6  # { "bar" : { * : . }, string(.foo) : "hey" } => expected {"1":"hey"}, got error: parse errors: unexpected token: found LParen, expected ':' after ob…
 query-tests.yaml#37  # {"foo" + "_bar" : 25} => expected {"foo_bar":25}, got error: parse errors: unexpected token: found Plus, expected ':' after o…
-function-tests.json#14  # round(parse-time(., "yyyy-MM-dd HH:mm:ssz")) => expected 125641293, got error: runtime error: internal error: builtin `parse-time` failed: parse-tim…
-function-tests.json#33  # format-time(., "yyyy-MM-dd HH:mm:ss.SSS") => expected "2018-01-01 00:00:00.000", got "2018-01-01 00:00:00.SSS"
-function-tests.json#34  # parse-time(., "yyyy-MM-dd HH:mm:ss.SSS") => expected 1514764800.0, got error: runtime error: internal error: builtin `parse-time` failed: parse-…
-function-tests.json#35  # format-time(., "yyyy-MM-dd HH:mm:ssz", "CET") => expected "1973-12-25 05:21:33CET", got error: runtime error: internal error: builtin `format-time` f…
-function-tests.json#36  # format-time(., "yyyy-MM-dd HH:mm:ssz") => expected "1973-12-25 04:21:33UTC", got "1973-12-25 04:21:33z"
-function-tests.json#87  # round(parse-time(., "yyyy-MM-dd HH:mm:ss.S") * 100) => expected 12564129312, got error: runtime error: internal error: builtin `parse-time` failed: parse-t…
 experimental-tests.json#0  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [], got error: module errors: imported module not found: http://jslt.schibsted.com/2018/exp…
 experimental-tests.json#1  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected null, got error: module errors: imported module not found: http://jslt.schibsted.com/2018/e…
 experimental-tests.json#2  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [{"key":"a","values":[1]}], got error: module errors: imported module not found: http://jsl…
@@ -43,5 +37,3 @@ function-declaration-tests.yaml#20  # import "module-as-function-with-global.jsl
 query-error-tests.json#0  # [for (32323) number(.)] => expected error containing "loop", got []
 query-error-tests.json#5  # .[7] => expected error containing "index", got null
 query-error-tests.json#15  # def func1(o) { * : . } func1(.) => expected error containing "matcher", got {}
-function-error-tests.json#20  # format-time(125641293.0, "yyyy-MM-dd dfkdfjkdf HH:mm:ss") => expected error containing "Couldn't parse format", got "1973-12-25 25fk25fjk25f 04:21:33"
-function-error-tests.json#23  # parse-time("1973-12-25 05:22:33", "yyyy-MM-dd gnugugg HH:mm:… => expected error containing "Couldn't parse format", got null

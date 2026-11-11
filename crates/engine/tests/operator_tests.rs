@@ -47,6 +47,21 @@ fn string_multiplication_repeats() {
 }
 
 #[test]
+fn string_multiplication_is_size_limited() {
+    // Overflowing the byte count must be an error, not a panic.
+    assert!(run_jslt(r#""abc" * 9223372036854775807"#).is_err());
+    // Over the default limit (64 MiB).
+    let err = run_jslt(r#""abcd" * 20000000"#).unwrap_err();
+    assert!(err.contains("too large"), "{err}");
+
+    let cfg = interp::EvalConfig { max_string_repeat_bytes: Some(5), ..Default::default() };
+    let program = engine::compile(r#""ab" * 3"#).unwrap();
+    assert!(program.apply(&Value::Null, Some(cfg.clone())).is_err());
+    let program = engine::compile(r#""ab" * 2"#).unwrap();
+    assert_eq!(program.apply(&Value::Null, Some(cfg)).unwrap(), Value::from("abab"));
+}
+
+#[test]
 fn null_is_smallest_in_comparisons() {
     assert_jslt("2 > null", "true");
     assert_jslt("2 >= null", "true");

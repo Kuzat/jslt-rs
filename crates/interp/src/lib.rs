@@ -23,6 +23,7 @@ pub fn bind(program: &Program) -> Result<BoundProgram, BindErrors> {
 /// max_call_depth: Max recursion depth (function calls). None = unlimited
 /// budget_check_at: Budget check at. Delays the check until after this many steps.
 ///     None = no budget check.
+/// max_string_repeat_bytes: Max size of a string built by `string * n`. None = unlimited
 #[derive(Debug, Clone)]
 pub struct EvalConfig {
     // Max number of expression steps (nodes) to evaluate. None = unlimited
@@ -31,6 +32,8 @@ pub struct EvalConfig {
     pub max_call_depth: Option<usize>,
     // Budget check at. Delays the check until after this many steps.
     pub budget_check_at: Option<u64>,
+    // Max size in bytes of a string built by `string * n`. None = unlimited
+    pub max_string_repeat_bytes: Option<usize>,
 }
 
 impl Default for EvalConfig {
@@ -39,6 +42,7 @@ impl Default for EvalConfig {
             max_steps: Some(100_000_000),
             max_call_depth: Some(10_000),
             budget_check_at: Some(1024),
+            max_string_repeat_bytes: Some(64 * 1024 * 1024),
         }
     }
 }
@@ -62,6 +66,9 @@ pub enum RuntimeError {
 
     #[error("recursion depth exceeded (max depth = {0})")]
     RecursionExceeded(usize),
+
+    #[error("string repetition result too large at {span:?}: limit is {max} bytes")]
+    StringTooLarge { max: usize, span: Span },
 
     #[error("unexpected NaN/Inf at {span:?}:")]
     NonFiniteNumber { span: Span },
@@ -425,7 +432,12 @@ impl<'p> Evaluator<'p> {
                     (Value::String(t), other) | (other, Value::String(t)) => (t, other),
                     _ => return numeric_op(&lv, &rv, *sp, i64::wrapping_mul, |a, b| a * b),
                 };
-                Ok(JsltValue::string(text.repeat(repeat_count(count))))
+                let n = repeat_count(count);
+                let max = self.cfg.max_string_repeat_bytes.unwrap_or(usize::MAX);
+                match text.len().checked_mul(n) {
+                    Some(len) if len <= max => Ok(JsltValue::string(text.repeat(n))),
+                    _ => Err(RuntimeError::StringTooLarge { max, span: *sp }),
+                }
             }
             Div(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
@@ -1460,8 +1472,12 @@ mod tests {
             ),
             vec![],
         );
-        let cfg =
-            EvalConfig { max_steps: Some(3), max_call_depth: Some(100), budget_check_at: Some(1) };
+        let cfg = EvalConfig {
+            max_steps: Some(3),
+            max_call_depth: Some(100),
+            budget_check_at: Some(1),
+            ..Default::default()
+        };
         let err = apply(&p, &json!(null), Some(cfg)).unwrap_err();
         match err {
             RuntimeError::BudgetExceeded(_) => {}
@@ -1487,6 +1503,7 @@ mod tests {
             max_steps: Some(10_000),
             max_call_depth: Some(8),
             budget_check_at: Some(1),
+            ..Default::default()
         };
         let err2 = apply(&p2, &json!(null), Some(cfg2)).unwrap_err();
         match err2 {

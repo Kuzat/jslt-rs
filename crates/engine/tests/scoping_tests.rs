@@ -61,3 +61,9 @@ fn function_let_may_not_redeclare_parameter() {
     let err = run_jslt("def f(a) let a = 1 $a f(2)", json!(null)).unwrap_err();
     assert!(err.contains("`a`"), "{err}");
 }
+
+#[test]
+fn top_level_lets_can_call_functions() {
+    let src = "let x = 2 let y = foo($x) def foo(v) $v * $x $y";
+    assert_eq!(run_jslt(src, json!(null)).unwrap(), json!(4));
+}

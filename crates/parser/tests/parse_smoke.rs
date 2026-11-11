@@ -79,11 +79,23 @@ fn postfix_chain_member_index_call_and_quoted_member() {
     assert_eq!(parse_fmt("$a[1:]"), "$a[1:]");
     assert_eq!(parse_fmt("$a[:]"), "$a[:]");
 
-    // Call + chaining
-    assert_eq!(parse_fmt("$f.g(1, \"s\", $x)"), "$f.g(1, \"s\", $x)");
-
     // Mixed chain
-    assert_eq!(parse_fmt(".a[1:3](42).\"weird-key\"[0]"), ".a[1:3](42).\"weird-key\"[0]");
+    assert_eq!(parse_fmt("f(1).a[1:3].\"weird-key\"[0]"), "f(1).a[1:3].\"weird-key\"[0]");
+
+    // Only function names can be called.
+    parse_err("$f.g(1, \"s\", $x)");
+}
+
+#[test]
+fn chain_links_only_follow_chainable_expressions() {
+    // After a literal, group or array, '[' and '.' start the next expression.
+    assert_eq!(parse_fmt("let v = 1 [$v]"), "let v = 1\n[$v]");
+    assert_eq!(parse_fmt("let v = (1) .a"), "let v = (1)\n.a");
+    assert_eq!(
+        parse_fmt("[for (.) let v = (. + 1) . if ($v > 3)]"),
+        "[for (.) let v = (. + 1) . if ($v > 3)]"
+    );
+    parse_err("[1, 2][0]");
 }
 
 #[test]
@@ -146,8 +158,8 @@ fn function_refs_and_calls() {
     assert_eq!(parse_fmt("foo()"), "foo()");
     assert_eq!(parse_fmt("foo(1, 2, $x)"), "foo(1, 2, $x)");
 
-    // Chained calls and mix with member/index
-    assert_eq!(parse_fmt("foo()(.)"), "foo()(.)");
+    // A call result cannot be called again.
+    parse_err("foo()(.)");
 }
 
 #[test]

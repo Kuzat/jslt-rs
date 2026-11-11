@@ -22,6 +22,10 @@ A variable name could not be resolved during binding.
 
 A call expression attempted to invoke a non-function value.
 
+## jslt_bind_duplicate_variable
+
+A variable was declared more than once in the same list of `let` statements.
+
 ## jslt_module
 
 General module-level error not otherwise classified.

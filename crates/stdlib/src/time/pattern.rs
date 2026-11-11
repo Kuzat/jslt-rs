@@ -193,22 +193,28 @@ impl JavaPattern {
                 return None;
             }
             if tok.is_numeric() {
-                let max_digits = if self.tokens.get(idx + 1).is_some_and(Token::is_numeric) {
-                    n
+                // A field followed by another numeric field reads exactly `n` chars.
+                let end = if self.tokens.get(idx + 1).is_some_and(Token::is_numeric) {
+                    if pos + n > text.len() {
+                        return None;
+                    }
+                    pos + n
                 } else {
-                    usize::MAX
+                    text.len()
                 };
-                let digits =
-                    text[pos..].iter().take(max_digits).take_while(|c| c.is_ascii_digit()).count();
+                let window = &text[pos..end];
+                let neg = window.first() == Some(&'-');
+                let sign_len = usize::from(neg);
+                let digits = window[sign_len..].iter().take_while(|c| c.is_ascii_digit()).count();
                 if digits == 0 {
                     return None;
                 }
-                let s: String = text[pos..pos + digits].iter().collect();
+                let s: String = window[..sign_len + digits].iter().collect();
                 let mut v: i64 = s.parse().ok()?;
-                pos += digits;
+                pos += sign_len + digits;
                 match c {
                     'y' | 'Y' => {
-                        let ambiguous = n <= 2 && digits == 2;
+                        let ambiguous = n <= 2 && !neg && digits == 2;
                         if ambiguous {
                             let start_year =
                                 DateTime::<Utc>::from_timestamp_millis(century_start_ms)?.year()
@@ -219,25 +225,27 @@ impl JavaPattern {
                             }
                         }
                         if c == 'y' {
-                            f.year = Some(v);
+                            f.set(F::Year, v);
                             f.ambiguous_year = ambiguous;
                         } else {
-                            f.week_year = Some(v);
+                            f.set(F::WeekYear, v);
                         }
                     }
-                    'M' | 'L' => f.month = Some(v),
-                    'd' => f.day = Some(v),
-                    'D' => f.day_of_year = Some(v),
-                    'H' => f.hour24 = Some(v),
-                    'k' => f.hour24 = Some(if v == 24 { 0 } else { v }),
-                    'K' => f.hour12 = Some(v),
-                    'h' => f.hour12 = Some(if v == 12 { 0 } else { v }),
-                    'm' => f.minute = v,
-                    's' => f.second = v,
-                    'S' => f.millis = v,
-                    'w' => f.week = Some(v),
-                    'u' => f.weekday = Some(v % 7),
-                    _ => {}
+                    'M' | 'L' => f.set(F::Month, v - 1),
+                    'd' => f.set(F::Day, v),
+                    'D' => f.set(F::DayOfYear, v),
+                    'F' => f.set(F::DowInMonth, v),
+                    'W' => f.set(F::WeekOfMonth, v),
+                    'w' => f.set(F::WeekOfYear, v),
+                    'u' => f.set(F::DayOfWeek, v.rem_euclid(7)),
+                    'H' => f.set(F::HourOfDay, v),
+                    'k' => f.set(F::HourOfDay, if v == 24 { 0 } else { v }),
+                    'K' => f.set(F::Hour, v),
+                    'h' => f.set(F::Hour, if v == 12 { 0 } else { v }),
+                    'm' => f.set(F::Minute, v),
+                    's' => f.set(F::Second, v),
+                    'S' => f.set(F::Millis, v),
+                    _ => unreachable!("numeric pattern letters are listed in is_numeric"),
                 }
                 continue;
             }
@@ -245,22 +253,22 @@ impl JavaPattern {
             let len = match c {
                 'M' | 'L' => {
                     let (i, len) = match_name(rest, &MONTHS)?;
-                    f.month = Some(i as i64 + 1);
+                    f.set(F::Month, i as i64);
                     len
                 }
                 'E' => {
                     let (i, len) = match_name(rest, &WEEKDAYS)?;
-                    f.weekday = Some(i as i64);
+                    f.set(F::DayOfWeek, i as i64);
                     len
                 }
                 'a' => {
                     let (i, len) = match_name(rest, &["AM", "PM"])?;
-                    f.pm = Some(i == 1);
+                    f.set(F::AmPm, i as i64);
                     len
                 }
                 'G' => {
                     let (i, len) = match_name(rest, &["BC", "AD"])?;
-                    f.bc = i == 0;
+                    f.set(F::Era, i as i64);
                     len
                 }
                 'z' | 'Z' => {
@@ -277,81 +285,211 @@ impl JavaPattern {
             };
             pos += len;
         }
+        if pos == 0 {
+            return None;
+        }
         let ms = f.resolve()?;
         if f.ambiguous_year && ms < century_start_ms {
-            f.year = f.year.map(|y| y + 100);
+            f.vals[F::Year as usize] += 100;
             return f.resolve();
         }
         Some(ms)
     }
 }
 
+/// Calendar fields set while parsing.
+#[derive(Clone, Copy)]
+enum F {
+    Era,
+    Year,
+    WeekYear,
+    /// 0 is January.
+    Month,
+    Day,
+    DayOfYear,
+    /// 0 is Sunday.
+    DayOfWeek,
+    DowInMonth,
+    WeekOfMonth,
+    WeekOfYear,
+    HourOfDay,
+    Hour,
+    /// 1 is PM.
+    AmPm,
+    Minute,
+    Second,
+    Millis,
+}
+
+const FIELD_COUNT: usize = F::Millis as usize + 1;
+
+/// Field values with the order they were set in (0 is unset), which Java uses to choose
+/// between competing ways of expressing a date.
 #[derive(Default)]
 struct Fields {
-    year: Option<i64>,
+    vals: [i64; FIELD_COUNT],
+    stamps: [u32; FIELD_COUNT],
+    next_stamp: u32,
     ambiguous_year: bool,
-    week_year: Option<i64>,
-    week: Option<i64>,
-    /// 0 is Sunday.
-    weekday: Option<i64>,
-    bc: bool,
-    month: Option<i64>,
-    day: Option<i64>,
-    day_of_year: Option<i64>,
-    hour24: Option<i64>,
-    hour12: Option<i64>,
-    pm: Option<bool>,
-    minute: i64,
-    second: i64,
-    millis: i64,
     offset_secs: i32,
 }
 
 impl Fields {
-    /// Out-of-range values roll over into the next unit, like a lenient Java calendar.
-    /// A week year, or a week without a month or day, selects a week date (as in Java,
-    /// `YYYY-MM-dd` ignores the month and day).
+    fn set(&mut self, f: F, v: i64) {
+        self.next_stamp += 1;
+        self.vals[f as usize] = v;
+        self.stamps[f as usize] = self.next_stamp;
+    }
+
+    fn stamp(&self, f: F) -> u32 {
+        self.stamps[f as usize]
+    }
+
+    fn get(&self, f: F, default: i64) -> i128 {
+        if self.stamp(f) == 0 {
+            default as i128
+        } else {
+            self.vals[f as usize] as i128
+        }
+    }
+
+    /// Resolves the fields the way a lenient `GregorianCalendar` does: out-of-range values
+    /// roll over, and the most recently set date fields win. Weeks start on Sunday and
+    /// week 1 holds January 1.
     fn resolve(&self) -> Option<i64> {
-        let mut year = self.year.unwrap_or(1970);
-        if self.bc {
+        let mut year = self.get(F::Year, 1970);
+        if self.stamp(F::Era) != 0 && self.vals[F::Era as usize] == 0 {
             year = 1 - year;
         }
-        let week_date = self.week_year.is_some()
-            || (self.week.is_some()
-                && self.month.is_none()
-                && self.day.is_none()
-                && self.day_of_year.is_none());
-        let days = match (self.day_of_year, self.month, self.day) {
-            _ if week_date => {
-                let jan1 = days_from_civil(self.week_year.unwrap_or(year), 1, 1);
-                let week1_start = jan1 - (jan1 + 4).rem_euclid(7);
-                let week = self.week.unwrap_or(1) - 1;
-                week1_start
-                    .checked_add(week.checked_mul(7)?)?
-                    .checked_add(self.weekday.unwrap_or(0))?
+        let dow = self.get(F::DayOfWeek, 0);
+        let days = if self.stamp(F::WeekYear) > self.stamp(F::Year) {
+            week1_start(self.get(F::WeekYear, 0))
+                + 7 * (self.get(F::WeekOfYear, 1) - 1)
+                + dow.rem_euclid(7)
+        } else {
+            self.resolve_date(year, dow)
+        };
+
+        let s = |f| self.stamp(f);
+        let hour_of_day = s(F::HourOfDay);
+        let mut best = hour_of_day.max(aggregate(s(F::Hour), s(F::AmPm)));
+        if best == 0 {
+            best = s(F::Hour).max(s(F::AmPm));
+        }
+        let hour = if best == 0 {
+            0
+        } else if best == hour_of_day {
+            self.get(F::HourOfDay, 0)
+        } else {
+            self.get(F::Hour, 0) + 12 * self.get(F::AmPm, 0)
+        };
+
+        let ms = days * 86_400_000
+            + hour * 3_600_000
+            + self.get(F::Minute, 0) * 60_000
+            + self.get(F::Second, 0) * 1000
+            + self.get(F::Millis, 0)
+            - self.offset_secs as i128 * 1000;
+        i64::try_from(ms).ok()
+    }
+
+    /// Port of `Calendar.selectFields` and `GregorianCalendar.getFixedDate`.
+    fn resolve_date(&self, year: i128, dow: i128) -> i128 {
+        let s = |f| self.stamp(f);
+        let dow_s = s(F::DayOfWeek);
+        let mut dom_s = s(F::Day);
+        let mut wom_s = aggregate(s(F::WeekOfMonth), dow_s);
+        let mut dowim_s = aggregate(s(F::DowInMonth), dow_s);
+        let doy_s = s(F::DayOfYear);
+        let mut woy_s = aggregate(s(F::WeekOfYear), dow_s);
+        let mut best = dom_s.max(wom_s).max(dowim_s).max(doy_s).max(woy_s);
+        if best == 0 {
+            wom_s = s(F::WeekOfMonth);
+            dowim_s = s(F::DowInMonth).max(dow_s);
+            woy_s = s(F::WeekOfYear);
+            best = wom_s.max(dowim_s).max(woy_s);
+            if best == 0 {
+                dom_s = s(F::Month);
+                best = dom_s;
             }
-            (Some(doy), None, None) => days_from_civil(year, 1, 1).checked_add(doy - 1)?,
-            (_, month, day) => {
-                let m0 = month.unwrap_or(1) - 1;
-                let first =
-                    days_from_civil(year.checked_add(m0.div_euclid(12))?, m0.rem_euclid(12) + 1, 1);
-                first.checked_add(day.unwrap_or(1) - 1)?
+        }
+        let first_week_start = |first: i128| {
+            let start = on_or_before(first + 6, 0);
+            if start > first {
+                start - 7
+            } else {
+                start
             }
         };
-        let pm_hours = if self.pm == Some(true) { 12 } else { 0 };
-        let hour = self.hour24.unwrap_or_else(|| self.hour12.unwrap_or(0) + pm_hours);
-        let ms = days
-            .checked_mul(86_400_000)?
-            .checked_add(hour.checked_mul(3_600_000)?)?
-            .checked_add(self.minute.checked_mul(60_000)?)?
-            .checked_add(self.second.checked_mul(1000)?)?
-            .checked_add(self.millis)?;
-        ms.checked_sub(self.offset_secs as i64 * 1000)
+
+        let by_month = best == dom_s
+            || (best == wom_s && s(F::WeekOfMonth) >= s(F::WeekOfYear))
+            || (best == dowim_s && s(F::DowInMonth) >= s(F::WeekOfYear));
+        if by_month {
+            let m0 = self.get(F::Month, 0);
+            let (y, m) = (year + m0.div_euclid(12), m0.rem_euclid(12) + 1);
+            let first = days_from_civil(y, m, 1);
+            if best == dom_s {
+                return first + self.get(F::Day, 1) - 1;
+            }
+            let use_wom = if wom_s == dowim_s {
+                s(F::WeekOfMonth) >= s(F::DowInMonth)
+            } else {
+                best == wom_s
+            };
+            if use_wom {
+                let mut start = first_week_start(first);
+                if dow_s != 0 {
+                    start = on_or_before(start + 6, dow);
+                }
+                return start + 7 * (self.get(F::WeekOfMonth, 1) - 1);
+            }
+            let dowim = self.get(F::DowInMonth, 1);
+            if dowim >= 0 {
+                on_or_before(first + 7 * dowim - 1, dow)
+            } else {
+                let next = if m == 12 {
+                    days_from_civil(y + 1, 1, 1)
+                } else {
+                    days_from_civil(y, m + 1, 1)
+                };
+                on_or_before(next + 7 * (dowim + 1) - 1, dow)
+            }
+        } else if best == doy_s {
+            days_from_civil(year, 1, 1) + self.get(F::DayOfYear, 1) - 1
+        } else {
+            let mut start = first_week_start(days_from_civil(year, 1, 1));
+            if dow_s != 0 && dow != 0 {
+                start = on_or_before(start + 6, dow);
+            }
+            start + 7 * (self.get(F::WeekOfYear, 1) - 1)
+        }
     }
 }
 
+/// Java's `Calendar.aggregateStamp`: unset unless both fields are set.
+fn aggregate(a: u32, b: u32) -> u32 {
+    if a == 0 || b == 0 {
+        0
+    } else {
+        a.max(b)
+    }
+}
+
+/// The latest day on or before `day` that falls on `dow` (0 is Sunday).
+fn on_or_before(day: i128, dow: i128) -> i128 {
+    // 1970-01-01 was a Thursday.
+    day - (day + 4 - dow).rem_euclid(7)
+}
+
+/// First day of week 1 of `year`.
+fn week1_start(year: i128) -> i128 {
+    let jan1 = days_from_civil(year, 1, 1);
+    jan1 - (jan1 + 4).rem_euclid(7)
+}
+
 /// Days since 1970-01-01 in the proleptic Gregorian calendar.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+fn days_from_civil(y: i128, m: i128, d: i128) -> i128 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -544,7 +682,32 @@ mod tests {
         assert_eq!(parse("yyyy", " 2018trailing"), Some(1_514_764_800_000));
         assert_eq!(parse("ss.SSS", "00.1234"), Some(1234));
         assert_eq!(parse(" yyyy", "2018"), None);
+        assert_eq!(parse("", "not a date"), None);
+        assert_eq!(parse("yyyy", "9223372036854775807"), None);
         assert_eq!(parse("yyyy-MM-dd HH", "2018-01-02"), None);
+    }
+
+    #[test]
+    fn resolves_competing_fields_like_java() {
+        let jan = |d: i64| Some(1_514_764_800_000 + (d - 1) * 86_400_000);
+        assert_eq!(parse("yyyy-MM F E", "2018-01 2 Mon"), jan(8));
+        assert_eq!(parse("yyyy-MM W E", "2018-01 2 Mon"), jan(8));
+        assert_eq!(parse("yyyy-MM W", "2018-01 2"), jan(7));
+        assert_eq!(parse("yyyy-MM F", "2018-01 2"), jan(14));
+        assert_eq!(parse("yyyy-MM-dd D", "2018-01-01 032"), jan(32));
+        assert_eq!(parse("D yyyy-MM-dd", "032 2018-01-05"), jan(5));
+        assert_eq!(parse("yyyy-MM-dd E", "2018-01-10 Mon"), jan(10));
+        assert_eq!(parse("yyyy w u", "2018 12 3"), Some(1_521_590_400_000));
+        assert_eq!(parse("yyyy-MM-dd hh a HH", "2018-01-02 03 PM 15"), Some(1_514_905_200_000));
+        assert_eq!(parse("yyyy-MM-dd HH hh a", "2018-01-02 15 03 PM"), Some(1_514_905_200_000));
+    }
+
+    #[test]
+    fn accepts_negative_fields() {
+        assert_eq!(parse("yyyy-MM-dd HH:mm:ss", "2018-01-01 00:00:-1"), Some(1_514_764_799_000));
+        assert_eq!(parse("yyyy-MM", "2018--01"), Some(1_509_494_400_000));
+        assert_eq!(parse("yyyyMM", "2018-1"), Some(1_509_494_400_000));
+        assert_eq!(parse("yyyy-MM", "2018-+1"), None);
     }
 
     #[test]

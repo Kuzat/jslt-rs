@@ -549,11 +549,16 @@ Examples:
 | `Z` | RFC 822 offset | `-0800` |
 | `X` | ISO 8601 offset (`X`, `XX`, `XXX`) | `Z`, `-08`, `-0800`, `-08:00` |
 
-Weeks start on Sunday, and week 1 is the week that contains January 1. When parsing, a two-digit year falls in the 100 years that start 80 years ago, and a week year (`Y`) selects a week date, so `YYYY-MM-dd` ignores the month and day, as in Java.
+Weeks start on Sunday, and week 1 is the week that contains January 1. When parsing:
+- Numeric fields can be negative, and out-of-range values roll over (`00:00:-1` is one second before midnight).
+- A two-digit year falls in the 100 years that start 80 years ago.
+- When the pattern holds more than one way to give the date (for example `dd` and `D`), the field that comes last wins, as in Java's `Calendar`.
+- A week year (`Y`) selects a week date, so `YYYY-MM-dd` ignores the month and day, as in Java.
 
 Differences from Java:
 - Long zone names are only known for common zones. Other zones use the `GMT+04:00` form.
 - Dates before October 1582 use the proleptic Gregorian calendar, not the Julian calendar.
+- A field value too large for a date is a parse failure. Java wraps it into a wrong date.
 
 
 ## Miscellaneous functions

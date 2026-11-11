@@ -554,6 +554,7 @@ Weeks start on Sunday, and week 1 is the week that contains January 1. When pars
 - A two-digit year falls in the 100 years that start 80 years ago.
 - When the pattern holds more than one way to give the date (for example `dd` and `D`), the field that comes last wins, as in Java's `Calendar`.
 - A week year (`Y`) selects a week date, so `YYYY-MM-dd` ignores the month and day, as in Java.
+- A zone name selects that zone with its standard offset on the parsed date (`MSK` is UTC+4 in 2012). A daylight name such as `CEST` adds one hour. Ambiguous abbreviations resolve as in Java: `IST` is Israel and `CST` is US Central.
 
 Differences from Java:
 - Long zone names are only known for common zones. Other zones use the `GMT+04:00` form.

@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Datelike, NaiveDate, Timelike, Utc};
 
-use super::zones::{match_zone_name, Zone};
+use super::zones::{match_zone_name, ParsedZone, Zone};
 
 const PATTERN_LETTERS: &str = "GyMdkHmsSEDFwWahKzZYuXL";
 
@@ -224,20 +224,16 @@ impl JavaPattern {
                                 v += 100;
                             }
                         }
-                        if c == 'y' {
-                            f.set(F::Year, v);
-                            f.ambiguous_year = ambiguous;
-                        } else {
-                            f.set(F::WeekYear, v);
-                        }
+                        f.set(if c == 'y' { F::Year } else { F::WeekYear }, v);
+                        f.ambiguous_year = ambiguous;
                     }
-                    'M' | 'L' => f.set(F::Month, v - 1),
+                    'M' | 'L' => f.set(F::Month, v),
                     'd' => f.set(F::Day, v),
                     'D' => f.set(F::DayOfYear, v),
                     'F' => f.set(F::DowInMonth, v),
                     'W' => f.set(F::WeekOfMonth, v),
                     'w' => f.set(F::WeekOfYear, v),
-                    'u' => f.set(F::DayOfWeek, v.rem_euclid(7)),
+                    'u' => f.set(F::DayOfWeek, if (1..=7).contains(&v) { v % 7 + 1 } else { v }),
                     'H' => f.set(F::HourOfDay, v),
                     'k' => f.set(F::HourOfDay, if v == 24 { 0 } else { v }),
                     'K' => f.set(F::Hour, v),
@@ -253,12 +249,12 @@ impl JavaPattern {
             let len = match c {
                 'M' | 'L' => {
                     let (i, len) = match_name(rest, &MONTHS)?;
-                    f.set(F::Month, i as i64);
+                    f.set(F::Month, i as i64 + 1);
                     len
                 }
                 'E' => {
                     let (i, len) = match_name(rest, &WEEKDAYS)?;
-                    f.set(F::DayOfWeek, i as i64);
+                    f.set(F::DayOfWeek, i as i64 + 1);
                     len
                 }
                 'a' => {
@@ -272,13 +268,13 @@ impl JavaPattern {
                     len
                 }
                 'z' | 'Z' => {
-                    let (off, len) = parse_general_zone(rest)?;
-                    f.offset_secs = off;
+                    let (zone, len) = parse_general_zone(rest)?;
+                    f.zone = zone;
                     len
                 }
                 'X' => {
                     let (off, len) = parse_iso_zone(rest, n)?;
-                    f.offset_secs = off;
+                    f.zone = ParsedZone::Offset(off);
                     len
                 }
                 _ => unreachable!("pattern letters are validated by compile"),
@@ -290,7 +286,9 @@ impl JavaPattern {
         }
         let ms = f.resolve()?;
         if f.ambiguous_year && ms < century_start_ms {
-            f.vals[F::Year as usize] += 100;
+            for y in [F::Year, F::WeekYear] {
+                f.vals[y as usize] = f.vals[y as usize].saturating_add(100);
+            }
             return f.resolve();
         }
         Some(ms)
@@ -303,11 +301,11 @@ enum F {
     Era,
     Year,
     WeekYear,
-    /// 0 is January.
+    /// 1 is January.
     Month,
     Day,
     DayOfYear,
-    /// 0 is Sunday.
+    /// Java's `Calendar` numbering: 1 is Sunday. Out-of-range values roll over.
     DayOfWeek,
     DowInMonth,
     WeekOfMonth,
@@ -325,13 +323,24 @@ const FIELD_COUNT: usize = F::Millis as usize + 1;
 
 /// Field values with the order they were set in (0 is unset), which Java uses to choose
 /// between competing ways of expressing a date.
-#[derive(Default)]
 struct Fields {
     vals: [i64; FIELD_COUNT],
     stamps: [u32; FIELD_COUNT],
     next_stamp: u32,
     ambiguous_year: bool,
-    offset_secs: i32,
+    zone: ParsedZone,
+}
+
+impl Default for Fields {
+    fn default() -> Self {
+        Fields {
+            vals: [0; FIELD_COUNT],
+            stamps: [0; FIELD_COUNT],
+            next_stamp: 0,
+            ambiguous_year: false,
+            zone: ParsedZone::Offset(0),
+        }
+    }
 }
 
 impl Fields {
@@ -361,13 +370,26 @@ impl Fields {
         if self.stamp(F::Era) != 0 && self.vals[F::Era as usize] == 0 {
             year = 1 - year;
         }
-        let dow = self.get(F::DayOfWeek, 0);
         let days = if self.stamp(F::WeekYear) > self.stamp(F::Year) {
-            week1_start(self.get(F::WeekYear, 0))
-                + 7 * (self.get(F::WeekOfYear, 1) - 1)
-                + dow.rem_euclid(7)
+            // Java's CalendarBuilder moves an out-of-range weekday into the next or previous
+            // week, then reads the result as an ISO day number.
+            let mut week = self.get(F::WeekOfYear, 1);
+            let mut dow = self.get(F::DayOfWeek, 1);
+            if !(1..=7).contains(&dow) {
+                if dow >= 8 {
+                    dow -= 1;
+                    week += dow / 7;
+                    dow = dow % 7 + 1;
+                } else {
+                    let k = (-dow).div_euclid(7) + 1;
+                    week -= k;
+                    dow += 7 * k;
+                }
+                dow = dow % 7 + 1;
+            }
+            week1_start(self.get(F::WeekYear, 0)) + 7 * (week - 1) + (dow - 1)
         } else {
-            self.resolve_date(year, dow)
+            self.resolve_date(year, (self.get(F::DayOfWeek, 1) - 1).rem_euclid(7))
         };
 
         let s = |f| self.stamp(f);
@@ -388,9 +410,9 @@ impl Fields {
             + hour * 3_600_000
             + self.get(F::Minute, 0) * 60_000
             + self.get(F::Second, 0) * 1000
-            + self.get(F::Millis, 0)
-            - self.offset_secs as i128 * 1000;
-        i64::try_from(ms).ok()
+            + self.get(F::Millis, 0);
+        let local = i64::try_from(ms).ok()?;
+        local.checked_sub(self.zone.offset_for_local(local)? as i64 * 1000)
     }
 
     /// Port of `Calendar.selectFields` and `GregorianCalendar.getFixedDate`.
@@ -426,7 +448,7 @@ impl Fields {
             || (best == wom_s && s(F::WeekOfMonth) >= s(F::WeekOfYear))
             || (best == dowim_s && s(F::DowInMonth) >= s(F::WeekOfYear));
         if by_month {
-            let m0 = self.get(F::Month, 0);
+            let m0 = self.get(F::Month, 1) - 1;
             let (y, m) = (year + m0.div_euclid(12), m0.rem_euclid(12) + 1);
             let first = days_from_civil(y, m, 1);
             if best == dom_s {
@@ -593,21 +615,21 @@ fn sign_of(c: Option<&char>) -> Option<i32> {
 }
 
 /// `z`/`Z`: `GMT[+hh:mm]`, RFC 822 `+hhmm`, or a zone name.
-fn parse_general_zone(text: &[char]) -> Option<(i32, usize)> {
+fn parse_general_zone(text: &[char]) -> Option<(ParsedZone, usize)> {
     let is_gmt = text.len() >= 3
         && text[..3].iter().zip("GMT".chars()).all(|(a, b)| a.eq_ignore_ascii_case(&b));
     if is_gmt {
         return match sign_of(text.get(3)) {
             Some(sign) => {
                 let (off, len) = parse_numeric_zone(&text[4..], 0, true)?;
-                Some((sign * off, 4 + len))
+                Some((ParsedZone::Offset(sign * off), 4 + len))
             }
-            None => Some((0, 3)),
+            None => Some((ParsedZone::Offset(0), 3)),
         };
     }
     if let Some(sign) = sign_of(text.first()) {
         let (off, len) = parse_numeric_zone(&text[1..], 0, false)?;
-        return Some((sign * off, 1 + len));
+        return Some((ParsedZone::Offset(sign * off), 1 + len));
     }
     match_zone_name(text)
 }
@@ -698,6 +720,13 @@ mod tests {
         assert_eq!(parse("D yyyy-MM-dd", "032 2018-01-05"), jan(5));
         assert_eq!(parse("yyyy-MM-dd E", "2018-01-10 Mon"), jan(10));
         assert_eq!(parse("yyyy w u", "2018 12 3"), Some(1_521_590_400_000));
+        // Out-of-range ISO day numbers roll into the next or previous week.
+        assert_eq!(parse("YYYY w u", "2018 1 8"), Some(1_515_369_600_000));
+        assert_eq!(parse("YYYY w u", "2018 1 0"), Some(1_514_073_600_000));
+        assert_eq!(parse("yyyy w u", "2018 1 8"), Some(1_514_678_400_000));
+        assert_eq!(parse("yyyy w u", "2018 1 0"), Some(1_515_196_800_000));
+        assert_eq!(parse("yyyy-MM F u", "2018-01 1 0"), Some(1_515_196_800_000));
+        assert_eq!(parse("YY w u", "46 1 1"), Some(2_398_377_600_000));
         assert_eq!(parse("yyyy-MM-dd hh a HH", "2018-01-02 03 PM 15"), Some(1_514_905_200_000));
         assert_eq!(parse("yyyy-MM-dd HH hh a", "2018-01-02 15 03 PM"), Some(1_514_905_200_000));
     }
@@ -708,6 +737,7 @@ mod tests {
         assert_eq!(parse("yyyy-MM", "2018--01"), Some(1_509_494_400_000));
         assert_eq!(parse("yyyyMM", "2018-1"), Some(1_509_494_400_000));
         assert_eq!(parse("yyyy-MM", "2018-+1"), None);
+        assert_eq!(parse("yyyy-MM-dd", "2018--9223372036854775808-01"), None);
     }
 
     #[test]
@@ -726,6 +756,11 @@ mod tests {
             Some(base - 3_600_000)
         );
         assert_eq!(parse("yyyy-MM-dd HH:mm z", "2018-01-02 00:00 PST"), Some(base + 28_800_000));
+        // Named zones use their offset on the parsed date: Moscow was UTC+4 in 2012.
+        assert_eq!(parse("yyyy-MM-dd z", "2012-01-01 MSK"), Some(1_325_361_600_000));
+        assert_eq!(parse("yyyy-MM-dd z", "1990-07-01 MSK"), Some(646_776_000_000));
+        assert_eq!(parse("yyyy-MM-dd z", "2018-07-01 CET"), Some(1_530_399_600_000));
+        assert_eq!(parse("yyyy-MM-dd z", "1950-07-01 CEST"), Some(-615_520_800_000));
         assert_eq!(parse("yyyy-MM-dd HH:mm X", "2018-01-02 00:00 Z"), Some(base));
         assert_eq!(parse("yyyy-MM-dd HH:mm X", "2018-01-02 00:00 +0130"), Some(base - 3_600_000));
         assert_eq!(

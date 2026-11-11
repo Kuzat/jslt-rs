@@ -44,8 +44,6 @@ struct ZoneNames {
     long_std: &'static str,
     short_dst: &'static str,
     long_dst: &'static str,
-    /// Standard offset in minutes. Daylight time is one hour ahead.
-    std_minutes: i32,
     zones: &'static [&'static str],
 }
 
@@ -54,21 +52,19 @@ const fn names(
     long_std: &'static str,
     short_dst: &'static str,
     long_dst: &'static str,
-    std_minutes: i32,
     zones: &'static [&'static str],
 ) -> ZoneNames {
-    ZoneNames { short_std, long_std, short_dst, long_dst, std_minutes, zones }
+    ZoneNames { short_std, long_std, short_dst, long_dst, zones }
 }
 
 /// When parsing, the first entry with a matching name wins (`IST` is Israel, `CST` is
-/// US Central), as in Java.
+/// US Central), as in Java, and the entry's first zone gives the offset.
 const ZONE_NAMES: &[ZoneNames] = &[
     names(
         "UTC",
         "Coordinated Universal Time",
         "",
         "",
-        0,
         &["UTC", "Etc/UTC", "Etc/UCT", "UCT", "Etc/Universal", "Universal", "Etc/Zulu", "Zulu"],
     ),
     names(
@@ -76,7 +72,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Greenwich Mean Time",
         "BST",
         "British Summer Time",
-        0,
         &[
             "GMT",
             "Etc/GMT",
@@ -103,7 +98,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Western European Standard Time",
         "WEST",
         "Western European Summer Time",
-        0,
         &[
             "WET",
             "Europe/Lisbon",
@@ -118,7 +112,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Central European Standard Time",
         "CEST",
         "Central European Summer Time",
-        60,
         &[
             "CET",
             "MET",
@@ -166,7 +159,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Eastern European Standard Time",
         "EEST",
         "Eastern European Summer Time",
-        120,
         &[
             "EET",
             "Europe/Helsinki",
@@ -198,45 +190,43 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Israel Standard Time",
         "IDT",
         "Israel Daylight Time",
-        120,
         &["Asia/Jerusalem", "Asia/Tel_Aviv", "Israel"],
     ),
+    // tzdata models Irish summer time as standard time with negative DST in winter. The
+    // offsets come from Europe/London, which has Java's positive DST and the same clock
+    // (London itself matches the entry above first).
     names(
         "GMT",
         "Greenwich Mean Time",
         "IST",
         "Irish Standard Time",
-        0,
-        &["Europe/Dublin", "Eire"],
+        &["Europe/London", "Europe/Dublin", "Eire"],
     ),
     names(
         "MSK",
         "Moscow Standard Time",
         "",
         "",
-        180,
         &["Europe/Moscow", "W-SU", "Europe/Simferopol", "Europe/Kirov", "Europe/Volgograd"],
     ),
-    names("", "Gulf Standard Time", "", "", 240, &["Asia/Dubai", "Asia/Muscat"]),
-    names("IST", "India Standard Time", "", "", 330, &["Asia/Kolkata", "Asia/Calcutta"]),
-    names("", "Singapore Standard Time", "", "", 480, &["Asia/Singapore", "Singapore"]),
-    names("HKT", "Hong Kong Standard Time", "", "", 480, &["Asia/Hong_Kong", "Hongkong"]),
+    names("", "Gulf Standard Time", "", "", &["Asia/Dubai", "Asia/Muscat"]),
+    names("IST", "India Standard Time", "", "", &["Asia/Kolkata", "Asia/Calcutta"]),
+    names("", "Singapore Standard Time", "", "", &["Asia/Singapore", "Singapore"]),
+    names("HKT", "Hong Kong Standard Time", "", "", &["Asia/Hong_Kong", "Hongkong"]),
     names(
         "AWST",
         "Australian Western Standard Time",
         "",
         "",
-        480,
         &["Australia/Perth", "Australia/West"],
     ),
-    names("JST", "Japan Standard Time", "", "", 540, &["Asia/Tokyo", "Japan"]),
-    names("KST", "Korean Standard Time", "", "", 540, &["Asia/Seoul", "ROK"]),
+    names("JST", "Japan Standard Time", "", "", &["Asia/Tokyo", "Japan"]),
+    names("KST", "Korean Standard Time", "", "", &["Asia/Seoul", "ROK"]),
     names(
         "ACST",
         "Australian Central Standard Time",
         "ACDT",
         "Australian Central Daylight Time",
-        570,
         &[
             "Australia/Adelaide",
             "Australia/South",
@@ -250,7 +240,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Australian Eastern Standard Time",
         "AEDT",
         "Australian Eastern Daylight Time",
-        600,
         &[
             "Australia/Sydney",
             "Australia/NSW",
@@ -270,7 +259,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "New Zealand Standard Time",
         "NZDT",
         "New Zealand Daylight Time",
-        720,
         &["Pacific/Auckland", "NZ"],
     ),
     names(
@@ -278,7 +266,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Hawaii-Aleutian Standard Time",
         "HDT",
         "Hawaii-Aleutian Daylight Time",
-        -600,
         &["HST", "Pacific/Honolulu", "US/Hawaii", "America/Adak", "US/Aleutian"],
     ),
     names(
@@ -286,7 +273,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Alaska Standard Time",
         "AKDT",
         "Alaska Daylight Time",
-        -540,
         &[
             "America/Anchorage",
             "US/Alaska",
@@ -302,7 +288,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Pacific Standard Time",
         "PDT",
         "Pacific Daylight Time",
-        -480,
         &[
             "America/Los_Angeles",
             "US/Pacific",
@@ -317,7 +302,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Mountain Standard Time",
         "MDT",
         "Mountain Daylight Time",
-        -420,
         &[
             "MST",
             "MST7MDT",
@@ -335,7 +319,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Central Standard Time",
         "CDT",
         "Central Daylight Time",
-        -360,
         &[
             "CST6CDT",
             "America/Chicago",
@@ -354,7 +337,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Eastern Standard Time",
         "EDT",
         "Eastern Daylight Time",
-        -300,
         &[
             "EST",
             "EST5EDT",
@@ -377,7 +359,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "Atlantic Standard Time",
         "ADT",
         "Atlantic Daylight Time",
-        -240,
         &[
             "America/Halifax",
             "Canada/Atlantic",
@@ -391,7 +372,6 @@ const ZONE_NAMES: &[ZoneNames] = &[
         "China Standard Time",
         "",
         "",
-        480,
         &["Asia/Shanghai", "PRC", "Asia/Chongqing", "Asia/Harbin"],
     ),
 ];
@@ -452,24 +432,57 @@ fn gmt_name(offset_secs: i32) -> String {
     format!("GMT{sign}{:02}:{:02}", mins / 60, mins % 60)
 }
 
+/// A zone read by the `z`/`Z`/`X` parsers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ParsedZone {
+    Offset(i32),
+    /// A named zone. `dst` is `Some` when the name says standard or daylight time, and
+    /// `None` when the zone uses one name for both.
+    Named {
+        tz: Tz,
+        dst: Option<bool>,
+    },
+}
+
+impl ParsedZone {
+    /// Offset in seconds for a local time given as milliseconds since 1970-01-01. Named
+    /// zones use their standard offset on that date, like Java.
+    pub(crate) fn offset_for_local(&self, local_ms: i64) -> Option<i32> {
+        let (tz, dst) = match *self {
+            ParsedZone::Offset(secs) => return Some(secs),
+            ParsedZone::Named { tz, dst } => (tz, dst),
+        };
+        let offset_at = |utc_ms: i64| -> Option<i32> {
+            let utc = DateTime::<Utc>::from_timestamp_millis(utc_ms)?;
+            let off = tz.offset_from_utc_datetime(&utc.naive_utc());
+            let base = off.base_utc_offset().num_seconds() as i32;
+            let actual_dst = off.dst_offset().num_seconds() as i32;
+            Some(base + dst.map_or(actual_dst, |d| if d { 3600 } else { 0 }))
+        };
+        let guess = local_ms.checked_sub(offset_at(local_ms)? as i64 * 1000)?;
+        offset_at(guess)
+    }
+}
+
 /// Matches a zone name at the start of `text` (case-insensitive, longest match wins).
-/// Returns the offset in seconds and the matched length in chars.
-pub(crate) fn match_zone_name(text: &[char]) -> Option<(i32, usize)> {
-    let mut best: Option<(i32, usize)> = None;
+/// Returns the zone and the matched length in chars.
+pub(crate) fn match_zone_name(text: &[char]) -> Option<(ParsedZone, usize)> {
+    let mut best: Option<(ParsedZone, usize)> = None;
     for n in ZONE_NAMES {
-        let std_off = n.std_minutes * 60;
-        for (name, off) in [
-            (n.short_std, std_off),
-            (n.long_std, std_off),
-            (n.short_dst, std_off + 3600),
-            (n.long_dst, std_off + 3600),
-        ] {
+        let Some(tz) = n.zones.first().and_then(|z| z.parse::<Tz>().ok()) else {
+            continue;
+        };
+        let has_dst_names = !n.short_dst.is_empty() || !n.long_dst.is_empty();
+        for (name, is_dst) in
+            [(n.short_std, false), (n.long_std, false), (n.short_dst, true), (n.long_dst, true)]
+        {
             let len = name.chars().count();
             if len == 0 || len > text.len() || best.is_some_and(|(_, b)| b >= len) {
                 continue;
             }
             if name.chars().zip(text).all(|(a, b)| a.eq_ignore_ascii_case(b)) {
-                best = Some((off, len));
+                let dst = has_dst_names.then_some(is_dst);
+                best = Some((ParsedZone::Named { tz, dst }, len));
             }
         }
     }

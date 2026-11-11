@@ -272,6 +272,9 @@ Used by `if`, `and`, `or` and filters:
   comprehension); a second declaration is a bind error. A function's parameters and its `let`s
   share one scope. Nested scopes may shadow a name; the new name is in scope in its own
   initializer.
+* Top-level `let`s are evaluated in order before the body. A `let` may call a top-level
+  function; the function sees the `let`s evaluated before it.
+* The `let`s of an imported module are evaluated once per run, with `.` set to the main input.
 * `def` defined at top level introduces a function binding visible **after** its declaration; inner `def` is allowed but discouraged (implementation may hoist or keep block‑local).
 
 > **OPEN:** Confirm whether inner `def` is legal in the reference. Safe default: allow and scope to declaration region.

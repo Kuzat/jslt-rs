@@ -359,3 +359,34 @@ fn import_grandchild_function_with_let_in_def() {
     let out = prog.apply(&json!({}), None).unwrap();
     assert_eq!(out, json!(42));
 }
+
+#[test]
+fn module_lets_can_call_module_functions() {
+    let td = TempDir::new().unwrap();
+    write_file(
+        &td,
+        "module.jslt",
+        "let x = 2\nlet y = foo($x)\ndef foo(v) $v * $x\ndef bar(v) $v + $y\n",
+    );
+    let main_path = write_file(&td, "main.jslt", "import \"module.jslt\" as m\nm:bar(2)\n");
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    assert_eq!(prog.apply(&json!({}), None).unwrap(), json!(6));
+}
+
+#[test]
+fn module_lets_see_main_input() {
+    let td = TempDir::new().unwrap();
+    write_file(&td, "inner.jslt", "let foo = .foo\ndef foo() $foo\n");
+    write_file(
+        &td,
+        "outer.jslt",
+        "import \"inner.jslt\" as m\nlet bar = m:foo()\ndef foo() $bar\n",
+    );
+    let main_path = write_file(
+        &td,
+        "main.jslt",
+        "import \"outer.jslt\" as o\nimport \"inner.jslt\" as m\n[o:foo(), m:foo()]\n",
+    );
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    assert_eq!(prog.apply(&json!({"foo": 22}), None).unwrap(), json!([22, 22]));
+}

@@ -190,43 +190,47 @@ impl<'p> Evaluator<'p> {
         }
     }
 
-    fn init_module_runtime(&mut self, child: &BoundProgram) -> Result<ModuleRuntime, RuntimeError> {
-        // Local evaluator context: reuse this Evaluator's helper but run on a temporary stack
+    fn init_module_runtime(
+        &mut self,
+        child: &BoundProgram,
+        input: &JsltValue,
+    ) -> Result<ModuleRuntime, RuntimeError> {
+        let mut sub_modules = HashMap::new();
+        for (k, (sub_prog, _callable)) in &child.imported_modules {
+            sub_modules.insert(k.clone(), self.init_module_runtime(sub_prog, input)?);
+        }
 
-        let mut top = Frame { locals: Vec::new(), this_val: JsltValue::null(), active_fun: None };
+        let mut top = Frame { locals: Vec::new(), this_val: input.clone(), active_fun: None };
         top.locals.resize(child.lets.len(), JsltValue::null());
-
-        // Push a temporary stack, evaluate module lets
-        // Save current stack length to restore after init
         let saved_len = self.stack.len();
         self.stack.push(top);
 
-        for (i, (_name, expr)) in child.lets.iter().enumerate() {
+        // Module lets run in the module's own function and import context.
+        let saved_closures = std::mem::take(&mut self.closures);
+        let saved_modules = std::mem::replace(&mut self.modules, sub_modules);
+        let result = self.eval_top_lets(child);
+        let closures = std::mem::replace(&mut self.closures, saved_closures);
+        let sub_modules = std::mem::replace(&mut self.modules, saved_modules);
+
+        let module_top = self.stack.pop().expect("module frame present");
+        debug_assert_eq!(self.stack.len(), saved_len);
+        result?;
+
+        Ok(ModuleRuntime { top_frame: module_top, closures, body: child.body.clone(), sub_modules })
+    }
+
+    /// Evaluates `prog`'s lets into the top frame and leaves its closures in `self.closures`.
+    /// Closures are rebuilt before each let so a let can call functions that read earlier lets.
+    fn eval_top_lets(&mut self, prog: &BoundProgram) -> Result<(), RuntimeError> {
+        for (i, (_name, expr)) in prog.lets.iter().enumerate() {
+            if !prog.functions.is_empty() {
+                self.closures = self.build_closures_for(prog)?;
+            }
             let v = self.eval_expr(expr)?;
             self.current_frame_mut().locals[i] = v;
         }
-
-        // Materialize closure for the child program using the module frame on top
-        let closures = self.build_closures_for(child)?;
-
-        // Pop the module frame, but keep clone for runtime top_frame
-        let module_top = self.stack.pop().expect("module frame present");
-
-        debug_assert_eq!(self.stack.len(), saved_len);
-
-        Ok(ModuleRuntime {
-            top_frame: module_top,
-            closures,
-            body: child.body.clone(),
-            sub_modules: {
-                let mut m = HashMap::new();
-                for (k, (sub_prog, _callable)) in &child.imported_modules {
-                    let sub_rt = self.init_module_runtime(sub_prog)?;
-                    m.insert(k.clone(), sub_rt);
-                }
-                m
-            },
-        })
+        self.closures = self.build_closures_for(prog)?;
+        Ok(())
     }
 
     fn build_closures_for(
@@ -245,23 +249,6 @@ impl<'p> Evaluator<'p> {
             out[f.id.0] = Some(Closure { fun: Arc::new(f.clone()), captures, capture_map });
         }
         Ok(out)
-    }
-
-    fn materialize_closures_from_top(&mut self) -> Result<(), RuntimeError> {
-        // Build closure after top-level lets evaluated.
-        let mut closures = Self::closure_slots(&self.prog.functions);
-        for f in &self.prog.functions {
-            let mut captures = Vec::with_capacity(f.captures.len());
-            let mut capture_map = HashMap::new();
-            for (i, cap) in f.captures.iter().enumerate() {
-                let val = self.lookup_captures_from_stack(*cap)?;
-                capture_map.insert((cap.depth, cap.slot), i);
-                captures.push(val);
-            }
-            closures[f.id.0] = Some(Closure { fun: Arc::new(f.clone()), captures, capture_map });
-        }
-        self.closures = closures;
-        Ok(())
     }
 
     // Pre-size closure slots so ids index directly.
@@ -304,14 +291,8 @@ impl<'p> Evaluator<'p> {
         top.locals.resize(self.prog.lets.len(), JsltValue::null());
         self.push_frame(top);
 
-        // Evaluate lets in order (binder assigned slots in the same order we pushed here)
-        for (i, (_name, expr)) in self.prog.lets.iter().enumerate() {
-            let v = self.eval_expr(expr)?;
-            self.current_frame_mut().locals[i] = v;
-        }
-
-        // Build closure after top-level lets evaluated.
-        self.materialize_closures_from_top()?;
+        let prog = self.prog;
+        self.eval_top_lets(prog)?;
 
         // Evaluate body with '.' = input
         let result = self.eval_expr(&self.prog.body)?.into_json();
@@ -1206,9 +1187,9 @@ pub fn apply_with_modules(
     let cfg = cfg.unwrap_or_default();
     let mut ev = Evaluator::new(bound, cfg);
 
+    let input_val = JsltValue::from_json(input.clone());
     for (key, (child, _callable)) in modules {
-        // If the module is a synthetic import, we need to create a ModuleRuntime
-        let mr = ev.init_module_runtime(child)?;
+        let mr = ev.init_module_runtime(child, &input_val)?;
 
         ev.modules.insert(key.clone(), mr);
     }

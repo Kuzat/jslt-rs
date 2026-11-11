@@ -33,6 +33,11 @@ fn from_json_converts_and_accepts_empty_input() {
     assert_eq!(run_jslt(r#"from-json("  ")"#), Ok(json!(null)));
     assert_eq!(run_jslt("from-json(5)"), Ok(json!(5)));
     assert_eq!(run_jslt(r#"from-json("[1", "bad")"#), Ok(json!("bad")));
+    assert_eq!(run_jslt(r#"from-json(" \t\r\n")"#), Ok(json!(null)));
+    // Other whitespace is not valid JSON.
+    assert_eq!(run_jslt(r#"from-json("\u00a0", "bad")"#), Ok(json!("bad")));
+    assert_eq!(run_jslt(r#"from-json("\u000b", "bad")"#), Ok(json!("bad")));
+    assert!(run_jslt(r#"from-json("\u00a0")"#).is_err());
 }
 
 #[test]
@@ -61,4 +66,9 @@ fn parse_url_decodes_query_like_java() {
     let out = run_jslt(r#"parse-url("http://x.com/p?a+b=%41%20c&=z&&d=")"#).unwrap();
     assert_eq!(out["parameters"], json!({"a b": ["A c"], "=z": [null], "": [null], "d": [null]}));
     assert!(run_jslt(r#"parse-url("http://x.com/?a=%zz")"#).is_err());
+    // Trailing empty pairs are dropped; empty pairs in the middle are kept.
+    let out = run_jslt(r#"parse-url("http://x.com/?a=1&&")"#).unwrap();
+    assert_eq!(out["parameters"], json!({"a": ["1"]}));
+    let out = run_jslt(r#"parse-url("http://x.com/?&")"#).unwrap();
+    assert_eq!(out["parameters"], json!({}));
 }

@@ -102,9 +102,14 @@ pub fn parse_url(url: &str) -> Result<Map<String, Value>, String> {
 
 /// Splits a query into `name -> [values]` like Java JSLT. A pair without `=` (or with nothing
 /// after it) adds `null`. Names and values are URL-decoded unless the pair starts with `=`.
+/// Trailing empty pairs are dropped, like Java's `String.split`.
 fn parse_query(qs: &str) -> Result<Map<String, Value>, String> {
+    let mut pairs: Vec<&str> = qs.split('&').collect();
+    while pairs.last() == Some(&"") {
+        pairs.pop();
+    }
     let mut params = Map::new();
-    for pair in qs.split('&') {
+    for pair in pairs {
         let (name, value) = match pair.find('=') {
             Some(idx) if idx > 0 => {
                 let v = &pair[idx + 1..];

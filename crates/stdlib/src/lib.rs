@@ -1184,8 +1184,8 @@ impl JsltFunction for FromJsonFn {
         let Some(s) = to_string_or_null(v) else {
             return Ok(JsltValue::null());
         };
-        // Like Jackson, empty input parses to nothing.
-        if s.trim().is_empty() {
+        // Like Jackson, input of only JSON whitespace parses to nothing.
+        if s.trim_matches([' ', '\t', '\r', '\n']).is_empty() {
             return Ok(JsltValue::null());
         }
 

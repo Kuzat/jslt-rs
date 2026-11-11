@@ -26,7 +26,7 @@ JSLT operates on a JSON‑like value lattice:
 * **number** — IEEE‑754 double (no NaN/Infinity in user space; see Errors).
 * **string** — immutable, UTF‑8 text; indices count **Unicode scalar values** (code points), not bytes.
 * **array** — ordered list of values.
-* **object** — mapping from **string keys** to values. Duplicate keys in literals: **last wins**.
+* **object** — mapping from **string keys** to values. See §7.5 for duplicate keys.
   Objects keep their keys in insertion order: input objects keep the order they were parsed in,
   and a template adds its keys in the order it writes them, followed by any keys copied by an
   object matcher. Overwriting a key keeps its original position.
@@ -150,7 +150,7 @@ object       = "{", ws,
                ws, "}" ;
 
 object_entry = ( object_key, ws, ":", ws, expr ) | ( "*", ws, ":", ws, expr ) ;
-object_key   = string | ident ;
+object_key   = string | ident | expr ;
 
 ident        = ident_start, { ident_continue } ;
 ident_start  = letter | "_" ;
@@ -320,6 +320,17 @@ Used by `if`, `and`, `or` and filters:
 * The body of a `for` and the right side of a pipe start the path again at their own `.`.
   Operators, function arguments, `let`s and `if` branches keep the path of the enclosing pair.
 * A matcher inside an array, or inside a function declaration, is a compile error.
+* A matcher in an object that has computed keys, or inside the value of a computed key, is a
+  compile error.
+
+### 7.5 Object keys
+
+* A key is a string literal, a bare identifier, or any other expression. Any other expression is
+  a computed key, for example `{string(.id) : .value}` or `{"foo" + "_bar" : 25}`.
+* A computed key must evaluate to a string, otherwise it is a runtime error. It is evaluated only
+  when the value is kept, so `{1 : null}` gives `{}`.
+* An object literal that sets the same static key twice is a compile error. In an object with
+  computed keys, a key produced twice is a runtime error.
 
 ---
 
@@ -472,7 +483,6 @@ def upcase(s) string(upper(s))
 4. Semantics of **negative indices** and out‑of‑range handling.
 5. Any **cross‑type comparisons** implicitly allowed by the reference.
 6. Comprehension `seq` over **objects** (values? entries?) vs arrays only.
-7. Handling of **duplicate object literal keys** (last wins vs error) and object equality order.
 
 ---
 

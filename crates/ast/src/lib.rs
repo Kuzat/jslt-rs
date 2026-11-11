@@ -249,7 +249,12 @@ pub enum ObjectEntry {
 #[derive(Debug, Clone)]
 pub enum ObjectKey {
     Ident(Ident),
-    Str { value: String, span: Span },
+    Str {
+        value: String,
+        span: Span,
+    },
+    /// A key computed at runtime, which must evaluate to a string.
+    Expr(Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -635,6 +640,7 @@ impl<'a, 'b> Pretty<'a, 'b> {
         match k {
             ObjectKey::Ident(id) => write!(self.f, "{id}"),
             ObjectKey::Str { value, .. } => self.string(value),
+            ObjectKey::Expr(e) => self.expr(e, Prec::Lowest),
         }
     }
 

@@ -111,6 +111,8 @@ pub struct Parser<'a> {
     lx: Lexer<'a>,
     cur: Tok,
     peeked: Option<Tok>,
+    /// Comments read while peeking, released when the peeked token is consumed.
+    peeked_comments: Vec<PendingComment>,
     errors: Vec<ParseError>,
     prev_span: Span,
     /// Buffer for comments that haven't been attached to a node yet
@@ -131,6 +133,7 @@ impl<'a> Parser<'a> {
             lx,
             cur: first,
             peeked: None,
+            peeked_comments: Vec::new(),
             errors: initial_errors,
             prev_span,
             pending_comments: initial_comments,
@@ -1122,57 +1125,49 @@ impl<'a> Parser<'a> {
                                 blank_lines_before,
                             }
                         }
-                        Token::String(s) => {
-                            let kspan = self.cur.span;
-                            let key = ObjectKey::Str { value: s.clone(), span: self.cur.span };
-                            self.bump()?;
-                            self.expect(Token::Colon, "':' after object key")?;
-                            let v = match self.parse_if_or_expr() {
-                                Ok(expr) => expr,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    self.synchronize_expression();
-                                    Expr::Null(self.prev_span)
-                                }
-                            };
-                            let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair {
-                                key,
-                                value: v,
-                                span,
-                                trivia: entry_trivia,
-                                blank_lines_before,
-                            }
-                        }
-                        Token::Ident(id) => {
-                            let kspan = self.cur.span;
-                            let key =
-                                ObjectKey::Ident(Ident { name: id.clone(), span: self.cur.span });
-                            self.bump()?;
-                            self.expect(Token::Colon, "':' after object key")?;
-                            let v = match self.parse_if_or_expr() {
-                                Ok(expr) => expr,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    self.synchronize_expression();
-                                    Expr::Null(self.prev_span)
-                                }
-                            };
-                            let span = Span::join(kspan, v.span());
-                            ObjectEntry::Pair {
-                                key,
-                                value: v,
-                                span,
-                                trivia: entry_trivia,
-                                blank_lines_before,
-                            }
-                        }
                         _ => {
-                            return Err(ParseError::unexpected(
-                                self.prev_span,
-                                self.cur.tok.clone(),
-                                "object key (identifier or string) or '*'",
-                            ))
+                            let key = if let (Token::Ident(name), Token::Colon) =
+                                (self.cur.tok.clone(), self.peek().clone())
+                            {
+                                let span = self.cur.span;
+                                self.bump()?;
+                                ObjectKey::Ident(Ident { name, span })
+                            } else {
+                                let key_expr = self.parse_if_or_expr()?;
+                                // A parenthesized string literal is still a static key.
+                                let mut inner = &key_expr;
+                                while let Expr::Group { expr, .. } = inner {
+                                    inner = expr;
+                                }
+                                match inner {
+                                    Expr::String { value, span } => {
+                                        ObjectKey::Str { value: value.clone(), span: *span }
+                                    }
+                                    _ => ObjectKey::Expr(Box::new(key_expr)),
+                                }
+                            };
+                            let kspan = match &key {
+                                ObjectKey::Ident(id) => id.span,
+                                ObjectKey::Str { span, .. } => *span,
+                                ObjectKey::Expr(e) => e.span(),
+                            };
+                            self.expect(Token::Colon, "':' after object key")?;
+                            let v = match self.parse_if_or_expr() {
+                                Ok(expr) => expr,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    self.synchronize_expression();
+                                    Expr::Null(self.prev_span)
+                                }
+                            };
+                            let span = Span::join(kspan, v.span());
+                            ObjectEntry::Pair {
+                                key,
+                                value: v,
+                                span,
+                                trivia: entry_trivia,
+                                blank_lines_before,
+                            }
                         }
                     };
                     entries.push(entry);
@@ -1224,8 +1219,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The token after the current one.
+    fn peek(&mut self) -> &Token {
+        if self.peeked.is_none() {
+            let (nt, comments, lex_errors) = next_token_with_comments(&mut self.lx);
+            self.peeked_comments = comments;
+            self.errors.extend(lex_errors);
+            self.peeked = Some(nt);
+        }
+        &self.peeked.as_ref().expect("peeked token").tok
+    }
+
     fn bump(&mut self) -> ParseResult<Tok> {
         let old = if let Some(pk) = self.peeked.take() {
+            self.pending_comments.append(&mut self.peeked_comments);
             mem::replace(&mut self.cur, pk)
         } else {
             let (nt, comments, lex_errors) = next_token_with_comments(&mut self.lx);

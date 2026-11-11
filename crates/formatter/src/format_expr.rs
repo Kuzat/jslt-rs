@@ -295,6 +295,7 @@ fn format_object_key(writer: &mut Writer, key: &ObjectKey) {
     match key {
         ObjectKey::Ident(id) => writer.write(&id.name),
         ObjectKey::Str { value, .. } => format_string(writer, value),
+        ObjectKey::Expr(e) => format_expr(writer, e),
     }
 }
 
@@ -389,6 +390,7 @@ fn format_object_key_string(key: &ObjectKey) -> String {
     match key {
         ObjectKey::Ident(id) => id.name.clone(),
         ObjectKey::Str { value, .. } => format!("\"{}\"", value),
+        ObjectKey::Expr(e) => format!("{}", e),
     }
 }
 

@@ -3,7 +3,7 @@
 #   UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests
 #
 # query-tests.json                    146/148 
-# query-tests.yaml                     43/45  
+# query-tests.yaml                     45/45  
 # function-tests.json                 278/278 
 # experimental-tests.json               0/8   
 # function-declaration-tests.yaml      20/24  
@@ -11,12 +11,10 @@
 # function-error-tests.json            42/42  
 # json-parse-tests.json                44/44  
 # json-parse-error-tests.json          13/13  
-# TOTAL                               608/624  (97.4%)
+# TOTAL                               610/624  (97.8%)
 
 query-tests.json#53  # $foo => external variables are not supported
 query-tests.json#89  # number( $num ) => external variables are not supported
-query-tests.yaml#6  # { "bar" : { * : . }, string(.foo) : "hey" } => expected {"1":"hey"}, got error: parse errors: unexpected token: found LParen, expected ':' after ob…
-query-tests.yaml#37  # {"foo" + "_bar" : 25} => expected {"foo_bar":25}, got error: parse errors: unexpected token: found Plus, expected ':' after o…
 experimental-tests.json#0  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [], got error: module errors: imported module not found: http://jslt.schibsted.com/2018/exp…
 experimental-tests.json#1  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected null, got error: module errors: imported module not found: http://jslt.schibsted.com/2018/e…
 experimental-tests.json#2  # import "http://jslt.schibsted.com/2018/experimental" as exp … => expected [{"key":"a","values":[1]}], got error: module errors: imported module not found: http://jsl…

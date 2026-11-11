@@ -28,7 +28,12 @@ A variable was declared more than once in the same list of `let` statements.
 
 ## jslt_bind_matcher_not_allowed
 
-An object matcher (`* : expr`) was used inside an array or a function declaration.
+An object matcher (`* : expr`) was used inside an array, a function declaration, the value of a
+computed key, or an object that has computed keys.
+
+## jslt_bind_duplicate_key
+
+An object literal sets the same static key more than once.
 
 ## jslt_module
 

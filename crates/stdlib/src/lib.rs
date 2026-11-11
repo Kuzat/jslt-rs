@@ -8,11 +8,11 @@ use crate::time::now_seconds_portable;
 use crate::time::{JavaPattern, Zone};
 #[cfg(feature = "regex")]
 use regex::Regex;
-use serde_json::{from_str, to_string, Map, Value};
+use serde_json::{from_str, to_string, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use thiserror::Error;
-use value::JsltValue;
+use value::{JsltValue, Map};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Arity {
@@ -203,15 +203,15 @@ impl Registry {
 
 /// Java `NodeUtils.toString(node, true)`: strings as-is, null as `None`, anything else as JSON.
 fn to_string_or_null(v: &JsltValue) -> Option<std::borrow::Cow<'_, str>> {
-    match v.as_json() {
-        Value::Null => None,
-        Value::String(s) => Some(std::borrow::Cow::Borrowed(s)),
-        other => Some(std::borrow::Cow::Owned(other.to_string())),
+    match v {
+        JsltValue::Null => None,
+        JsltValue::String(s) => Some(std::borrow::Cow::Borrowed(s)),
+        other => Some(std::borrow::Cow::Owned(to_string(other).unwrap_or_default())),
     }
 }
 
 fn expect_string<'a>(v: &'a JsltValue, fname: &str, argn: usize) -> Result<&'a str, StdlibError> {
-    v.as_json().as_str().ok_or_else(|| {
+    v.as_str().ok_or_else(|| {
         StdlibError::Type(format!(
             "{fname} expects argument #{argn} to be string, got {}",
             v.type_of()
@@ -219,12 +219,8 @@ fn expect_string<'a>(v: &'a JsltValue, fname: &str, argn: usize) -> Result<&'a s
     })
 }
 
-fn expect_object<'a>(
-    v: &'a JsltValue,
-    fname: &str,
-    argn: usize,
-) -> Result<&'a Map<String, Value>, StdlibError> {
-    v.as_json().as_object().ok_or_else(|| {
+fn expect_object<'a>(v: &'a JsltValue, fname: &str, argn: usize) -> Result<&'a Map, StdlibError> {
+    v.as_object().ok_or_else(|| {
         StdlibError::Type(format!(
             "{fname} expects argument #{argn} to be object, got {}",
             v.type_of()
@@ -236,8 +232,8 @@ fn expect_array<'a>(
     v: &'a JsltValue,
     fname: &str,
     argn: usize,
-) -> Result<&'a Vec<Value>, StdlibError> {
-    v.as_json().as_array().ok_or_else(|| {
+) -> Result<&'a [JsltValue], StdlibError> {
+    v.as_array().ok_or_else(|| {
         StdlibError::Type(format!(
             "{fname} expects argument #{argn} to be array, got {}",
             v.type_of()
@@ -246,8 +242,8 @@ fn expect_array<'a>(
 }
 
 fn expect_int_i128(v: &JsltValue, fname: &str, argn: usize) -> Result<i128, StdlibError> {
-    match v.as_json() {
-        Value::Number(n) => {
+    match v {
+        JsltValue::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Ok(i as i128)
             } else if let Some(u) = n.as_u64() {
@@ -271,17 +267,17 @@ fn expect_int_i128(v: &JsltValue, fname: &str, argn: usize) -> Result<i128, Stdl
 
 // Produce a canonical JSON string like serde_json/to_string() without whitespace,
 // but with object keys sorted so that key order doesn't affect the result.
-fn canonical_json_string(v: &Value, out: &mut String) {
+fn canonical_json_string(v: &JsltValue, out: &mut String) {
     match v {
-        Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) => out.push_str(&n.to_string()),
-        Value::String(s) => {
+        JsltValue::Null => out.push_str("null"),
+        JsltValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        JsltValue::Number(n) => out.push_str(&n.to_string()),
+        JsltValue::String(s) => {
             // reuse serde_json's escaping by serializing the string itself
             // this gives a quoted string with proper escapes
-            out.push_str(&to_string(s).expect("string serialize"));
+            out.push_str(&to_string(&**s).expect("string serialize"));
         }
-        Value::Array(a) => {
+        JsltValue::Array(a) => {
             out.push('[');
             for (i, elt) in a.iter().enumerate() {
                 if i > 0 {
@@ -291,7 +287,7 @@ fn canonical_json_string(v: &Value, out: &mut String) {
             }
             out.push(']');
         }
-        Value::Object(m) => {
+        JsltValue::Object(m) => {
             out.push('{');
             // sort keys lexicographically
             let mut keys: Vec<&str> = m.keys().map(|k| k.as_str()).collect();
@@ -359,7 +355,7 @@ impl JsltFunction for NumberFn {
         if v.is_null() {
             return Ok(fallback.cloned().unwrap_or_else(JsltValue::null));
         }
-        let Some(s) = v.as_json().as_str() else {
+        let Some(s) = v.as_str() else {
             return match fallback {
                 Some(fb) => Ok(fb.clone()),
                 None => Err(StdlibError::Type(format!(
@@ -447,11 +443,11 @@ impl JsltFunction for SizeFn {
         if v.is_null() {
             return Ok(JsltValue::null());
         }
-        let n = if let Some(s) = v.as_json().as_str() {
+        let n = if let Some(s) = v.as_str() {
             s.chars().count()
-        } else if let Some(a) = v.as_json().as_array() {
+        } else if let Some(a) = v.as_array() {
             a.len()
-        } else if let Some(o) = v.as_json().as_object() {
+        } else if let Some(o) = v.as_object() {
             o.len()
         } else {
             return Err(StdlibError::Type(format!("size: unsupported type {}", v.type_of())));
@@ -498,7 +494,7 @@ impl JsltFunction for ValuesFn {
         let obj = expect_object(v, "values", 1)?;
         let mut out = Vec::with_capacity(obj.len());
         for v in obj.values() {
-            out.push(JsltValue::from_json(v.clone()));
+            out.push(v.clone());
         }
         Ok(JsltValue::array(out))
     }
@@ -523,7 +519,7 @@ impl JsltFunction for GetKeyFn {
         }
         let m = expect_object(obj, "get-key", 1)?;
         match m.get(k.as_ref()) {
-            Some(v) => Ok(JsltValue::from_json(v.clone())),
+            Some(v) => Ok(v.clone()),
             None => Ok(args.get(2).cloned().unwrap_or(JsltValue::null())),
         }
     }
@@ -635,27 +631,27 @@ impl JsltFunction for ContainsFn {
         let elt = &args[0];
         let seq = &args[1];
 
-        match seq.as_json() {
-            Value::Array(a) => {
+        match seq {
+            JsltValue::Array(a) => {
                 // deep equality
-                let found = a.iter().any(|v| elt.deep_eq(&JsltValue::from_json(v.clone())));
+                let found = a.iter().any(|v| elt.deep_eq(&v.clone()));
                 Ok(JsltValue::bool(found))
             }
-            Value::String(s) => {
+            JsltValue::String(s) => {
                 if elt.is_null() {
                     return Ok(JsltValue::bool(false));
                 }
                 let needle = elt.stringify();
                 Ok(JsltValue::bool(s.contains(&needle)))
             }
-            Value::Object(o) => {
+            JsltValue::Object(o) => {
                 if elt.is_null() {
                     return Ok(JsltValue::bool(false));
                 }
                 let k = elt.stringify();
                 Ok(JsltValue::bool(o.contains_key(&k)))
             }
-            Value::Null => Ok(JsltValue::bool(false)),
+            JsltValue::Null => Ok(JsltValue::bool(false)),
             _ => Err(StdlibError::Type(format!("contains: unsupported type {}", seq.type_of()))),
         }
     }
@@ -685,7 +681,7 @@ impl JsltFunction for JoinFn {
             if i > 0 {
                 out.push_str(sep);
             }
-            out.push_str(JsltValue::from_json(v.clone()).stringify().as_str());
+            out.push_str(v.clone().stringify().as_str());
         }
         Ok(JsltValue::string(out))
     }
@@ -718,10 +714,10 @@ impl JsltFunction for FallbackFn {
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
         for v in args {
-            match v.as_json() {
-                Value::Null => {}
-                Value::Array(a) if a.is_empty() => {}
-                Value::Object(o) if o.is_empty() => {}
+            match v {
+                JsltValue::Null => {}
+                JsltValue::Array(a) if a.is_empty() => {}
+                JsltValue::Object(o) if o.is_empty() => {}
                 _ => return Ok(v.clone()),
             }
         }
@@ -747,14 +743,14 @@ impl JsltFunction for MinFn {
         }
 
         // Compare only when types are compatible. Otherwise: type error
-        let ord = match (a.as_json(), b.as_json()) {
-            (Value::Number(na), Value::Number(nb)) => {
+        let ord = match (a, b) {
+            (JsltValue::Number(na), JsltValue::Number(nb)) => {
                 let fa = na.as_f64().unwrap_or(0.0);
                 let fb = nb.as_f64().unwrap_or(0.0);
                 fa.total_cmp(&fb)
             }
-            (Value::String(sa), Value::String(sb)) => sa.cmp(sb),
-            (Value::Bool(ba), Value::Bool(bb)) => ba.cmp(bb),
+            (JsltValue::String(sa), JsltValue::String(sb)) => sa.cmp(sb),
+            (JsltValue::Bool(ba), JsltValue::Bool(bb)) => ba.cmp(bb),
             // Mismatched or unsuported type
             _ => {
                 return Err(StdlibError::Type(format!(
@@ -789,14 +785,14 @@ impl JsltFunction for MaxFn {
             return Ok(JsltValue::null());
         }
 
-        let ord = match (a.as_json(), b.as_json()) {
-            (Value::Number(na), Value::Number(nb)) => {
+        let ord = match (a, b) {
+            (JsltValue::Number(na), JsltValue::Number(nb)) => {
                 let fa = na.as_f64().unwrap_or(0.0);
                 let fb = nb.as_f64().unwrap_or(0.0);
                 fa.total_cmp(&fb)
             }
-            (Value::String(sa), Value::String(sb)) => sa.cmp(sb),
-            (Value::Bool(ba), Value::Bool(bb)) => ba.cmp(bb),
+            (JsltValue::String(sa), JsltValue::String(sb)) => sa.cmp(sb),
+            (JsltValue::Bool(ba), JsltValue::Bool(bb)) => ba.cmp(bb),
             _ => {
                 return Err(StdlibError::Type(format!(
                     "max: incompatible types {} and {}",
@@ -839,8 +835,8 @@ impl JsltFunction for IsIntegerFn {
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
         let v = &args[0];
-        let is_int = match v.as_json() {
-            Value::Number(n) => n.is_i64() || n.is_u64(),
+        let is_int = match v {
+            JsltValue::Number(n) => n.is_i64() || n.is_u64(),
             _ => false,
         };
         Ok(JsltValue::bool(is_int))
@@ -858,8 +854,8 @@ impl JsltFunction for IsDecimalFn {
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
         let v = &args[0];
-        let is_dec = match v.as_json() {
-            Value::Number(n) => n.is_f64(),
+        let is_dec = match v {
+            JsltValue::Number(n) => n.is_f64(),
             _ => false,
         };
         Ok(JsltValue::bool(is_dec))
@@ -882,8 +878,8 @@ impl JsltFunction for RoundFn {
             return Ok(JsltValue::null());
         }
 
-        match v.as_json() {
-            Value::Number(n) => {
+        match v {
+            JsltValue::Number(n) => {
                 if n.is_i64() || n.is_u64() {
                     // Already integer
                     Ok(v.clone())
@@ -922,8 +918,8 @@ impl JsltFunction for FloorFn {
             return Ok(JsltValue::null());
         }
 
-        match v.as_json() {
-            Value::Number(n) => {
+        match v {
+            JsltValue::Number(n) => {
                 if n.is_i64() || n.is_u64() {
                     Ok(v.clone())
                 } else if let Some(f) = n.as_f64() {
@@ -958,8 +954,8 @@ impl JsltFunction for CeilingFn {
             return Ok(JsltValue::null());
         }
 
-        match v.as_json() {
-            Value::Number(n) => {
+        match v {
+            JsltValue::Number(n) => {
                 if n.is_i64() || n.is_u64() {
                     Ok(v.clone())
                 } else if let Some(f) = n.as_f64() {
@@ -1019,7 +1015,7 @@ impl JsltFunction for SumFn {
 
         for v in a {
             match v {
-                Value::Number(n) => {
+                JsltValue::Number(n) => {
                     if let Some(i) = n.as_i64() {
                         if any_float {
                             float_acc += i as f64;
@@ -1115,7 +1111,7 @@ impl JsltFunction for HashIntFn {
 
         // Build canonical JSON then compute java-like hash over UTF-16 code units
         let mut s = String::with_capacity(64);
-        canonical_json_string(v.as_json(), &mut s);
+        canonical_json_string(v, &mut s);
         let h = java_string_hash(&s) as i64;
         Ok(JsltValue::number_i64(h))
     }
@@ -1215,8 +1211,8 @@ impl JsltFunction for ToJsonFn {
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
         // Serialize any JSON vlaue to compact JSON text
-        let s = to_string(args[0].as_json())
-            .map_err(|e| StdlibError::Semantic(format!("to-json: {}", e)))?;
+        let s =
+            to_string(&args[0]).map_err(|e| StdlibError::Semantic(format!("to-json: {}", e)))?;
         Ok(JsltValue::string(s))
     }
 }
@@ -1296,7 +1292,7 @@ impl JsltFunction for TestFn {
             return Ok(JsltValue::bool(false));
         }
 
-        let input = i.as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let input = i.as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
         let pattern = expect_string(r, "test", 2)?;
 
         let re = Regex::new(pattern)
@@ -1324,7 +1320,7 @@ impl JsltFunction for CaptureFn {
             return Ok(JsltValue::null());
         }
 
-        let input = i.as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let input = i.as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
         let pattern = expect_string(r, "capture", 2)?;
 
         let re = Regex::new(pattern)
@@ -1334,13 +1330,13 @@ impl JsltFunction for CaptureFn {
             let mut obj = Map::new();
             for name in re.capture_names().flatten() {
                 if let Some(m) = caps.name(name) {
-                    obj.insert(name.to_string(), Value::String(m.as_str().to_string()));
+                    obj.insert(name.to_string(), JsltValue::string(m.as_str()));
                 }
             }
-            Ok(JsltValue::from_json(Value::Object(obj)))
+            Ok(JsltValue::object(obj))
         } else {
             // No match empty object
-            Ok(JsltValue::from_json(Value::Object(Map::new())))
+            Ok(JsltValue::object(Map::new()))
         }
     }
 }
@@ -1363,7 +1359,7 @@ impl JsltFunction for SplitFn {
         if i.is_null() {
             return Ok(JsltValue::null());
         }
-        let input = i.as_json().as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let input = i.as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
         let pattern = expect_string(r, "split", 2)?;
 
         let re = Regex::new(pattern)
@@ -1415,11 +1411,7 @@ impl JsltFunction for ReplaceFn {
             return Ok(JsltValue::null());
         }
 
-        let value = args[0]
-            .as_json()
-            .as_str()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| args[0].stringify());
+        let value = args[0].as_str().map(|s| s.to_string()).unwrap_or_else(|| args[0].stringify());
         let pattern = expect_string(&args[1], "replace", 2)?;
         let out = expect_string(&args[2], "replace", 3)?;
 
@@ -1535,15 +1527,15 @@ impl JsltFunction for ArrayFn {
             return Ok(JsltValue::null());
         }
 
-        match v.as_json() {
-            Value::Array(_) => Ok(v.clone()),
-            Value::Object(obj) => {
+        match v {
+            JsltValue::Array(_) => Ok(v.clone()),
+            JsltValue::Object(obj) => {
                 let mut out: Vec<JsltValue> = Vec::with_capacity(obj.len());
                 for (k, val) in obj.iter() {
                     let mut entry = Map::new();
-                    entry.insert("key".to_string(), Value::String(k.clone()));
+                    entry.insert("key".to_string(), JsltValue::string(k.as_str()));
                     entry.insert("value".to_string(), val.clone());
-                    out.push(JsltValue::from_json(Value::Object(entry)));
+                    out.push(JsltValue::object(entry));
                 }
                 Ok(JsltValue::array(out))
             }
@@ -1570,10 +1562,10 @@ impl JsltFunction for FlattenFn {
 
         let arr = expect_array(v, "flatten", 1)?;
 
-        fn flatten_value(val: &Value, out: &mut Vec<Value>) {
+        fn flatten_value(val: &JsltValue, out: &mut Vec<JsltValue>) {
             match val {
-                Value::Array(arr) => {
-                    for elt in arr {
+                JsltValue::Array(arr) => {
+                    for elt in arr.iter() {
                         flatten_value(elt, out);
                     }
                 }
@@ -1581,12 +1573,12 @@ impl JsltFunction for FlattenFn {
             }
         }
 
-        let mut flat: Vec<Value> = Vec::new();
+        let mut flat: Vec<JsltValue> = Vec::new();
         for elt in arr {
             flatten_value(elt, &mut flat);
         }
 
-        Ok(JsltValue::from_json(Value::Array(flat)))
+        Ok(JsltValue::array(flat))
     }
 }
 
@@ -1610,7 +1602,7 @@ impl JsltFunction for AllFn {
 
         let mut result = true;
         for elt in arr {
-            if !JsltValue::from_json(elt.clone()).truthy() {
+            if !elt.clone().truthy() {
                 result = false;
                 break;
             }
@@ -1640,7 +1632,7 @@ impl JsltFunction for AnyFn {
 
         let mut result = false;
         for elt in arr {
-            if JsltValue::from_json(elt.clone()).truthy() {
+            if elt.clone().truthy() {
                 result = true;
                 break;
             }
@@ -1678,10 +1670,7 @@ impl JsltFunction for ZipFn {
 
         let mut out: Vec<JsltValue> = Vec::with_capacity(arr1.len());
         for (v1, v2) in arr1.iter().zip(arr2.iter()) {
-            let pair = JsltValue::array(vec![
-                JsltValue::from_json(v1.clone()),
-                JsltValue::from_json(v2.clone()),
-            ]);
+            let pair = JsltValue::array(vec![v1.clone(), v2.clone()]);
             out.push(pair);
         }
 
@@ -1711,8 +1700,8 @@ impl JsltFunction for ZipWithIndexFn {
         for (idx, val) in arr.iter().enumerate() {
             let mut obj = Map::new();
             obj.insert("value".to_string(), val.clone());
-            obj.insert("index".to_string(), Value::Number((idx as i64).into()));
-            out.push(JsltValue::from_json(Value::Object(obj)));
+            obj.insert("index".to_string(), JsltValue::Number((idx as i64).into()));
+            out.push(JsltValue::object(obj));
         }
 
         Ok(JsltValue::array(out))
@@ -1739,7 +1728,7 @@ impl JsltFunction for IndexOfFn {
         let arr = expect_array(a, "index-of", 1)?;
 
         for (i, elt) in arr.iter().enumerate() {
-            if JsltValue::from_json(elt.clone()).eq(n) {
+            if elt.clone().eq(n) {
                 return Ok(JsltValue::number_i64(i as i64));
             }
         }
@@ -1768,9 +1757,9 @@ impl JsltFunction for NowFn {
 /// Java `NodeUtils.toString(node, false)`: strings as-is, anything else (null too) as JSON.
 #[cfg(feature = "chrono")]
 fn to_java_string(v: &JsltValue) -> std::borrow::Cow<'_, str> {
-    match v.as_json() {
-        Value::String(s) => std::borrow::Cow::Borrowed(s),
-        other => std::borrow::Cow::Owned(other.to_string()),
+    match v {
+        JsltValue::String(s) => std::borrow::Cow::Borrowed(s),
+        other => std::borrow::Cow::Owned(to_string(other).unwrap_or_default()),
     }
 }
 
@@ -1825,10 +1814,10 @@ impl JsltFunction for FormatTimeFn {
     }
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
-        let seconds = match args[0].as_json() {
-            Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
-            Value::String(s) => parse_number(s)
-                .and_then(|n| n.as_json().as_f64())
+        let seconds = match &args[0] {
+            JsltValue::Number(n) => n.as_f64().unwrap_or(f64::NAN),
+            JsltValue::String(s) => parse_number(s)
+                .and_then(|n| n.as_f64_checked())
                 .ok_or_else(|| StdlibError::Type(format!("number({s}) failed: not a number")))?,
             _ => return Ok(JsltValue::null()),
         };
@@ -2074,7 +2063,7 @@ mod tests {
     fn sum_with_floats_returns_float_even_if_whole() {
         let arr = j(json!([1.5, 1.5]));
         let out = SumFn.call(&[arr]).unwrap();
-        assert_eq!(out.as_json(), &json!(3.0));
+        assert_eq!(out.to_json(), json!(3.0));
         assert!(out.as_i64().is_none());
     }
 }

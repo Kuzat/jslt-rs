@@ -1093,21 +1093,22 @@ impl<'p> Evaluator<'p> {
         let explicit_keys: std::collections::HashSet<std::string::String> = entries
             .iter()
             .filter_map(|entry| match entry {
-                BoundObjectEntry::Pair(BoundExpr::String(s, _), _) => Some(s.clone()),
+                BoundObjectEntry::Pair { key: BoundExpr::String(s, _), dynamic: false, .. } => {
+                    Some(s.clone())
+                }
                 _ => None,
             })
             .collect();
 
-        let has_dynamic_keys = entries.iter().any(
-            |e| matches!(e, BoundObjectEntry::Pair(k, _) if !matches!(k, BoundExpr::String(..))),
-        );
+        let has_dynamic_keys =
+            entries.iter().any(|e| matches!(e, BoundObjectEntry::Pair { dynamic: true, .. }));
 
         // Explicit pairs come first, so matcher-copied keys follow them in the output.
         let (pairs, matchers): (Vec<_>, Vec<_>) =
-            entries.iter().partition(|e| matches!(e, BoundObjectEntry::Pair(..)));
+            entries.iter().partition(|e| matches!(e, BoundObjectEntry::Pair { .. }));
         for entry in pairs.into_iter().chain(matchers) {
             match entry {
-                BoundObjectEntry::Pair(kexpr, vexpr) => {
+                BoundObjectEntry::Pair { key: kexpr, value: vexpr, .. } => {
                     let val_json = self.eval_expr(vexpr)?.into_json();
                     if should_omit_object_field(&val_json) {
                         continue;
@@ -1406,21 +1407,31 @@ mod tests {
         // The above is awkward. Let's instead test equality through evaluator's deep_eq by constructing JsltValue via ObjectLiteral:
         let body_obj_left = B::ObjectLiteral(
             vec![
-                BOE::Pair(B::String("x".into(), sp()), B::NumberInt(1, sp())),
-                BOE::Pair(
-                    B::String("y".into(), sp()),
-                    B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
-                ),
+                BOE::Pair {
+                    key: B::String("x".into(), sp()),
+                    value: B::NumberInt(1, sp()),
+                    dynamic: false,
+                },
+                BOE::Pair {
+                    key: B::String("y".into(), sp()),
+                    value: B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
+                    dynamic: false,
+                },
             ],
             sp(),
         );
         let body_obj_right = B::ObjectLiteral(
             vec![
-                BOE::Pair(
-                    B::String("y".into(), sp()),
-                    B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
-                ),
-                BOE::Pair(B::String("x".into(), sp()), B::NumberInt(1, sp())),
+                BOE::Pair {
+                    key: B::String("y".into(), sp()),
+                    value: B::ArrayLiteral(vec![B::Bool(true, sp()), B::Null(sp())], sp()),
+                    dynamic: false,
+                },
+                BOE::Pair {
+                    key: B::String("x".into(), sp()),
+                    value: B::NumberInt(1, sp()),
+                    dynamic: false,
+                },
             ],
             sp(),
         );

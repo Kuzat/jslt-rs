@@ -111,6 +111,8 @@ pub struct Parser<'a> {
     lx: Lexer<'a>,
     cur: Tok,
     peeked: Option<Tok>,
+    /// Comments read while peeking, released when the peeked token is consumed.
+    peeked_comments: Vec<PendingComment>,
     errors: Vec<ParseError>,
     prev_span: Span,
     /// Buffer for comments that haven't been attached to a node yet
@@ -131,6 +133,7 @@ impl<'a> Parser<'a> {
             lx,
             cur: first,
             peeked: None,
+            peeked_comments: Vec::new(),
             errors: initial_errors,
             prev_span,
             pending_comments: initial_comments,
@@ -1130,7 +1133,12 @@ impl<'a> Parser<'a> {
                                 self.bump()?;
                                 ObjectKey::Ident(Ident { name, span })
                             } else {
-                                match self.parse_if_or_expr()? {
+                                let mut key_expr = self.parse_if_or_expr()?;
+                                // A parenthesized string literal is still a static key.
+                                while let Expr::Group { expr, .. } = key_expr {
+                                    key_expr = *expr;
+                                }
+                                match key_expr {
                                     Expr::String { value, span } => ObjectKey::Str { value, span },
                                     other => ObjectKey::Expr(Box::new(other)),
                                 }
@@ -1212,7 +1220,7 @@ impl<'a> Parser<'a> {
     fn peek(&mut self) -> &Token {
         if self.peeked.is_none() {
             let (nt, comments, lex_errors) = next_token_with_comments(&mut self.lx);
-            self.pending_comments.extend(comments);
+            self.peeked_comments = comments;
             self.errors.extend(lex_errors);
             self.peeked = Some(nt);
         }
@@ -1221,6 +1229,7 @@ impl<'a> Parser<'a> {
 
     fn bump(&mut self) -> ParseResult<Tok> {
         let old = if let Some(pk) = self.peeked.take() {
+            self.pending_comments.append(&mut self.peeked_comments);
             mem::replace(&mut self.cur, pk)
         } else {
             let (nt, comments, lex_errors) = next_token_with_comments(&mut self.lx);

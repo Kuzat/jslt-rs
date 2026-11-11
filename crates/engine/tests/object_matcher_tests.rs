@@ -69,6 +69,8 @@ fn computed_keys_evaluate_to_strings() {
     );
     assert_eq!(run_jslt("{sum: 1, \"a\" + \"b\": 2}", json!(null)), Ok(json!({"sum": 1, "ab": 2})));
     assert_eq!(run_jslt("{1 + 1 : null}", json!(null)), Ok(json!({})));
+    let src = "{{ // comment\n let x = 1 \"k\": $x} | string(.) : 1}";
+    assert_eq!(run_jslt(src, json!(null)), Ok(json!({"{\"k\":1}": 1})));
 }
 
 #[test]
@@ -77,6 +79,7 @@ fn bad_object_keys_are_errors() {
         ("{1 : 2}", "Object key must be string"),
         ("{\"a\" : 1, \"a\" + \"\" : 2}", "Duplicate key 'a' in object"),
         ("{\"a\" : 1, \"b\" : 2, \"a\" : 3}", "Invalid object declaration, duplicate key 'a'"),
+        ("{(\"a\") : 1, \"a\" : 2}", "Invalid object declaration, duplicate key 'a'"),
         (
             "{\"a\" + \"\" : 1, * : .}",
             "Object matcher not allowed in objects which have dynamic keys",

@@ -160,13 +160,10 @@ pub enum BoundExpr {
 
 #[derive(Debug, Clone)]
 pub enum BoundObjectEntry {
-    Pair(BoundExpr, BoundExpr),
+    /// `key : value`; `dynamic` is set for computed keys.
+    Pair { key: BoundExpr, value: BoundExpr, dynamic: bool },
     /// `* : value`, matching the fields of `.` followed by the keys in `path`.
-    Wildcard {
-        value: BoundExpr,
-        exclude_keys: Vec<String>,
-        path: Vec<String>,
-    },
+    Wildcard { value: BoundExpr, exclude_keys: Vec<String>, path: Vec<String> },
 }
 
 /// Where an object matcher takes its fields from, following Java's rules.
@@ -982,7 +979,11 @@ impl Binder {
                             };
                             let vexpr =
                                 self.with_match_ctx(value_ctx, |b| b.bind_expr_recovery(value));
-                            out_entries.push(BoundObjectEntry::Pair(kexpr, vexpr));
+                            out_entries.push(BoundObjectEntry::Pair {
+                                key: kexpr,
+                                value: vexpr,
+                                dynamic: static_key.is_none(),
+                            });
                         }
                         ast::ObjectEntry::Spread { value, exclude_keys, span, .. } => {
                             if has_dynamic_keys {

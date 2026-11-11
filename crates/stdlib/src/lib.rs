@@ -199,6 +199,15 @@ impl Registry {
     }
 }
 
+/// Java `NodeUtils.toString(node, true)`: strings as-is, null as `None`, anything else as JSON.
+fn to_string_or_null(v: &JsltValue) -> Option<std::borrow::Cow<'_, str>> {
+    match v.as_json() {
+        Value::Null => None,
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s)),
+        other => Some(std::borrow::Cow::Owned(other.to_string())),
+    }
+}
+
 fn expect_string<'a>(v: &'a JsltValue, fname: &str, argn: usize) -> Result<&'a str, StdlibError> {
     v.as_json().as_str().ok_or_else(|| {
         StdlibError::Type(format!(
@@ -504,13 +513,14 @@ impl JsltFunction for GetKeyFn {
     fn call(&self, args: &[JsltValue]) -> StdResult {
         self.arity().check(args.len())?;
         let obj = &args[0];
-        let key = &args[1];
+        let Some(k) = to_string_or_null(&args[1]) else {
+            return Ok(JsltValue::null());
+        };
         if obj.is_null() {
             return Ok(JsltValue::null());
         }
         let m = expect_object(obj, "get-key", 1)?;
-        let k = expect_string(key, "get-key", 2)?;
-        match m.get(k) {
+        match m.get(k.as_ref()) {
             Some(v) => Ok(JsltValue::from_json(v.clone())),
             None => Ok(args.get(2).cloned().unwrap_or(JsltValue::null())),
         }
@@ -694,8 +704,7 @@ impl JsltFunction for ErrorFn {
     }
 }
 
-// TODO: Rework this to be lazy and work as macros in the original JSLT
-// TODO: meaning it should take in Expressions and only evaluate them as needed.
+// The evaluator calls `fallback` lazily (like the Java macro) and only uses this for its arity.
 struct FallbackFn;
 impl JsltFunction for FallbackFn {
     fn name(&self) -> &'static str {
@@ -1172,26 +1181,15 @@ impl JsltFunction for FromJsonFn {
         let v = &args[0];
         let fallback = args.get(1);
 
-        if v.is_null() {
+        let Some(s) = to_string_or_null(v) else {
+            return Ok(JsltValue::null());
+        };
+        // Like Jackson, empty input parses to nothing.
+        if s.trim().is_empty() {
             return Ok(JsltValue::null());
         }
 
-        // Expect string; wrong type -> fallback or error
-        let s = match v.as_json().as_str() {
-            Some(s) => s,
-            None => {
-                return if let Some(fb) = fallback {
-                    Ok(fb.clone())
-                } else {
-                    Err(StdlibError::Type(format!(
-                        "from-json: argument must be a string, got {}",
-                        v.type_of()
-                    )))
-                }
-            }
-        };
-
-        match from_str::<Value>(s) {
+        match from_str::<Value>(&s) {
             Ok(parsed) => Ok(JsltValue::from_json(parsed)),
             Err(_) => {
                 if let Some(fb) = fallback {
@@ -1462,8 +1460,13 @@ impl JsltFunction for UuidV4JSLT {
                 }
 
                 // Match original JSLT mask logic exactly (Java's UUID(long, long) semantics
-                let msb_i = expect_int_i128(&args[0], "uuid", 1)?;
-                let lsb_i = expect_int_i128(&args[1], "uuid", 2)?;
+                // Like Java, a null half counts as 0.
+                let half = |i: usize| match args[i].is_null() {
+                    true => Ok(0),
+                    false => expect_int_i128(&args[i], "uuid", i + 1),
+                };
+                let msb_i = half(0)?;
+                let lsb_i = half(1)?;
 
                 // Preserve two's complement bit patterns
                 let msb_raw = msb_i as u64;

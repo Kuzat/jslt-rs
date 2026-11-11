@@ -2,7 +2,7 @@
 # crates/engine/tests/upstream_tests.rs; regenerate with:
 #   UPDATE_UPSTREAM_KNOWN_FAILURES=1 cargo test -p engine --test upstream_tests
 #
-# query-tests.json                    133/148 
+# query-tests.json                    139/148 
 # query-tests.yaml                     16/45  
 # function-tests.json                 267/278 
 # experimental-tests.json               0/8   
@@ -11,17 +11,11 @@
 # function-error-tests.json            40/42  
 # json-parse-tests.json                44/44  
 # json-parse-error-tests.json          13/13  
-# TOTAL                               548/624  (87.8%)
+# TOTAL                               554/624  (88.8%)
 
-query-tests.json#10  # .foo or false => expected true, got "bar"
 query-tests.json#19  # [for (null) number(.)] => expected null, got []
-query-tests.json#21  # .foo // comment and false => expected false, got null
 query-tests.json#53  # $foo => external variables are not supported
-query-tests.json#65  # .foo and true and 22 => expected true, got 22
 query-tests.json#89  # number( $num ) => external variables are not supported
-query-tests.json#92  # .foo and false or .bar and true => expected false, got null
-query-tests.json#100  # false or .foo => expected true, got "bar"
-query-tests.json#113  # .foo or true => expected true, got "bar"
 query-tests.json#125  # [for (.) let v = . $v] => expected [{"key":"foo","value":1},{"key":"bar","value":2}], got [{"key":"bar","value":2},{"key":"foo…
 query-tests.json#135  # let x = 1 ["h" + $x + 1] => expected ["h11"], got null
 query-tests.json#137  # [for (.) .] => expected [{"key":"foo","value":1},{"key":"bar","value":2}], got [{"key":"bar","value":2},{"key":"foo…

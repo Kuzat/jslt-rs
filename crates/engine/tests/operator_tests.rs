@@ -78,3 +78,21 @@ fn incompatible_types_still_error() {
     assert!(run_jslt(r#"1 < "a""#).is_err());
     assert!(run_jslt("[1] - 1").is_err());
 }
+
+#[test]
+fn and_or_return_booleans() {
+    assert_jslt("1 and 2", "true");
+    assert_jslt(r#""a" and []"#, "false");
+    assert_jslt(r#""" and true"#, "false");
+    assert_jslt(".foo and false", "false");
+    assert_jslt(".foo or false", "false");
+    assert_jslt(r#""a" or false"#, "true");
+    assert_jslt("null or [1]", "true");
+    assert_jslt("0 or {}", "false");
+}
+
+#[test]
+fn and_or_short_circuit() {
+    assert_jslt(r#"false and error("not evaluated")"#, "false");
+    assert_jslt(r#"true or error("not evaluated")"#, "true");
+}

@@ -128,6 +128,8 @@ pub enum BoundExpr {
     // Array comprehensions
     ArrayFor {
         seq: Box<BoundExpr>,
+        // Per-element lets, evaluated before the filter and element
+        lets: Vec<(usize, BoundExpr)>,
         elem: Box<BoundExpr>,
         filter: Option<Box<BoundExpr>>,
         span: Span,
@@ -135,6 +137,8 @@ pub enum BoundExpr {
 
     ObjectFor {
         seq: Box<BoundExpr>,
+        // Per-element lets, evaluated before the filter, key and value
+        lets: Vec<(usize, BoundExpr)>,
         key: Box<BoundExpr>,
         value: Box<BoundExpr>,
         filter: Option<Box<BoundExpr>>,
@@ -215,6 +219,8 @@ pub enum BindError {
     UnknownFunction { name: String, span: Span, suggestions: Vec<String> },
     #[error("attempted to call a non-function expression at {span:?}")]
     NonFunctionCallee { span: Span },
+    #[error("variable `{name}` is already declared in this scope at {span:?}")]
+    DuplicateVariable { name: String, span: Span },
 }
 
 impl BindError {
@@ -224,6 +230,7 @@ impl BindError {
             UnknownVariable { span, .. } => *span,
             UnknownFunction { span, .. } => *span,
             NonFunctionCallee { span } => *span,
+            DuplicateVariable { span, .. } => *span,
         }
     }
 }
@@ -277,41 +284,32 @@ fn edit_distance(a: &str, b: &str) -> usize {
     dp[n]
 }
 
+fn let_names(lets: &[ast::Let]) -> impl Iterator<Item = (&str, Span)> {
+    lets.iter().flat_map(|l| &l.bindings).map(|b| (b.name.name.as_str(), b.name.span))
+}
+
 #[derive(Debug, Default)]
 struct VarFrame {
-    // Order matters: slot is index in 'order'
+    // Slot is the index in 'order'. A shadowing declaration gets a new slot, so an inner scope
+    // never overwrites the outer variable.
     order: Vec<String>,
-    // Quick lookup by name -> slot
-    slots: HashMap<String, usize>,
 }
 
 impl VarFrame {
     fn new() -> Self {
-        Self { order: Vec::new(), slots: HashMap::new() }
+        Self { order: Vec::new() }
     }
     fn define(&mut self, name: &str) -> usize {
-        if let Some(&slot) = self.slots.get(name) {
-            return slot;
-        }
-        let slot = self.order.len();
         self.order.push(name.to_string());
-        self.slots.insert(name.to_string(), slot);
-        slot
+        self.order.len() - 1
     }
     fn lookup(&self, name: &str) -> Option<usize> {
-        self.slots.get(name).copied()
+        self.order.iter().rposition(|n| n == name)
     }
     fn len(&self) -> usize {
         self.order.len()
     }
     fn truncate(&mut self, len: usize) {
-        if len >= self.order.len() {
-            return;
-        }
-        // Remove slots beyond len
-        for name in self.order[len..].iter() {
-            self.slots.remove(name);
-        }
         self.order.truncate(len);
     }
 }
@@ -577,6 +575,7 @@ impl Binder {
         }
 
         // Pre-declare all top-level lets so they are visible after their decl point only.
+        self.check_duplicate_lets(&p.lets);
         for l in &p.lets {
             for b in &l.bindings {
                 let _slot = self.env.define_var(&b.name.name);
@@ -595,6 +594,8 @@ impl Binder {
                 self.env.define_var(&param.name);
             }
             // predeclare let names in order so their slots follow params
+            let param_names = d.params.iter().map(|p| (p.name.as_str(), p.span));
+            self.check_duplicate_names(param_names.chain(let_names(&d.lets)));
             for l in &d.lets {
                 for b in &l.bindings {
                     self.env.define_var(&b.name.name);
@@ -658,6 +659,47 @@ impl Binder {
         })
     }
 
+    /// Like Java JSLT, a name may only be declared once in a let list. Inner scopes may shadow it.
+    fn check_duplicate_lets(&mut self, lets: &[ast::Let]) {
+        self.check_duplicate_names(let_names(lets));
+    }
+
+    fn check_duplicate_names<'a>(&mut self, names: impl Iterator<Item = (&'a str, Span)>) {
+        let mut seen = std::collections::HashSet::new();
+        for (name, span) in names {
+            if !seen.insert(name) {
+                self.errors.push(BindError::DuplicateVariable { name: name.to_string(), span });
+            }
+        }
+    }
+
+    fn var_frame_len(&self) -> usize {
+        self.env.var_stack.last().map(|f| f.len()).unwrap_or(0)
+    }
+
+    /// Removes variables defined after `len`, ending the scope they were declared in.
+    fn truncate_var_frame(&mut self, len: usize) {
+        if let Some(frame) = self.env.var_stack.last_mut() {
+            frame.truncate(len);
+        }
+    }
+
+    /// Declares the variables of `lets` in the current frame and binds their values. The caller
+    /// ends the scope with `truncate_var_frame`.
+    fn bind_scoped_lets(&mut self, lets: &[ast::Let]) -> Vec<(usize, BoundExpr)> {
+        self.check_duplicate_lets(lets);
+        let slots: Vec<usize> = lets
+            .iter()
+            .flat_map(|l| &l.bindings)
+            .map(|b| self.env.define_var(&b.name.name))
+            .collect();
+        lets.iter()
+            .flat_map(|l| &l.bindings)
+            .zip(slots)
+            .map(|(b, slot)| (slot, self.bind_expr_recovery(&b.value)))
+            .collect()
+    }
+
     fn bind_expr_recovery(&mut self, e: &ast::Expr) -> BoundExpr {
         match self.bind_expr(e) {
             Ok(expr) => expr,
@@ -707,33 +749,10 @@ impl Binder {
             }
             Expr::String { value, span } => Ok(BoundExpr::String(value.clone(), *span)),
             Expr::LetBlock { lets, body, span } => {
-                // Snapshot current frame length to restore after binding
-                let base_len = self.env.var_stack.last().map(|f| f.len()).unwrap_or(0);
-                // Predeclare all names and record slots
-                let mut slots: Vec<usize> = Vec::new();
-                for l in lets {
-                    for b in &l.bindings {
-                        let slot = self.env.define_var(&b.name.name);
-                        slots.push(slot);
-                    }
-                }
-                // Bind let values in order, pairing with their slots
-                let mut blets: Vec<(usize, BoundExpr)> = Vec::new();
-                let mut i = 0usize;
-                for l in lets {
-                    for b in &l.bindings {
-                        let val = self.bind_expr_recovery(&b.value);
-                        let slot = slots[i];
-                        i += 1;
-                        blets.push((slot, val));
-                    }
-                }
-                // Bind body with lets visible
+                let base_len = self.var_frame_len();
+                let blets = self.bind_scoped_lets(lets);
                 let bbody = Box::new(self.bind_expr_recovery(body));
-                // Truncate frame to base_len to avoid leakage
-                if let Some(frame) = self.env.var_stack.last_mut() {
-                    frame.truncate(base_len);
-                }
+                self.truncate_var_frame(base_len);
                 Ok(BoundExpr::LetBlock(blets, bbody, *span))
             }
             Expr::This(span) => Ok(BoundExpr::This(*span)),
@@ -843,12 +862,16 @@ impl Binder {
                 Ok(BoundExpr::ArrayLiteral(out, *span))
             }
 
-            Expr::ArrayFor { seq, body, filter, span } => {
+            Expr::ArrayFor { seq, lets, body, filter, span } => {
                 let bseq = self.bind_expr_recovery(seq);
+                let base_len = self.var_frame_len();
+                let blets = self.bind_scoped_lets(lets);
                 let bbody = self.bind_expr_recovery(body);
                 let bfilter = filter.as_ref().map(|f| Box::new(self.bind_expr_recovery(f)));
+                self.truncate_var_frame(base_len);
                 Ok(BoundExpr::ArrayFor {
                     seq: Box::new(bseq),
+                    lets: blets,
                     elem: Box::new(bbody),
                     filter: bfilter,
                     span: *span,
@@ -883,13 +906,17 @@ impl Binder {
                 Ok(BoundExpr::ObjectLiteral(out_entries, *span))
             }
 
-            Expr::ObjectFor { seq, key, value, filter, span } => {
+            Expr::ObjectFor { seq, lets, key, value, filter, span } => {
                 let bseq = self.bind_expr_recovery(seq);
+                let base_len = self.var_frame_len();
+                let blets = self.bind_scoped_lets(lets);
                 let bkey = self.bind_expr_recovery(key);
                 let bvalue = self.bind_expr_recovery(value);
                 let bfilter = filter.as_ref().map(|f| Box::new(self.bind_expr_recovery(f)));
+                self.truncate_var_frame(base_len);
                 Ok(BoundExpr::ObjectFor {
                     seq: Box::new(bseq),
+                    lets: blets,
                     key: Box::new(bkey),
                     value: Box::new(bvalue),
                     filter: bfilter,

@@ -538,7 +538,7 @@ impl<'p> Evaluator<'p> {
 
             ObjectLiteral(entries, _sp) => self.eval_object_literal(entries, None),
 
-            ArrayFor { seq, elem, filter, .. } => {
+            ArrayFor { seq, lets, elem, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
                 let mut out = Vec::new();
                 let caller_frame = self.current_frame().clone();
@@ -553,6 +553,7 @@ impl<'p> Evaluator<'p> {
                         out.reserve(items.len());
                         for item in items {
                             self.current_frame_mut().this_val = JsltValue::from_json(item.clone());
+                            self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
                             } else {
@@ -568,6 +569,7 @@ impl<'p> Evaluator<'p> {
                         for (k, v) in map {
                             self.current_frame_mut().this_val =
                                 JsltValue::from_json(json!({ "key": k, "value": v }));
+                            self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
                             } else {
@@ -584,7 +586,7 @@ impl<'p> Evaluator<'p> {
                 Ok(JsltValue::from_json(Value::Array(out)))
             }
 
-            ObjectFor { seq, key, value, filter, .. } => {
+            ObjectFor { seq, lets, key, value, filter, .. } => {
                 let seq_val = self.eval_expr(seq)?;
                 let mut out = Map::new();
                 let caller_frame = self.current_frame().clone();
@@ -597,6 +599,7 @@ impl<'p> Evaluator<'p> {
                     Value::Array(items) => {
                         for item in items {
                             self.current_frame_mut().this_val = JsltValue::from_json(item.clone());
+                            self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
                             } else {
@@ -626,6 +629,7 @@ impl<'p> Evaluator<'p> {
                         for (k_raw, v_raw) in map {
                             self.current_frame_mut().this_val =
                                 JsltValue::from_json(json!({ "key": k_raw, "value": v_raw }));
+                            self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
                             } else {
@@ -995,6 +999,25 @@ impl<'p> Evaluator<'p> {
 
     /// Evaluates an object field value. A nested object literal, or one on the left of a
     /// pipe, matches against `match_source` (the parent's value for this key).
+    /// Evaluates per-element comprehension lets into their slots in the current frame. The slots
+    /// are cleared first so no value carries over from the previous element.
+    fn eval_iteration_lets(&mut self, lets: &[(usize, BoundExpr)]) -> Result<(), RuntimeError> {
+        let locals = &mut self.current_frame_mut().locals;
+        if let Some(max) = lets.iter().map(|(slot, _)| *slot).max() {
+            if max >= locals.len() {
+                locals.resize(max + 1, JsltValue::null());
+            }
+        }
+        for (slot, _) in lets {
+            locals[*slot] = JsltValue::null();
+        }
+        for (slot, expr) in lets {
+            let v = self.eval_expr(expr)?;
+            self.current_frame_mut().locals[*slot] = v;
+        }
+        Ok(())
+    }
+
     fn eval_object_value(
         &mut self,
         expr: &BoundExpr,

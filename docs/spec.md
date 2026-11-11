@@ -106,7 +106,10 @@ add_expr     = mul_expr, { ws, ("+" | "-"), ws, mul_expr } ;
 mul_expr     = unary,    { ws, ("*" | "/" | "%"), ws, unary } ;
 unary        = [ ("not" | "-"), ws1 ], postfix ;
 
-postfix      = primary, { member | index_or_slice | call } ;
+# Like Java JSLT, chain links only follow a call, a variable or `.`. After any other primary,
+# `[` and `.` start the next expression, so `let v = 1 [$v]` is a let followed by an array.
+postfix      = chainable, { member | index_or_slice } | primary ;
+chainable    = ( name_ref | ns_qualified ), [ call ] | variable | this ;
 member       = ws, ".", ws, ( ident | string ) ;
 index_or_slice
              = ws, "[", ws, [ expr ], ws, [ ":", ws, [ expr ] ], ws, "]" ;
@@ -262,6 +265,10 @@ Used by `if`, `and`, `or` and filters:
 
 * `let` introduces **lexical** bindings visible in its body and nested expressions.
 * Function parameters shadow outer variables.
+* A name may be declared only once in one list of `let`s (program, function body, let block or
+  comprehension); a second declaration is a bind error. A function's parameters and its `let`s
+  share one scope. Nested scopes may shadow a name; the new name is in scope in its own
+  initializer.
 * `def` defined at top level introduces a function binding visible **after** its declaration; inner `def` is allowed but discouraged (implementation may hoist or keep block‑local).
 
 > **OPEN:** Confirm whether inner `def` is legal in the reference. Safe default: allow and scope to declaration region.
@@ -285,6 +292,8 @@ Used by `if`, `and`, `or` and filters:
 
 ### 7.3 Comprehensions
 
+* Both forms accept `let`s after `for (seq)`. They are evaluated once per element, before the
+  filter, and are visible in the filter and the body (`key` and `value` for objects).
 * **Array:** `[for (seq) expr]` optionally `[for (seq) expr if cond]`
 
   * `seq` is any expression evaluating to an array; each element becomes the new context.

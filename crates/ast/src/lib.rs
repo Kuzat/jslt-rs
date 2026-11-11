@@ -178,6 +178,7 @@ pub enum Expr {
     },
     ArrayFor {
         seq: Box<Expr>,            // for (seq)
+        lets: Vec<Let>,            // evaluated per element; visible in body and filter
         body: Box<Expr>,           // expr
         filter: Option<Box<Expr>>, // optional "if cond"
         span: Span,
@@ -192,6 +193,7 @@ pub enum Expr {
     },
     ObjectFor {
         seq: Box<Expr>,            // for (seq)
+        lets: Vec<Let>,            // evaluated per element; visible in key, value and filter
         key: Box<Expr>,            // key expr (must evaluate to string later)
         value: Box<Expr>,          // value expr
         filter: Option<Box<Expr>>, // optional "if cond"
@@ -433,17 +435,7 @@ impl<'a, 'b> Pretty<'a, 'b> {
             }
 
             LetBlock { lets, body, .. } => {
-                for l in lets {
-                    write!(self.f, "let ")?;
-                    for (i, b) in l.bindings.iter().enumerate() {
-                        if i > 0 {
-                            write!(self.f, "; ")?;
-                        }
-                        write!(self.f, "{} = ", b.name.name)?;
-                        self.expr(&b.value, Prec::Lowest)?;
-                    }
-                    write!(self.f, " ")?;
-                }
+                self.lets(lets)?;
                 self.expr(body, Prec::Lowest)
             }
 
@@ -555,10 +547,11 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 write!(self.f, "]")
             }
 
-            ArrayFor { seq, body, filter, .. } => {
+            ArrayFor { seq, lets, body, filter, .. } => {
                 write!(self.f, "[for (")?;
                 self.expr(seq, Prec::Lowest)?;
                 write!(self.f, ") ")?;
+                self.lets(lets)?;
                 self.expr(body, Prec::Lowest)?;
                 if let Some(fx) = filter {
                     write!(self.f, " if ")?;
@@ -602,10 +595,11 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 write!(self.f, "}}")
             }
 
-            ObjectFor { seq, key, value, filter, .. } => {
+            ObjectFor { seq, lets, key, value, filter, .. } => {
                 write!(self.f, "{{for (")?;
                 self.expr(seq, Prec::Lowest)?;
                 write!(self.f, ") ")?;
+                self.lets(lets)?;
                 self.expr(key, Prec::Lowest)?;
                 write!(self.f, ": ")?;
                 self.expr(value, Prec::Lowest)?;
@@ -620,6 +614,21 @@ impl<'a, 'b> Pretty<'a, 'b> {
                 write!(self.f, "{}", name)
             }
         }
+    }
+
+    fn lets(&mut self, lets: &[Let]) -> fmt::Result {
+        for l in lets {
+            write!(self.f, "let ")?;
+            for (i, b) in l.bindings.iter().enumerate() {
+                if i > 0 {
+                    write!(self.f, "; ")?;
+                }
+                write!(self.f, "{} = ", b.name.name)?;
+                self.expr(&b.value, Prec::Lowest)?;
+            }
+            write!(self.f, " ")?;
+        }
+        Ok(())
     }
 
     fn obj_key(&mut self, k: &ObjectKey) -> fmt::Result {
@@ -853,6 +862,7 @@ mod tests {
         // [for (seq) body]
         let arr_for_simple = Expr::ArrayFor {
             seq: Box::new(var("seq")),
+            lets: vec![],
             body: Box::new(var("x")),
             filter: None,
             span: sp(),
@@ -862,6 +872,7 @@ mod tests {
         // [for (seq) body if cond]
         let arr_for_filter = Expr::ArrayFor {
             seq: Box::new(var("seq")),
+            lets: vec![],
             body: Box::new(num("1")),
             filter: Some(Box::new(bool_(true))),
             span: sp(),
@@ -871,6 +882,7 @@ mod tests {
         // {for (seq) key: value}
         let obj_for_simple = Expr::ObjectFor {
             seq: Box::new(var("seq")),
+            lets: vec![],
             key: Box::new(str_("k")),
             value: Box::new(var("v")),
             filter: None,
@@ -881,6 +893,7 @@ mod tests {
         // {for (seq) key: value if cond}
         let obj_for_filter = Expr::ObjectFor {
             seq: Box::new(var("seq")),
+            lets: vec![],
             key: Box::new(member_ident(var("a"), "b")),
             value: Box::new(num("2")),
             filter: Some(Box::new(bin(BinaryOp::Eq, var("x"), num("3")))),

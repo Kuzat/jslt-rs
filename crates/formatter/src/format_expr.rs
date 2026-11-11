@@ -100,10 +100,11 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
             format_array(writer, elements);
         }
 
-        Expr::ArrayFor { seq, body, filter, .. } => {
+        Expr::ArrayFor { seq, lets, body, filter, .. } => {
             writer.write("[for (");
             format_expr(writer, seq);
             writer.write(") ");
+            format_lets_inline(writer, lets);
             format_expr(writer, body);
             if let Some(f) = filter {
                 writer.write(" if ");
@@ -116,10 +117,11 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
             format_object(writer, entries, trivia.as_ref(), trailing_trivia.as_ref());
         }
 
-        Expr::ObjectFor { seq, key, value, filter, .. } => {
+        Expr::ObjectFor { seq, lets, key, value, filter, .. } => {
             writer.write("{for (");
             format_expr(writer, seq);
             writer.write(") ");
+            format_lets_inline(writer, lets);
             format_expr(writer, key);
             writer.write(": ");
             format_expr(writer, value);
@@ -131,10 +133,7 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
         }
 
         Expr::LetBlock { lets, body, .. } => {
-            for let_stmt in lets {
-                format_let(writer, let_stmt);
-                writer.write(" ");
-            }
+            format_lets_inline(writer, lets);
             format_expr(writer, body);
         }
 
@@ -147,6 +146,13 @@ pub fn format_expr(writer: &mut Writer, expr: &Expr) {
         Expr::FunctionRef { name, .. } => {
             writer.write(name);
         }
+    }
+}
+
+fn format_lets_inline(writer: &mut Writer, lets: &[ast::Let]) {
+    for let_stmt in lets {
+        format_let(writer, let_stmt);
+        writer.write(" ");
     }
 }
 

@@ -516,20 +516,12 @@ impl<'p> Evaluator<'p> {
             Ge(l, r, sp) => self.eval_cmp(l, r, *sp, |o| o.is_ge()),
 
             And(l, r, _) => {
-                let lv = self.eval_expr(l)?;
-                if !lv.truthy() {
-                    Ok(lv) // short-circuit
-                } else {
-                    self.eval_expr(r)
-                }
+                let res = self.eval_expr(l)?.truthy() && self.eval_expr(r)?.truthy();
+                Ok(JsltValue::from_json(Value::Bool(res)))
             }
             Or(l, r, _) => {
-                let lv = self.eval_expr(l)?;
-                if lv.truthy() {
-                    Ok(lv) // short-circuit
-                } else {
-                    self.eval_expr(r)
-                }
+                let res = self.eval_expr(l)?.truthy() || self.eval_expr(r)?.truthy();
+                Ok(JsltValue::from_json(Value::Bool(res)))
             }
 
             ArrayLiteral(elems, _) => {

@@ -230,10 +230,9 @@ Used by `if`, `and`, `or` and filters:
 * strings → falsey iff empty
 * arrays/objects → truthy iff non‑empty
 
-> **OPEN:** Verify string/collection truthiness in the reference. Adjust if it treats only booleans as booleans.
+### 5.4 `and` / `or`
 
-### 5.4 Short‑circuiting
-
+* `a and b` and `a or b` always return a boolean (`true` or `false`), never one of the operands.
 * `a and b` evaluates `b` only if `a` is truthy.
 * `a or b` evaluates `b` only if `a` is falsey.
 

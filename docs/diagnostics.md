@@ -26,6 +26,10 @@ A call expression attempted to invoke a non-function value.
 
 A variable was declared more than once in the same list of `let` statements.
 
+## jslt_bind_matcher_not_allowed
+
+An object matcher (`* : expr`) was used inside an array or a function declaration.
+
 ## jslt_module
 
 General module-level error not otherwise classified.

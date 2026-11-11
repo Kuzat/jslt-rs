@@ -161,7 +161,21 @@ pub enum BoundExpr {
 #[derive(Debug, Clone)]
 pub enum BoundObjectEntry {
     Pair(BoundExpr, BoundExpr),
-    Wildcard { value: BoundExpr, exclude_keys: Vec<String> },
+    /// `* : value`, matching the fields of `.` followed by the keys in `path`.
+    Wildcard {
+        value: BoundExpr,
+        exclude_keys: Vec<String>,
+        path: Vec<String>,
+    },
+}
+
+/// Where an object matcher takes its fields from, following Java's rules.
+#[derive(Debug, Clone)]
+enum MatchContext {
+    /// Static keys from the nearest `.` the context restarts at.
+    Path(Vec<String>),
+    /// Matchers are not allowed here.
+    Fail(&'static str),
 }
 
 impl BoundExpr {
@@ -221,6 +235,8 @@ pub enum BindError {
     NonFunctionCallee { span: Span },
     #[error("variable `{name}` is already declared in this scope at {span:?}")]
     DuplicateVariable { name: String, span: Span },
+    #[error("Object matcher used inside {location} at {span:?}")]
+    MatcherNotAllowed { location: &'static str, span: Span },
 }
 
 impl BindError {
@@ -231,6 +247,7 @@ impl BindError {
             UnknownFunction { span, .. } => *span,
             NonFunctionCallee { span } => *span,
             DuplicateVariable { span, .. } => *span,
+            MatcherNotAllowed { span, .. } => *span,
         }
     }
 }
@@ -458,6 +475,8 @@ pub struct Binder {
     modules: HashMap<String, LoadedModule>,
 
     errors: Vec<BindError>,
+
+    match_ctx: MatchContext,
 }
 
 impl Default for Binder {
@@ -485,6 +504,7 @@ impl Binder {
             builtin_count: registry.len(),
             modules: HashMap::new(),
             errors: Vec::new(),
+            match_ctx: MatchContext::Path(Vec::new()),
         }
     }
 
@@ -601,6 +621,8 @@ impl Binder {
                     self.env.define_var(&b.name.name);
                 }
             }
+            let outer_ctx =
+                std::mem::replace(&mut self.match_ctx, MatchContext::Fail("function declaration"));
             // bind let values in order
             let mut def_lets = Vec::new();
             for l in &d.lets {
@@ -611,6 +633,7 @@ impl Binder {
             }
             // bind body
             let body = self.bind_expr_recovery(&d.body);
+            self.match_ctx = outer_ctx;
             let captures = self.env.end_fun(fid);
             self.env.pop_vars();
 
@@ -712,7 +735,31 @@ impl Binder {
         }
     }
 
+    fn with_match_ctx<T>(&mut self, ctx: MatchContext, f: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = std::mem::replace(&mut self.match_ctx, ctx);
+        let out = f(self);
+        self.match_ctx = saved;
+        out
+    }
+
     fn bind_expr(&mut self, e: &ast::Expr) -> Result<BoundExpr, BindError> {
+        use ast::Expr;
+        // Operators, calls, lets, conditionals and objects pass the matcher context on; arrays
+        // forbid matchers, and anything else restarts the context at its own `.`.
+        let ctx = match e {
+            Expr::If { .. }
+            | Expr::Binary { .. }
+            | Expr::Call { .. }
+            | Expr::LetBlock { .. }
+            | Expr::Group { .. }
+            | Expr::ObjectLiteral { .. } => return self.bind_expr_inner(e),
+            Expr::ArrayLiteral { .. } => MatchContext::Fail("array"),
+            _ => MatchContext::Path(Vec::new()),
+        };
+        self.with_match_ctx(ctx, |b| b.bind_expr_inner(e))
+    }
+
+    fn bind_expr_inner(&mut self, e: &ast::Expr) -> Result<BoundExpr, BindError> {
         use ast::Expr;
         match e {
             Expr::Null(s) => Ok(BoundExpr::Null(*s)),
@@ -770,7 +817,9 @@ impl Binder {
             }
 
             Expr::If { cond, then_br, else_br, span } => Ok(BoundExpr::If {
-                cond: Box::new(self.bind_expr_recovery(cond)),
+                cond: Box::new(self.with_match_ctx(MatchContext::Path(Vec::new()), |b| {
+                    b.bind_expr_recovery(cond)
+                })),
                 then_br: Box::new(self.bind_expr_recovery(then_br)),
                 else_br: Box::new(match else_br {
                     Some(else_br) => self.bind_expr_recovery(else_br),
@@ -791,7 +840,13 @@ impl Binder {
             Expr::Binary { op, left, right, span } => {
                 use ast::BinaryOp::*;
                 let l = Box::new(self.bind_expr_recovery(left));
-                let r = Box::new(self.bind_expr_recovery(right));
+                let r = Box::new(if matches!(op, Pipe) {
+                    self.with_match_ctx(MatchContext::Path(Vec::new()), |b| {
+                        b.bind_expr_recovery(right)
+                    })
+                } else {
+                    self.bind_expr_recovery(right)
+                });
                 Ok(match op {
                     Mul => BoundExpr::Mul(l, r, *span),
                     Div => BoundExpr::Div(l, r, *span),
@@ -892,13 +947,40 @@ impl Binder {
                                     BoundExpr::String(value.clone(), *span)
                                 }
                             };
-                            let vexpr = self.bind_expr_recovery(value);
+                            let value_ctx = match &self.match_ctx {
+                                MatchContext::Path(path) => {
+                                    let key = match &kexpr {
+                                        BoundExpr::String(k, _) => k.clone(),
+                                        _ => unreachable!("object literal keys are static"),
+                                    };
+                                    let mut path = path.clone();
+                                    path.push(key);
+                                    MatchContext::Path(path)
+                                }
+                                fail => fail.clone(),
+                            };
+                            let vexpr =
+                                self.with_match_ctx(value_ctx, |b| b.bind_expr_recovery(value));
                             out_entries.push(BoundObjectEntry::Pair(kexpr, vexpr));
                         }
-                        ast::ObjectEntry::Spread { value, exclude_keys, .. } => {
+                        ast::ObjectEntry::Spread { value, exclude_keys, span, .. } => {
+                            let path = match &self.match_ctx {
+                                MatchContext::Path(path) => path.clone(),
+                                MatchContext::Fail(location) => {
+                                    self.errors.push(BindError::MatcherNotAllowed {
+                                        location,
+                                        span: *span,
+                                    });
+                                    Vec::new()
+                                }
+                            };
+                            let value = self.with_match_ctx(MatchContext::Path(Vec::new()), |b| {
+                                b.bind_expr_recovery(value)
+                            });
                             out_entries.push(BoundObjectEntry::Wildcard {
-                                value: self.bind_expr_recovery(value),
+                                value,
                                 exclude_keys: exclude_keys.clone(),
+                                path,
                             });
                         }
                     }

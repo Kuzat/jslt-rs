@@ -134,3 +134,13 @@ fn parse_time_bad_format_errors_even_with_fallback() {
     let err = run_jslt(r#"parse-time("1973-12-25", "yyyy-MM-dd HH")"#).unwrap_err();
     assert!(err.contains(r#"Unparseable date: "1973-12-25""#), "{err}");
 }
+
+#[test]
+fn split_drops_trailing_empty_strings_like_java() {
+    assert_eq!(
+        run_jslt(
+            r#"[split(" a b ", " "), split("a,,b,,", ","), split(",,", ","), split("", ","), split("abc", "")]"#
+        ),
+        Ok(json!([["", "a", "b"], ["a", "", "b"], [], [""], ["a", "b", "c"]]))
+    );
+}

@@ -321,6 +321,7 @@ Used by `if`, `and`, `or` and filters:
 
 * The matcher copies every field of its context object that the template does not set and that
   is not excluded with `* - a, b : expr`. `expr` is evaluated with `.` set to the field value.
+  Unlike explicit pairs, copied fields are kept even when the value is null, `[]` or `{}`.
 * The context is `.` followed by the keys of the enclosing object pairs. In
   `{"a": {"b": {* : .}}}` the matcher copies the fields of `.a.b`. If the context is not an
   object, nothing is copied.

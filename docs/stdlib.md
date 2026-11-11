@@ -583,3 +583,28 @@ Examples:
 - parse-url("https://www.example.com/?aa=1&aa=2&bb=&cc").parameters.cc => [null]
 - parse-url("ftp://username:password@host.com/").userinfo => "username:password"
 - parse-url("https://example.com:8443").port => 8443
+
+## Experimental module
+
+Like Java JSLT, the import path `http://jslt.schibsted.com/2018/experimental` is a built-in
+module. It needs no file:
+
+```jslt
+import "http://jslt.schibsted.com/2018/experimental" as exp
+exp:group-by(., .type, .name)
+```
+
+### group-by(array, key, value) -> array
+Groups the elements of array. For each element, key and value are evaluated with `.` set to that
+element. Returns one `{"key": <key>, "values": [...]}` object per distinct key, in the order the
+keys first appear. Keys keep their JSON type.
+- An object is grouped as its `{"key": ..., "value": ...}` pairs, like `array()`.
+- null => null. Any other non-array input => error.
+- A call with other than 3 arguments, or to any other function in the module, is a compile error.
+
+Examples:
+- exp:group-by([1, 2, 1], ., "x") => [{"key": 1, "values": ["x", "x"]}, {"key": 2, "values": ["x"]}]
+- exp:group-by([{"t": "a", "n": 1}, {"t": "a", "n": 2}], .t, .n) => [{"key": "a", "values": [1, 2]}]
+- exp:group-by({"a": 1}, .key, .value) => [{"key": "a", "values": [1]}]
+- exp:group-by(null, ., .) => null
+- exp:group-by(5, ., .) => error

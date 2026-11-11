@@ -400,3 +400,47 @@ fn module_let_error_is_reported() {
     let err = prog.apply(&json!({}), None).unwrap_err();
     assert!(err.to_string().contains("boom"), "{err}");
 }
+
+const EXP: &str = "import \"http://jslt.schibsted.com/2018/experimental\" as exp\n";
+
+#[test]
+fn experimental_group_by_keeps_first_seen_order() {
+    let prog = engine::compile(&format!("{EXP}exp:group-by(., .t, .n)")).unwrap();
+    let input = json!([{"t": "b", "n": 1}, {"t": "a", "n": 2}, {"t": "b", "n": 3}]);
+    assert_eq!(
+        prog.apply(&input, None).unwrap(),
+        json!([{"key": "b", "values": [1, 3]}, {"key": "a", "values": [2]}])
+    );
+}
+
+#[test]
+fn experimental_group_by_matches_objects_regardless_of_key_order() {
+    let prog = engine::compile(&format!("{EXP}exp:group-by(., ., 1)")).unwrap();
+    let input = json!([{"a": 1, "b": 2}, {"b": 2, "a": 1}]);
+    assert_eq!(
+        prog.apply(&input, None).unwrap(),
+        json!([{"key": {"a": 1, "b": 2}, "values": [1, 1]}])
+    );
+}
+
+#[test]
+fn experimental_group_by_errors() {
+    let prog = engine::compile(&format!("{EXP}exp:group-by(., ., .)")).unwrap();
+    let err = prog.apply(&json!(5), None).unwrap_err().to_string();
+    assert!(err.contains("Can't group-by on 5"), "{err}");
+
+    let err = engine::compile(&format!("{EXP}exp:group-by(., .)")).unwrap_err().to_string();
+    assert!(err.contains("needs 3 parameters, got 2"), "{err}");
+
+    let err = engine::compile(&format!("{EXP}exp:foo(.)")).unwrap_err().to_string();
+    assert!(err.contains("exp:foo"), "{err}");
+}
+
+#[test]
+fn experimental_module_can_be_imported_from_a_module() {
+    let td = TempDir::new().unwrap();
+    write_file(&td, "module.jslt", &format!("{EXP}def groups(xs) exp:group-by($xs, ., .)\n"));
+    let main_path = write_file(&td, "main.jslt", "import \"module.jslt\" as m\nm:groups([1, 1])\n");
+    let prog = compile_file_with_imports(&main_path).unwrap();
+    assert_eq!(prog.apply(&json!(null), None).unwrap(), json!([{"key": 1, "values": [1, 1]}]));
+}

@@ -1,5 +1,5 @@
 use ast::Program;
-use interp::binder::{Binder, BoundProgram};
+use interp::binder::{Binder, BoundProgram, EXPERIMENTAL_MODULE_URI};
 use interp::{apply_with_modules, apply_with_variables, binder, EvalConfig, RuntimeError};
 use parser::{parse_import_header, Parser};
 use serde_json::Value;
@@ -129,6 +129,10 @@ impl ModuleLoader {
         // Recursively load and bind its imports first
         let mut child_binder = Binder::new();
         for imp in &ast.imports {
+            if imp.path == EXPERIMENTAL_MODULE_URI {
+                child_binder.wire_experimental_alias(&imp.alias);
+                continue;
+            }
             let child_base = Path::new(&key).parent().unwrap_or(Path::new("."));
             let loaded_module = self.load_module(child_base, &imp.path)?;
             child_binder.register_imported_module(
@@ -211,6 +215,10 @@ pub fn compile_with_import_path(
 
     // Load and register each import (recursive)
     for imp in &ast.imports {
+        if imp.path == EXPERIMENTAL_MODULE_URI {
+            binder.wire_experimental_alias(&imp.alias);
+            continue;
+        }
         let loaded_module = loader.load_module(base_dir, &imp.path)?;
         all_children.insert(
             loaded_module.key.clone(),
@@ -237,7 +245,7 @@ pub fn collect_import_diagnostics(main_src: &str, main_path: &str) -> Vec<Module
         .into_iter()
         .filter_map(|imp| {
             let resolved = base_dir.join(&imp.path);
-            if resolved.exists() {
+            if imp.path == EXPERIMENTAL_MODULE_URI || resolved.exists() {
                 None
             } else {
                 Some(ModuleDiagnostic {
@@ -254,7 +262,7 @@ fn collect_missing_imports_from_ast(ast: &Program, base_dir: &Path) -> Vec<Modul
         .iter()
         .filter_map(|imp| {
             let resolved = base_dir.join(&imp.path);
-            if resolved.exists() {
+            if imp.path == EXPERIMENTAL_MODULE_URI || resolved.exists() {
                 None
             } else {
                 Some(ModuleDiagnostic {

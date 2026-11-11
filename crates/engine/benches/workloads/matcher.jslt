@@ -1,0 +1,7 @@
+// Object matchers copying most of each record.
+[for (.events) {
+  "id": "evt:" + .id,
+  "user": {"vip": mod(.user.id, 7) == 0, *: .},
+  "attrs": {"k0": null, *: .},
+  *: .
+}]

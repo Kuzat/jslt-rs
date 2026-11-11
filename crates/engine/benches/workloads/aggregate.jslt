@@ -1,0 +1,14 @@
+// Filtering, lets and aggregation.
+import "http://jslt.schibsted.com/2018/experimental" as exp
+
+let purchases = [for (.events) . if (.type == "purchase")]
+
+{
+  "purchases": size($purchases),
+  "revenue": round(sum([for ($purchases) .amount])),
+  "by-type": {for (exp:group-by(.events, .type, .amount)) .key : round(sum(.values))},
+  "by-user": {for ($purchases) "u" + string(.user.id) : .amount},
+  "any-big": any([for (.events) .amount > 99]),
+  "all-items": all([for (.events) size(.items) > 0]),
+  "big-ids": [for (.events) .id if (.amount > 90)]
+}

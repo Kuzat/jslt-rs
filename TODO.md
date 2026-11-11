@@ -273,7 +273,7 @@ unsafe_code = "forbid"
 
 ## 12) Performance checks (lightweight)
 
-* [ ] Add a handful of `criterion` benches (compile hot path, map-like comprehension).
+* [x] Add `criterion` benches over shared workloads, with a Java comparison (see `docs/benchmarks.md`).
 * [ ] Avoid cloning large values; use `Rc` where helpful.
 
   * **Accept:** compile+eval of medium templates stays within sane allocations.

@@ -290,6 +290,7 @@ This project is in active development with most core features completed:
 
 🚧 **In Progress:**
 - Error message polish and code frame display
+- Performance (benchmarks and Java comparison: see `docs/benchmarks.md`)
 - Language Server Protocol (LSP) support
 
 📋 **Planned:**

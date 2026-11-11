@@ -1,0 +1,10 @@
+// Arithmetic over a large array of numbers.
+let xs = [for (.numbers) . * 1.5 + 3]
+
+{
+  "sum": sum($xs),
+  "rounded": [for ($xs) mod(round(.), 7) + floor(. / 3) - ceiling(. / 5)],
+  "ints": [for (.numbers) . * 2 - 1 if (mod(., 3) == 0)],
+  "maxed": [for (.numbers) max(., 500) - min(., 250)],
+  "parsed": [for (.numbers) number(string(.)) + 1]
+}

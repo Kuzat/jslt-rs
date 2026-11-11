@@ -23,6 +23,7 @@ pub fn bind(program: &Program) -> Result<BoundProgram, BindErrors> {
 /// max_call_depth: Max recursion depth (function calls). None = unlimited
 /// budget_check_at: Budget check at. Delays the check until after this many steps.
 ///     None = no budget check.
+/// max_string_repeat_bytes: Max size of a string built by `string * n`. None = unlimited
 #[derive(Debug, Clone)]
 pub struct EvalConfig {
     // Max number of expression steps (nodes) to evaluate. None = unlimited
@@ -31,6 +32,8 @@ pub struct EvalConfig {
     pub max_call_depth: Option<usize>,
     // Budget check at. Delays the check until after this many steps.
     pub budget_check_at: Option<u64>,
+    // Max size in bytes of a string built by `string * n`. None = unlimited
+    pub max_string_repeat_bytes: Option<usize>,
 }
 
 impl Default for EvalConfig {
@@ -39,6 +42,7 @@ impl Default for EvalConfig {
             max_steps: Some(100_000_000),
             max_call_depth: Some(10_000),
             budget_check_at: Some(1024),
+            max_string_repeat_bytes: Some(64 * 1024 * 1024),
         }
     }
 }
@@ -62,6 +66,9 @@ pub enum RuntimeError {
 
     #[error("recursion depth exceeded (max depth = {0})")]
     RecursionExceeded(usize),
+
+    #[error("string repetition result too large at {span:?}: limit is {max} bytes")]
+    StringTooLarge { max: usize, span: Span },
 
     #[error("unexpected NaN/Inf at {span:?}:")]
     NonFiniteNumber { span: Span },
@@ -412,10 +419,32 @@ impl<'p> Evaluator<'p> {
 
             Add(l, r, sp) => self.eval_add(l, r, *sp),
             Sub(l, r, sp) => self.eval_num_binop(l, r, *sp, i64::wrapping_sub, |a, b| a - b),
-            Mul(l, r, sp) => self.eval_num_binop(l, r, *sp, i64::wrapping_mul, |a, b| a * b),
+            Mul(l, r, sp) => {
+                let lv = self.eval_expr(l)?;
+                let rv = self.eval_expr(r)?;
+                let (text, count) = match (lv.as_json(), rv.as_json()) {
+                    (Value::String(_), Value::String(_)) => {
+                        return Err(RuntimeError::TypeError {
+                            msg: "can't multiply two strings".into(),
+                            span: *sp,
+                        })
+                    }
+                    (Value::String(t), other) | (other, Value::String(t)) => (t, other),
+                    _ => return numeric_op(&lv, &rv, *sp, i64::wrapping_mul, |a, b| a * b),
+                };
+                let n = repeat_count(count);
+                let max = self.cfg.max_string_repeat_bytes.unwrap_or(usize::MAX);
+                match text.len().checked_mul(n) {
+                    Some(len) if len <= max => Ok(JsltValue::string(text.repeat(n))),
+                    _ => Err(RuntimeError::StringTooLarge { max, span: *sp }),
+                }
+            }
             Div(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
+                if lv.is_null() || rv.is_null() {
+                    return Ok(JsltValue::null());
+                }
                 if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
                     if b == 0 {
                         return Err(RuntimeError::DivByZero { span: *sp });
@@ -444,6 +473,9 @@ impl<'p> Evaluator<'p> {
             Mod(l, r, sp) => {
                 let lv = self.eval_expr(l)?;
                 let rv = self.eval_expr(r)?;
+                if lv.is_null() || rv.is_null() {
+                    return Ok(JsltValue::null());
+                }
                 if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
                     if b == 0 {
                         return Err(RuntimeError::DivByZero { span: *sp });
@@ -788,28 +820,10 @@ impl<'p> Evaluator<'p> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
         match (lv.as_json(), rv.as_json()) {
-            (Value::Number(_), Value::Number(_)) => {
-                numeric_op(&lv, &rv, span, i64::wrapping_add, |a, b| a + b)
-            }
-            (Value::String(a), Value::String(b)) => {
-                let mut s = String::with_capacity(a.len() + b.len());
-                s.push_str(a);
-                s.push_str(b);
-                Ok(JsltValue::from_json(Value::String(s)))
-            }
-            (Value::String(a), Value::Number(b)) => {
-                let bs = b.to_string();
-                let mut s = String::with_capacity(a.len() + bs.len());
-                s.push_str(a);
-                s.push_str(&bs);
-                Ok(JsltValue::from_json(Value::String(s)))
-            }
-            (Value::Number(a), Value::String(b)) => {
-                let as_ = a.to_string();
-                let mut s = String::with_capacity(as_.len() + b.len());
-                s.push_str(&as_);
-                s.push_str(b);
-                Ok(JsltValue::from_json(Value::String(s)))
+            (Value::String(_), _) | (_, Value::String(_)) => {
+                let mut out = concat_part(&lv);
+                out.push_str(&concat_part(&rv));
+                Ok(JsltValue::string(out))
             }
             (Value::Object(a), Value::Object(b)) => {
                 // Object addition: merge with left operand winning on key conflicts
@@ -824,10 +838,9 @@ impl<'p> Evaluator<'p> {
                 out.extend(b.clone());
                 Ok(JsltValue::from_json(Value::Array(out)))
             }
-            _ => Err(RuntimeError::TypeError {
-                msg: "addition expects number+number, string+string, string+number, object+object, or array+array".into(),
-                span,
-            }),
+            (Value::Object(_) | Value::Array(_), Value::Null) => Ok(lv),
+            (Value::Null, Value::Object(_) | Value::Array(_)) => Ok(rv),
+            _ => numeric_op(&lv, &rv, span, i64::wrapping_add, |a, b| a + b),
         }
     }
 
@@ -859,6 +872,9 @@ impl<'p> Evaluator<'p> {
                 pred(af.partial_cmp(&bf).ok_or(RuntimeError::NonFiniteNumber { span })?)
             }
             (Value::String(a), Value::String(b)) => pred(a.cmp(b)),
+            (Value::Null, Value::Null) => pred(std::cmp::Ordering::Equal),
+            (Value::Null, _) => pred(std::cmp::Ordering::Less),
+            (_, Value::Null) => pred(std::cmp::Ordering::Greater),
             _ => {
                 return Err(RuntimeError::TypeError {
                     msg: "comparison expects number vs number or string vs string".into(),
@@ -1126,7 +1142,27 @@ fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> Runtim
     }
 }
 
-/// Integer operands use (wrapping, like Java `long`) integer math; anything else uses f64.
+/// String concatenation renders non-string operands as JSON (`"a" + null` is `"anull"`).
+fn concat_part(v: &JsltValue) -> String {
+    match v.as_json() {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Repeat count for `string * n`: numbers truncate toward zero; anything else, or a
+/// negative count, repeats zero times.
+fn repeat_count(v: &Value) -> usize {
+    match v {
+        Value::Number(n) => {
+            let count = n.as_i64().unwrap_or_else(|| n.as_f64().unwrap_or(0.0) as i64);
+            usize::try_from(count).unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+/// Null operands give null. Integer operands use (wrapping, like Java `long`) integer math; anything else uses f64.
 fn numeric_op(
     lv: &JsltValue,
     rv: &JsltValue,
@@ -1134,6 +1170,9 @@ fn numeric_op(
     int_op: fn(i64, i64) -> i64,
     float_op: fn(f64, f64) -> f64,
 ) -> Result<JsltValue, RuntimeError> {
+    if lv.is_null() || rv.is_null() {
+        return Ok(JsltValue::null());
+    }
     if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
         return Ok(JsltValue::number_i64(int_op(a, b)));
     }
@@ -1433,8 +1472,12 @@ mod tests {
             ),
             vec![],
         );
-        let cfg =
-            EvalConfig { max_steps: Some(3), max_call_depth: Some(100), budget_check_at: Some(1) };
+        let cfg = EvalConfig {
+            max_steps: Some(3),
+            max_call_depth: Some(100),
+            budget_check_at: Some(1),
+            ..Default::default()
+        };
         let err = apply(&p, &json!(null), Some(cfg)).unwrap_err();
         match err {
             RuntimeError::BudgetExceeded(_) => {}
@@ -1460,6 +1503,7 @@ mod tests {
             max_steps: Some(10_000),
             max_call_depth: Some(8),
             budget_check_at: Some(1),
+            ..Default::default()
         };
         let err2 = apply(&p2, &json!(null), Some(cfg2)).unwrap_err();
         match err2 {

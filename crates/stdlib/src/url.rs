@@ -58,7 +58,6 @@ pub fn parse_url(url: &str) -> Result<Map<String, Value>, String> {
     }
 
     // path, query, fragment
-    let mut path: Option<String> = None;
     let mut query: Option<String> = None;
     let mut fragment: Option<String> = None;
 
@@ -74,74 +73,79 @@ pub fn parse_url(url: &str) -> Result<Map<String, Value>, String> {
         rest = &rest[..q_pos];
     }
 
-    // path is what's left; empty string => null. "/" should be kept
-    if !rest.is_empty() {
-        path = Some(rest.to_string());
-    }
-
-    // parameters object from query per spec
-    let mut params_obj = Map::new();
-    if let Some(qs) = &query {
-        if !qs.is_empty() {
-            for pair in qs.split('&') {
-                // name[=value], empty value -> null in array; missing '=' -> [null]
-                let (name, value_opt) = match pair.split_once('=') {
-                    Some((n, v)) => (n, Some(v)),
-                    None => (pair, None),
-                };
-                if name.is_empty() {
-                    continue;
-                }
-                let arr =
-                    params_obj.entry(name.to_string()).or_insert_with(|| Value::Array(Vec::new()));
-                match arr {
-                    Value::Array(vec) => {
-                        if let Some(v) = value_opt {
-                            if v.is_empty() {
-                                vec.push(Value::Null);
-                            } else {
-                                vec.push(Value::String(v.to_string()));
-                            }
-                        } else {
-                            vec.push(Value::Null);
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-        }
-    }
-
+    // Like Java's URL: only present, non-empty parts are included (the fragment may be empty).
     if let Some(ui) = userinfo {
         out.insert("userinfo".to_string(), Value::String(ui));
     }
-
-    if let Some(h) = host {
+    if let Some(h) = host.filter(|h| !h.is_empty()) {
         out.insert("host".to_string(), Value::String(h));
     }
-
     if let Some(p) = port_num {
         out.insert("port".to_string(), Value::Number(p.into()));
     }
-
-    if let Some(p) = path {
-        out.insert("path".to_string(), Value::String(p));
-    } else {
-        out.insert("path".to_string(), Value::Null);
+    if !rest.is_empty() {
+        out.insert("path".to_string(), Value::String(rest.to_string()));
     }
-
-    if let Some(s) = scheme_opt {
+    if let Some(s) = scheme_opt.filter(|s| !s.is_empty()) {
         out.insert("scheme".to_string(), Value::String(s.to_string()));
     }
-
-    if let Some(q) = query {
-        out.insert("query".to_string(), Value::String(q));
+    if let Some(qs) = query.filter(|q| !q.is_empty()) {
+        out.insert("parameters".to_string(), Value::Object(parse_query(&qs)?));
+        out.insert("query".to_string(), Value::String(qs));
     }
-    out.insert("parameters".to_string(), Value::Object(params_obj));
-
     if let Some(f) = fragment {
         out.insert("fragment".to_string(), Value::String(f));
     }
 
     Ok(out)
+}
+
+/// Splits a query into `name -> [values]` like Java JSLT. A pair without `=` (or with nothing
+/// after it) adds `null`. Names and values are URL-decoded unless the pair starts with `=`.
+/// Trailing empty pairs are dropped, like Java's `String.split`.
+fn parse_query(qs: &str) -> Result<Map<String, Value>, String> {
+    let mut pairs: Vec<&str> = qs.split('&').collect();
+    while pairs.last() == Some(&"") {
+        pairs.pop();
+    }
+    let mut params = Map::new();
+    for pair in pairs {
+        let (name, value) = match pair.find('=') {
+            Some(idx) if idx > 0 => {
+                let v = &pair[idx + 1..];
+                let value = if v.is_empty() { None } else { Some(url_decode(v)?) };
+                (url_decode(&pair[..idx])?, value)
+            }
+            _ => (pair.to_string(), None),
+        };
+        let entry = params.entry(name).or_insert_with(|| Value::Array(Vec::new()));
+        if let Value::Array(values) = entry {
+            values.push(value.map_or(Value::Null, Value::String));
+        }
+    }
+    Ok(params)
+}
+
+/// `application/x-www-form-urlencoded` decoding, like Java's `URLDecoder` with UTF-8.
+fn url_decode(s: &str) -> Result<String, String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' => {
+                let hex = bytes
+                    .get(i + 1..i + 3)
+                    .and_then(|h| std::str::from_utf8(h).ok())
+                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+                    .ok_or_else(|| format!("invalid escape in query: {s}"))?;
+                out.push(hex);
+                i += 2;
+            }
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }

@@ -111,6 +111,8 @@ struct Evaluator<'p> {
     stack: Vec<Frame>,
     registry: Registry,
     builtin_count: usize,
+    // Builtin `fallback` is evaluated lazily, like the Java macro.
+    fallback_id: Option<usize>,
     modules: HashMap<String, ModuleRuntime>,
 }
 
@@ -119,6 +121,7 @@ impl<'p> Evaluator<'p> {
         // Initialize builtin registry once. ids 0..builtin_coutn must match binding seeding
         let registry = Registry::with_default();
         let builtin_count = prog.builtin_count;
+        let fallback_id = registry.get_id("fallback").filter(|id| *id < builtin_count);
 
         Self {
             prog,
@@ -130,6 +133,7 @@ impl<'p> Evaluator<'p> {
             stack: Vec::new(),
             registry,
             builtin_count,
+            fallback_id,
             modules: HashMap::new(),
         }
     }
@@ -709,6 +713,9 @@ impl<'p> Evaluator<'p> {
                 }
             }
 
+            Call { id, args, span } if Some(id.0) == self.fallback_id => {
+                self.eval_fallback(id.0, args, *span)
+            }
             Call { id, args, span } => {
                 // Evaluate args left to right once for either builtin or user functions
                 let mut evaluated_args = Vec::with_capacity(args.len());
@@ -999,6 +1006,26 @@ impl<'p> Evaluator<'p> {
 
     /// Evaluates an object field value. A nested object literal, or one on the left of a
     /// pipe, matches against `match_source` (the parent's value for this key).
+    /// Returns the first argument that is a value (not null, `[]` or `{}`), evaluating no
+    /// arguments after it.
+    fn eval_fallback(
+        &mut self,
+        id: usize,
+        args: &[BoundExpr],
+        span: Span,
+    ) -> Result<JsltValue, RuntimeError> {
+        if let Some(f) = self.registry.get_by_id(id) {
+            f.arity().check(args.len()).map_err(|e| map_stdlib_error(e, f.name(), span))?;
+        }
+        for a in args {
+            let v = self.eval_expr(a)?;
+            if !should_omit_object_field(v.as_json()) {
+                return Ok(v);
+            }
+        }
+        Ok(JsltValue::null())
+    }
+
     /// Evaluates per-element comprehension lets into their slots in the current frame. The slots
     /// are cleared first so no value carries over from the previous element.
     fn eval_iteration_lets(&mut self, lets: &[(usize, BoundExpr)]) -> Result<(), RuntimeError> {

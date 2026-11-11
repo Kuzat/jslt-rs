@@ -41,6 +41,7 @@ Example:
 
 ### fallback(arg1, arg2, ...) -> value
 Returns the first argument that has a value (i.e. not null, not [], not {}).
+Arguments after that value are not evaluated, so `fallback(1, error("x"))` returns 1.
 
 Examples:
 - fallback(.not_existing_key, .another_not_existing, 1) => 1
@@ -284,9 +285,10 @@ Examples:
 - ends-with(null, "ion") => false
 
 ### from-json(string, fallback?) -> value
-Parses string as JSON and returns the value. If string is null returns null.
+Parses string as JSON and returns the value. If string is null, empty or only whitespace,
+returns null. A non-string argument is first converted to its JSON text, so from-json(5) => 5.
 - If fallback is omitted: parse error => error.
-- If fallback is provided: returned on parse error or wrong type.
+- If fallback is provided: returned on parse error.
 
 Examples:
 - from-json("[1,2]") => [1, 2]
@@ -329,6 +331,7 @@ Generates a formatted UUID string with dashes.
 - No parameters: random UUID v4.
 - Two parameters: UUID v1 based on two long values: first is MSB, second is LSB.
 - Both parameters null: NIL UUID 00000000-0000-0000-0000-000000000000
+- One parameter null: that parameter counts as 0.
 
 Examples:
 - uuid() => "b02c39c0-6f8f-4250-97cd-78500af36e27"
@@ -393,6 +396,7 @@ Examples:
 Equivalent to object.key except key is dynamic.
 - If key does not exist and no fallback: returns null.
 - If fallback is provided: returns fallback when key does not exist.
+- If key is null: returns null. A non-string key is converted to its JSON text (1 => "1").
 
 Example:
 - let lookup = { "no": "Norway", "se": "Sweden" }
@@ -516,12 +520,16 @@ Examples:
 
 ### parse-url(url) -> object
 Parses url and returns an object with keys: scheme, userinfo, host, port, path, query, parameters, fragment.
-- parameters is an object mapping parameter names to arrays of values; parameters with no value become [null].
+- A key is only present when that part of the URL is present and non-empty. The exception is
+  fragment, which is present (possibly "") whenever the URL has a `#`.
+- query and parameters are only present when the query is non-empty.
+- parameters is an object mapping parameter names to arrays of values; parameters with no value
+  become [null]. Names and values are URL-decoded (`+` is a space).
 
 Examples:
 - parse-url("http://example.com").scheme => "http"
 - parse-url("http://example.com").host => "example.com"
-- parse-url("http://example.com").path => null
+- parse-url("http://example.com").path => null (the key is absent)
 - parse-url("http://example.com/").path => "/"
 - parse-url("https://www.example.com/?aa=1&aa=2&bb=&cc").query => "aa=1&aa=2&bb=&cc"
 - parse-url("https://www.example.com/?aa=1&aa=2&bb=&cc").parameters.aa => ["1", "2"]

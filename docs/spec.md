@@ -192,25 +192,33 @@ From highest to lowest (all left‑associative unless stated):
 
 ### 5.2 Types & coercion
 
-* Operators are **type‑direct**. No implicit string↔number coercion except where stated.
+These rules match the Java reference implementation.
+
+* Numbers keep their type: integer `op` integer → integer; if either operand is a decimal, the
+  result is a decimal (`2.5 * 4` → `10.0`). `/` gives an integer only when the division is exact
+  (`6 / 3` → `2`, `7 / 2` → `3.5`).
 * `+`
 
-  * number + number → numeric sum
-  * string + string → concatenation
-  * any other combination → **Type error**
-* `-`, `*`, `/`, `%` → numbers only.
-* Comparisons
+  * string + anything, or anything + string → concatenation; a non‑string operand is rendered
+    as JSON (`"a" + null` → `"anull"`, `"a" + [1]` → `"a[1]"`)
+  * array + array → concatenation; object + object → union
+  * object/array + `null`, or `null` + object/array → the object/array
+  * otherwise numeric, as for `-` below
+* `-`, `/`, `%` → numeric. If either operand is `null` the result is `null`; any other
+  non‑number is a **Type error**.
+* `*` → numeric as above, except string * number (either order) repeats the string. The count is
+  truncated to an integer; a negative or non‑number count gives `""`. string * string is a
+  **Type error**.
+* Comparisons `<` `<=` `>` `>=`
 
   * number vs number → numeric compare
-  * string vs string → lexicographic (Unicode code point order)
-  * boolean vs boolean → `==`/`!=` only
-  * mixed types → **Type error** (except equality against `null`, see below)
+  * string vs string → lexicographic
+  * `null` is equal to itself and smaller than any other value (`2 > null` → `true`)
+  * any other combination → **Type error**
 * Equality `==`/`!=`
 
   * Same‑type values use deep equality (arrays/objects compare recursively; object order irrelevant).
   * Comparing with `null`: `x == null` is `true` iff `x` is `null`.
-
-> **OPEN:** If the Java reference performs cross‑type coercions in any of these operators, mirror that. Until confirmed, the Rust spec stays strict to reduce surprise.
 
 ### 5.3 Truthiness
 

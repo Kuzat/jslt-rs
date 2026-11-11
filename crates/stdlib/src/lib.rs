@@ -11,6 +11,8 @@ use regex::Regex;
 use serde_json::{from_str, to_string, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+#[cfg(feature = "regex")]
+use std::sync::Arc;
 use thiserror::Error;
 use value::{JsltValue, Map};
 
@@ -1292,10 +1294,10 @@ impl JsltFunction for TestFn {
             return Ok(JsltValue::bool(false));
         }
 
-        let input = i.as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let input = str_or_stringify(i);
         let pattern = expect_string(r, "test", 2)?;
 
-        let re = Regex::new(pattern)
+        let re = cached_regex(pattern)
             .map_err(|e| StdlibError::Semantic(format!("test: invalid regexp {}", e)))?;
         Ok(JsltValue::bool(re.is_match(&input)))
     }
@@ -1320,10 +1322,10 @@ impl JsltFunction for CaptureFn {
             return Ok(JsltValue::null());
         }
 
-        let input = i.as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let input = str_or_stringify(i);
         let pattern = expect_string(r, "capture", 2)?;
 
-        let re = Regex::new(pattern)
+        let re = cached_regex(pattern)
             .map_err(|e| StdlibError::Semantic(format!("capture: invalid regexp {}", e)))?;
 
         if let Some(caps) = re.captures(&input) {
@@ -1359,10 +1361,10 @@ impl JsltFunction for SplitFn {
         if i.is_null() {
             return Ok(JsltValue::null());
         }
-        let input = i.as_str().map(|s| s.to_string()).unwrap_or_else(|| i.stringify());
+        let input = str_or_stringify(i);
         let pattern = expect_string(r, "split", 2)?;
 
-        let re = Regex::new(pattern)
+        let re = cached_regex(pattern)
             .map_err(|e| StdlibError::Semantic(format!("split: invalid regexp {}", e)))?;
 
         Ok(JsltValue::array(
@@ -1373,6 +1375,40 @@ impl JsltFunction for SplitFn {
 
 /// Splits like Java's `String.split(regex)`: with no match the result is the whole input,
 /// trailing empty strings are dropped, and a zero-width match at the start adds no leading "".
+/// Strings as-is, anything else stringified.
+#[cfg(feature = "regex")]
+fn str_or_stringify(v: &JsltValue) -> std::borrow::Cow<'_, str> {
+    match v.as_str() {
+        Some(s) => std::borrow::Cow::Borrowed(s),
+        None => std::borrow::Cow::Owned(v.stringify()),
+    }
+}
+
+#[cfg(feature = "regex")]
+const REGEX_CACHE_CAPACITY: usize = 256;
+
+/// Compiles `pattern`, reusing earlier compilations. The cache is cleared when full.
+///
+/// Shared through `Arc`: cloning a `Regex` would give it a new, cold match cache.
+#[cfg(feature = "regex")]
+fn cached_regex(pattern: &str) -> Result<Arc<Regex>, regex::Error> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<Regex>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(re) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(pattern) {
+        return Ok(re.clone());
+    }
+    let re = Arc::new(Regex::new(pattern)?);
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if map.len() >= REGEX_CACHE_CAPACITY {
+        map.clear();
+    }
+    map.insert(pattern.to_string(), re.clone());
+    Ok(re)
+}
+
 #[cfg(feature = "regex")]
 fn java_split<'a>(re: &Regex, input: &'a str) -> Vec<&'a str> {
     let mut parts = Vec::new();
@@ -1411,11 +1447,11 @@ impl JsltFunction for ReplaceFn {
             return Ok(JsltValue::null());
         }
 
-        let value = args[0].as_str().map(|s| s.to_string()).unwrap_or_else(|| args[0].stringify());
+        let value = str_or_stringify(&args[0]);
         let pattern = expect_string(&args[1], "replace", 2)?;
         let out = expect_string(&args[2], "replace", 3)?;
 
-        let re = Regex::new(pattern)
+        let re = cached_regex(pattern)
             .map_err(|e| StdlibError::Semantic(format!("replace: invalid regexp {}", e)))?;
 
         // Spec: error if the regexp EVER matches the empty string
@@ -2065,5 +2101,15 @@ mod tests {
         let out = SumFn.call(&[arr]).unwrap();
         assert_eq!(out.to_json(), json!(3.0));
         assert!(out.as_i64().is_none());
+    }
+
+    #[cfg(feature = "regex")]
+    #[test]
+    fn regex_cache_reuses_compiled_patterns() {
+        let a = cached_regex("^a+b$").unwrap();
+        let b = cached_regex("^a+b$").unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        assert!(a.is_match("aab"));
+        assert!(cached_regex("(").is_err());
     }
 }

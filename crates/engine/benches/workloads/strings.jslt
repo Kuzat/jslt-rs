@@ -1,0 +1,11 @@
+// Regex and string functions.
+[for (.events) {
+  "valid": test(.user.email, "^[A-Za-z0-9.]+@[A-Za-z0-9.]+$"),
+  "parts": capture(.id, "evt-(?<num>[0-9]+)"),
+  "masked": replace(.user.email, "[0-9]", "#"),
+  "words": split(.user.name, " "),
+  "slug": lowercase(join(split(trim(.user.name), " "), "-")),
+  "json": to-json(.items[0]),
+  "starts": starts-with(.type, "pur"),
+  "hash": sha256-hex(.id)
+}]

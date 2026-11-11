@@ -90,3 +90,12 @@ fn bad_object_keys_are_errors() {
         assert!(err.contains(msg), "{src}: {err}");
     }
 }
+
+#[test]
+fn matcher_keeps_empty_and_null_values() {
+    let input = json!({"a": null, "b": [], "c": {}, "d": 1});
+    assert_eq!(
+        run_jslt("{*: if (. == 1) null else .}", input),
+        Ok(json!({"a": null, "b": [], "c": {}, "d": null}))
+    );
+}

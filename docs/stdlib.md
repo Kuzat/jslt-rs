@@ -228,6 +228,7 @@ Output:
 
 ### split(input, regexp) -> array
 Splits the input string by regexp, returns array of strings. If input is null returns null.
+- Like Java's `String.split`, trailing empty strings are dropped.
 
 Examples:
 - split("1,2,3,4,5", ",") => ["1", "2", "3", "4", "5"]
@@ -235,6 +236,7 @@ Examples:
 - split(null, ";") => null
 - split(",2", ",") => ["", "2"]
 - split("2,", ",") => ["2"]
+- split(",,", ",") => []
 
 ### join(array, separator) -> string
 Concatenates array elements (stringified via string()) with separator between. If array is null returns null.

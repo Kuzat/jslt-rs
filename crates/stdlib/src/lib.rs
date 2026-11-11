@@ -1369,11 +1369,33 @@ impl JsltFunction for SplitFn {
         let re = Regex::new(pattern)
             .map_err(|e| StdlibError::Semantic(format!("split: invalid regexp {}", e)))?;
 
-        let parts: Vec<JsltValue> =
-            re.split(&input).map(|s| JsltValue::string(s.to_string())).collect();
-
-        Ok(JsltValue::array(parts))
+        Ok(JsltValue::array(
+            java_split(&re, &input).into_iter().map(|s| JsltValue::string(s.to_string())).collect(),
+        ))
     }
+}
+
+/// Splits like Java's `String.split(regex)`: with no match the result is the whole input,
+/// trailing empty strings are dropped, and a zero-width match at the start adds no leading "".
+#[cfg(feature = "regex")]
+fn java_split<'a>(re: &Regex, input: &'a str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let mut last = 0;
+    for m in re.find_iter(input) {
+        if m.end() == 0 {
+            continue;
+        }
+        parts.push(&input[last..m.start()]);
+        last = m.end();
+    }
+    if parts.is_empty() {
+        return vec![input];
+    }
+    parts.push(&input[last..]);
+    while parts.last() == Some(&"") {
+        parts.pop();
+    }
+    parts
 }
 
 #[cfg(feature = "regex")]

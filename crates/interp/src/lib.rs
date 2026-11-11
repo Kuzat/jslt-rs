@@ -1199,9 +1199,6 @@ impl<'p> Evaluator<'p> {
                             }
                             self.current_frame_mut().this_val = JsltValue::from_json(v.clone());
                             let mapped = self.eval_expr(value)?.into_json();
-                            if should_omit_object_field(&mapped) {
-                                continue;
-                            }
                             obj.insert(k.clone(), mapped);
                         }
                         self.current_frame_mut().this_val = saved_this;

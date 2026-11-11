@@ -1,0 +1,9 @@
+// Building and iterating a wide object.
+let wide = {for (.events) .id : .amount}
+
+{
+  "size": size($wide),
+  "keys": size([for ($wide) .key]),
+  "big": {for ($wide) .key : .value * 2 if (.value > 50)},
+  "lookup": [for (.events) get-key($wide, .id)]
+}

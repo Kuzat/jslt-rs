@@ -1,0 +1,18 @@
+// Typical record mapping: field access, string functions, nested comprehensions.
+def line-total(item)
+  $item.qty * $item.price
+
+{
+  "count": size(.events),
+  "events": [for (.events) {
+    "id": .id,
+    "kind": uppercase(.type),
+    "email": lowercase(.user.email),
+    "domain": split(lowercase(.user.email), "@")[1],
+    "total": round(sum([for (.items) line-total(.)]) * 100) / 100,
+    "skus": join([for (.items) .sku], ","),
+    "big": .amount > 50,
+    "tags": [for (.user.tags) "t:" + .],
+    "attrs": {for (.attrs) "attr_" + .key : .value}
+  }]
+}

@@ -30,3 +30,14 @@ fn empty_sequences_give_empty_results() {
     assert_eq!(run_jslt("[for ([]) .]", json!(null)), Ok(json!([])));
     assert_eq!(run_jslt("{for ({}) .key : .value}", json!(null)), Ok(json!({})));
 }
+
+#[test]
+fn objects_keep_insertion_order() {
+    let input: Value = serde_json::from_str(r#"{"z": 1, "a": 2}"#).unwrap();
+    let out = run_jslt("[for (.) .key]", input.clone()).unwrap();
+    assert_eq!(out, json!(["z", "a"]));
+    for src in ["{\"m\": 0, * : .}", "{* : ., \"m\": 0}"] {
+        let out = run_jslt(src, input.clone()).unwrap();
+        assert_eq!(serde_json::to_string(&out).unwrap(), r#"{"m":0,"z":1,"a":2}"#, "{src}");
+    }
+}

@@ -27,6 +27,9 @@ JSLT operates on a JSON‑like value lattice:
 * **string** — immutable, UTF‑8 text; indices count **Unicode scalar values** (code points), not bytes.
 * **array** — ordered list of values.
 * **object** — mapping from **string keys** to values. Duplicate keys in literals: **last wins**.
+  Objects keep their keys in insertion order: input objects keep the order they were parsed in,
+  and a template adds its keys in the order it writes them, followed by any keys copied by an
+  object matcher. Overwriting a key keeps its original position.
 
 > **OPEN:** Confirm deep‑equality nuances for numbers (e.g., `-0` vs `0`), and whether the reference ever exposes NaN/Infinity. Proposed: disallow NaN/Inf; any operation yielding them is a runtime error.
 

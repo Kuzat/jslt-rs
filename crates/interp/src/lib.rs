@@ -1098,7 +1098,10 @@ impl<'p> Evaluator<'p> {
             })
             .collect();
 
-        for entry in entries {
+        // Explicit pairs come first, so matcher-copied keys follow them in the output.
+        let (pairs, matchers): (Vec<_>, Vec<_>) =
+            entries.iter().partition(|e| matches!(e, BoundObjectEntry::Pair(..)));
+        for entry in pairs.into_iter().chain(matchers) {
             match entry {
                 BoundObjectEntry::Pair(kexpr, vexpr) => {
                     let key = self.eval_expr(kexpr)?;

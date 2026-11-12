@@ -6,6 +6,7 @@ use ast::{Program, Span};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
 use stdlib::Registry;
 use thiserror::Error;
 use value::JsltValue;
@@ -334,7 +335,7 @@ impl<'p> Evaluator<'p> {
                 Ok(JsltValue::number_f64(*n))
             }
             NumberInt(n, _) => Ok(JsltValue::number_i64(*n)),
-            String(s, _) => Ok(JsltValue::string(s.as_str())),
+            String(s, _) => Ok(JsltValue::String(s.clone())),
             LetBlock(bindings, body, _) => {
                 // Create a temporary frame cloning current locals to support shadowing and new lets
                 let cur = self.current_frame().clone();
@@ -642,8 +643,8 @@ impl<'p> Evaluator<'p> {
                             };
                             if pass {
                                 let k = self.eval_expr(key)?;
-                                let kstr = match &k {
-                                    JsltValue::String(s) => s.to_string(),
+                                let kstr = match k {
+                                    JsltValue::String(s) => s,
                                     _ => {
                                         return Err(RuntimeError::TypeError {
                                             msg: "object key must be a  string".into(),
@@ -671,8 +672,8 @@ impl<'p> Evaluator<'p> {
                             };
                             if pass {
                                 let k = self.eval_expr(key)?;
-                                let kstr = match &k {
-                                    JsltValue::String(s) => s.to_string(),
+                                let kstr = match k {
+                                    JsltValue::String(s) => s,
                                     _ => {
                                         return Err(RuntimeError::TypeError {
                                             msg: "object key must be a  string".into(),
@@ -1125,8 +1126,8 @@ impl<'p> Evaluator<'p> {
             .into_iter()
             .map(|(k, vs)| {
                 let mut group = value::map_with_capacity(2);
-                group.insert("key".to_string(), k);
-                group.insert("values".to_string(), JsltValue::array(vs));
+                group.insert("key".into(), k);
+                group.insert("values".into(), JsltValue::array(vs));
                 JsltValue::object(group)
             })
             .collect();
@@ -1148,11 +1149,11 @@ impl<'p> Evaluator<'p> {
         let mut obj = Map::default();
 
         // Wildcard copies should skip explicitly-defined keys.
-        let explicit_keys: std::collections::HashSet<std::string::String> = entries
+        let explicit_keys: std::collections::HashSet<&str> = entries
             .iter()
             .filter_map(|entry| match entry {
                 BoundObjectEntry::Pair { key: BoundExpr::String(s, _), dynamic: false, .. } => {
-                    Some(s.clone())
+                    Some(&**s)
                 }
                 _ => None,
             })
@@ -1173,8 +1174,8 @@ impl<'p> Evaluator<'p> {
                     }
 
                     let key = self.eval_expr(kexpr)?;
-                    let s = match &key {
-                        JsltValue::String(s) => s.to_string(),
+                    let s = match key {
+                        JsltValue::String(s) => s,
                         _ => {
                             return Err(RuntimeError::TypeError {
                                 msg: "Object key must be string".into(),
@@ -1201,7 +1202,7 @@ impl<'p> Evaluator<'p> {
                             exclude_keys.iter().map(std::string::String::as_str).collect();
                         let saved_this = self.current_frame().this_val.clone();
                         for (k, v) in m.iter() {
-                            if explicit_keys.contains(k) || excluded.contains(k.as_str()) {
+                            if explicit_keys.contains(&**k) || excluded.contains(&**k) {
                                 continue;
                             }
                             self.current_frame_mut().this_val = v.clone();
@@ -1238,10 +1239,12 @@ fn should_omit_object_field(value: &JsltValue) -> bool {
 }
 
 /// The `{"key": k, "value": v}` object that iterating over an object binds to `.`.
-fn key_value_pair(k: &str, v: &JsltValue) -> JsltValue {
+fn key_value_pair(k: &Arc<str>, v: &JsltValue) -> JsltValue {
+    static NAMES: OnceLock<[Arc<str>; 2]> = OnceLock::new();
+    let [key_name, value_name] = NAMES.get_or_init(|| ["key".into(), "value".into()]);
     let mut m = value::map_with_capacity(2);
-    m.insert("key".to_string(), JsltValue::string(k));
-    m.insert("value".to_string(), v.clone());
+    m.insert(key_name.clone(), JsltValue::String(k.clone()));
+    m.insert(value_name.clone(), v.clone());
     JsltValue::object(m)
 }
 

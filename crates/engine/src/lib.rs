@@ -1,12 +1,15 @@
 use ast::Program;
 use interp::binder::{Binder, BoundProgram, EXPERIMENTAL_MODULE_URI};
-use interp::{apply_with_modules, apply_with_variables, binder, EvalConfig, RuntimeError};
+use interp::{
+    apply_value, apply_with_modules, apply_with_variables, binder, EvalConfig, RuntimeError,
+};
 use parser::{parse_import_header, Parser};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
+pub use value::JsltValue;
 
 #[derive(Debug, Clone)]
 pub struct ModuleDiagnostic {
@@ -179,6 +182,27 @@ impl CompiledProgram {
         cfg: Option<EvalConfig>,
     ) -> Result<Value, EngineError> {
         Ok(apply_with_variables(&self.bound, &self.modules, input, variables, cfg)?)
+    }
+
+    /// Like [`apply`](Self::apply), on a [`JsltValue`]. Parts of the input that reach the
+    /// output are shared, not copied. Parse input straight into a `JsltValue` with serde
+    /// (for example `serde_json::from_str::<JsltValue>`) to skip `serde_json::Value`.
+    pub fn apply_value(
+        &self,
+        input: &JsltValue,
+        cfg: Option<EvalConfig>,
+    ) -> Result<JsltValue, EngineError> {
+        Ok(apply_value(&self.bound, &self.modules, input.clone(), HashMap::new(), cfg)?)
+    }
+
+    /// Like [`apply_with_variables`](Self::apply_with_variables), on [`JsltValue`]s.
+    pub fn apply_value_with_variables(
+        &self,
+        input: &JsltValue,
+        variables: HashMap<String, JsltValue>,
+        cfg: Option<EvalConfig>,
+    ) -> Result<JsltValue, EngineError> {
+        Ok(apply_value(&self.bound, &self.modules, input.clone(), variables, cfg)?)
     }
 
     /// Variables the main program uses without declaring them.

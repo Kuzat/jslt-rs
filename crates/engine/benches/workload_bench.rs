@@ -16,11 +16,23 @@ fn bench_apply(c: &mut Criterion) {
     g.sampling_mode(SamplingMode::Flat).sample_size(20).measurement_time(Duration::from_secs(5));
     for w in workloads::all() {
         let compiled = engine::compile(w.program).expect("compile workload");
-        let input = (w.input)();
+        let input = engine::JsltValue::from_json((w.input)());
         g.bench_function(w.name, |b| {
-            b.iter(|| hint::black_box(compiled.apply(hint::black_box(&input), None).unwrap()))
+            b.iter(|| hint::black_box(compiled.apply_value(hint::black_box(&input), None).unwrap()))
         });
     }
+    g.finish();
+}
+
+/// `identity` through `apply`, which converts from and to `serde_json::Value`.
+fn bench_apply_json(c: &mut Criterion) {
+    let mut g = c.benchmark_group("apply_json");
+    let w = workloads::all().into_iter().find(|w| w.name == "identity").expect("identity");
+    let compiled = engine::compile(w.program).expect("compile workload");
+    let input = (w.input)();
+    g.bench_function(w.name, |b| {
+        b.iter(|| hint::black_box(compiled.apply(hint::black_box(&input), None).unwrap()))
+    });
     g.finish();
 }
 
@@ -34,5 +46,5 @@ fn bench_compile(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_apply, bench_compile);
+criterion_group!(benches, bench_apply, bench_apply_json, bench_compile);
 criterion_main!(benches);

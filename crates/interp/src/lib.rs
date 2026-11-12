@@ -303,7 +303,7 @@ impl<'p> Evaluator<'p> {
         self.closures.get(id.0).and_then(|c| c.as_ref())
     }
 
-    fn eval_program(mut self, input: JsltValue) -> Result<Value, RuntimeError> {
+    fn eval_program(mut self, input: JsltValue) -> Result<JsltValue, RuntimeError> {
         self.bump_steps()?;
 
         // Top-Level frame with lets as locals; '.' is input
@@ -315,7 +315,7 @@ impl<'p> Evaluator<'p> {
         self.eval_top_lets(prog)?;
 
         // Evaluate body with '.' = input
-        let result = self.eval_expr(&self.prog.body)?.into_json();
+        let result = self.eval_expr(&self.prog.body)?;
 
         self.pop_frame();
         Ok(result)
@@ -1253,7 +1253,7 @@ pub fn apply(
 ) -> Result<Value, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let ev = Evaluator::new(bound, cfg);
-    ev.eval_program(JsltValue::from_json_ref(input))
+    ev.eval_program(JsltValue::from_json_ref(input)).map(JsltValue::into_json)
 }
 
 pub fn apply_with_modules(
@@ -1274,19 +1274,31 @@ pub fn apply_with_variables(
     variables: &HashMap<String, Value>,
     cfg: Option<EvalConfig>,
 ) -> Result<Value, RuntimeError> {
+    let variables =
+        variables.iter().map(|(k, v)| (k.clone(), JsltValue::from_json_ref(v))).collect();
+    apply_value(bound, modules, JsltValue::from_json_ref(input), variables, cfg)
+        .map(JsltValue::into_json)
+}
+
+/// Like [`apply_with_variables`], on [`JsltValue`]s, so no JSON conversion is needed.
+pub fn apply_value(
+    bound: &BoundProgram,
+    modules: &HashMap<String, (BoundProgram, bool)>,
+    input: JsltValue,
+    variables: HashMap<String, JsltValue>,
+    cfg: Option<EvalConfig>,
+) -> Result<JsltValue, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let mut ev = Evaluator::new(bound, cfg);
-    ev.variables =
-        variables.iter().map(|(k, v)| (k.clone(), JsltValue::from_json_ref(v))).collect();
+    ev.variables = variables;
 
-    let input_val = JsltValue::from_json_ref(input);
     let mut runtimes = HashMap::with_capacity(modules.len());
     for (key, (child, _callable)) in modules {
-        runtimes.insert(key.clone(), ev.init_module_runtime(child, &input_val)?);
+        runtimes.insert(key.clone(), ev.init_module_runtime(child, &input)?);
     }
     ev.modules = Rc::new(runtimes);
 
-    ev.eval_program(input_val)
+    ev.eval_program(input)
 }
 
 fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> RuntimeError {

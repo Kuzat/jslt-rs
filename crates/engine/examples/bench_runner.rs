@@ -1,5 +1,6 @@
 //! Times the benchmark workloads in-process with the same method as
 //! `conformance/scripts/JsltBench.java`, so the numbers can be compared with Java JSLT.
+//! Like Java, which applies to a parsed `JsonNode`, it applies to a parsed `JsltValue`.
 //!
 //! Usage: bench_runner [--dump DIR] [--out DIR] [--warmup-ms N] [--measure-ms N] [NAME...]
 //!   --dump DIR  write `<name>.jslt` and `<name>.json` for each workload, then exit
@@ -50,8 +51,8 @@ fn main() {
 
     for w in &selected {
         let compiled = engine::compile(w.program).expect("compile workload");
-        let input = (w.input)();
-        let run = || compiled.apply(hint::black_box(&input), None).expect("apply workload");
+        let input = engine::JsltValue::from_json((w.input)());
+        let run = || compiled.apply_value(hint::black_box(&input), None).expect("apply workload");
 
         if let Some(dir) = &out {
             std::fs::create_dir_all(dir).expect("create out dir");

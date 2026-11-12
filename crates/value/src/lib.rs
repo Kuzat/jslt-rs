@@ -371,8 +371,69 @@ impl<'de> Deserialize<'de> for JsltValue {
     where
         D: Deserializer<'de>,
     {
-        let v = Value::deserialize(deserializer)?;
-        Ok(JsltValue::from_json(v))
+        deserializer.deserialize_any(JsltValueVisitor)
+    }
+}
+
+struct JsltValueVisitor;
+
+impl<'de> serde::de::Visitor<'de> for JsltValueVisitor {
+    type Value = JsltValue;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("any JSON value")
+    }
+
+    fn visit_unit<E>(self) -> Result<JsltValue, E> {
+        Ok(JsltValue::Null)
+    }
+
+    fn visit_none<E>(self) -> Result<JsltValue, E> {
+        Ok(JsltValue::Null)
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<JsltValue, D::Error> {
+        JsltValue::deserialize(d)
+    }
+
+    fn visit_bool<E>(self, b: bool) -> Result<JsltValue, E> {
+        Ok(JsltValue::Bool(b))
+    }
+
+    fn visit_i64<E>(self, n: i64) -> Result<JsltValue, E> {
+        Ok(JsltValue::Number(n.into()))
+    }
+
+    fn visit_u64<E>(self, n: u64) -> Result<JsltValue, E> {
+        Ok(JsltValue::Number(n.into()))
+    }
+
+    fn visit_f64<E>(self, n: f64) -> Result<JsltValue, E> {
+        Ok(Number::from_f64(n).map_or(JsltValue::Null, JsltValue::Number))
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<JsltValue, E> {
+        Ok(JsltValue::String(s.into()))
+    }
+
+    fn visit_string<E>(self, s: String) -> Result<JsltValue, E> {
+        Ok(JsltValue::String(s.into()))
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<JsltValue, A::Error> {
+        let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(4096));
+        while let Some(v) = seq.next_element()? {
+            items.push(v);
+        }
+        Ok(JsltValue::array(items))
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut access: A) -> Result<JsltValue, A::Error> {
+        let mut map = map_with_capacity(access.size_hint().unwrap_or(0).min(4096));
+        while let Some((k, v)) = access.next_entry::<String, JsltValue>()? {
+            map.insert(k, v);
+        }
+        Ok(JsltValue::object(map))
     }
 }
 
@@ -442,6 +503,16 @@ impl From<JsltValue> for Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn deserialize_matches_serde_json_value() {
+        let text = r#"{"b":1,"a":[true,null,-3,18446744073709551615,1.5e300,0.1,"x\u00e9"],
+            "o":{"k":{}},"b":2,"e":[]}"#;
+        let direct: JsltValue = serde_json::from_str(text).unwrap();
+        let via_value = JsltValue::from_json(serde_json::from_str::<Value>(text).unwrap());
+        assert_eq!(direct.to_json(), via_value.to_json());
+        assert_eq!(direct.to_string(), via_value.to_string());
+    }
 
     #[test]
     fn as_f64_checked_rejects_nan_inf() {

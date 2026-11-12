@@ -37,7 +37,10 @@ conformance/scripts/bench_compare.sh fib queens # only some workloads
 
 The script runs each workload with `bench_runner` (`crates/engine/examples/bench_runner.rs`) and
 with `JsltBench` (`conformance/scripts/JsltBench.java`) on a warm JVM. Both use the same method:
-a warmup, then batches of about 20 ms, reporting the median time per call. The script also checks
+a warmup, then batches of about 20 ms, reporting the median time per call. Java applies to a
+parsed `JsonNode`, and Rust applies to a parsed `JsltValue` with `CompiledProgram::apply_value`.
+`apply` takes and returns `serde_json::Value` and converts both ways. For the 1 000-event input
+that adds about 3 ms per call (criterion group `apply_json`). The script also checks
 that both give the same output. It writes `report.md`, `rust.tsv` and `java.tsv` to
 `target/bench-compare/`. It needs a JDK and `jq`, and builds the Java JSLT jar if it is missing.
 
@@ -76,14 +79,14 @@ outputs match.
 
 | Workload | Rust (median) | Java (median) | Rust / Java |
 |---|---:|---:|---:|
-| transform | 7.83 ms | 1.22 ms | 6.45× |
-| matcher | 5.13 ms | 342.29 µs | 14.99× |
-| aggregate | 2.04 ms | 228.69 µs | 8.90× |
-| strings | 6.24 ms | 1.47 ms | 4.25× |
-| time | 4.77 ms | 2.50 ms | 1.91× |
-| large_object | 2.08 ms | 163.18 µs | 12.77× |
-| identity | 3.10 ms | 8 ns | 388015.62× |
-| numeric | 4.97 ms | 3.59 ms | 1.38× |
-| fib | 1.73 ms | 1.42 ms | 1.22× |
-| queens | 870.75 ms | 698.39 ms | 1.25× |
-| cdp | 7.09 µs | 835 ns | 8.49× |
+| transform | 5.50 ms | 1.22 ms | 4.51× |
+| matcher | 1.99 ms | 336.99 µs | 5.91× |
+| aggregate | 455.60 µs | 219.71 µs | 2.07× |
+| strings | 4.12 ms | 1.43 ms | 2.88× |
+| time | 3.09 ms | 2.54 ms | 1.22× |
+| large_object | 552.70 µs | 158.27 µs | 3.49× |
+| identity | 178 ns | 8 ns | 22.25× |
+| numeric | 5.12 ms | 3.56 ms | 1.44× |
+| fib | 1.78 ms | 1.20 ms | 1.49× |
+| queens | 886.65 ms | 686.05 ms | 1.29× |
+| cdp | 4.33 µs | 830 ns | 5.21× |

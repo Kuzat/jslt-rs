@@ -1,7 +1,6 @@
 use crate::args::{Cli, Command, RunArgs};
 use clap::Parser;
-use engine::compile_with_import_path;
-use serde_json::Value;
+use engine::{compile_with_import_path, JsltValue};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -50,7 +49,7 @@ fn run_command(args: RunArgs) -> Result<(), CliError> {
     let input = read_input_json(args.input.as_deref())?;
 
     let compiled = compile_with_import_path(&program_src, &program_path_ctx)?;
-    let out = compiled.apply_with_variables(&input, &variables, None)?;
+    let out = compiled.apply_value_with_variables(&input, variables, None)?;
 
     if args.pretty {
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -61,7 +60,7 @@ fn run_command(args: RunArgs) -> Result<(), CliError> {
 }
 
 /// Parses `NAME=JSON` pairs from `--var`.
-fn parse_vars(vars: &[String]) -> Result<HashMap<String, Value>, CliError> {
+fn parse_vars(vars: &[String]) -> Result<HashMap<String, JsltValue>, CliError> {
     vars.iter()
         .map(|v| {
             let (name, json) = v
@@ -130,49 +129,14 @@ fn read_program_source(
     Err(CliError::Usage("either --program <file|-> or --eval <expr> must be provided".into()))
 }
 
-/// Reads a JSON input either from a file or standard input and parses it into a `serde_json::Value`.
-///
-/// # Arguments
-///
-/// * `path` - An `Option<&str>` specifying the source of the JSON input:
-///   - `Some("-")`: Reads JSON from the standard input.
-///   - `Some(p)`: Reads JSON from a file specified by the path `p`.
-///   - `None`: Reads JSON from the standard input.
-///
-/// # Returns
-///
-/// A `Result<Value, CliError>` where:
-/// * `Value` is the successfully parsed JSON as a `serde_json::Value`.
-/// * `CliError` indicates an error occurred during reading or parsing the input.
-///
-/// # Errors
-///
-/// This function can return an error in the following cases:
-/// * If the file specified by `path` cannot be found, accessed, or read.
-/// * If reading from the standard input fails.
-/// * If the content read is not a valid JSON string.
-///
-/// # Examples
-///
-/// ```rust
-/// # use serde_json::Value;
-/// # use your_crate::errors::CliError;
-/// # fn example() -> Result<(), CliError> {
-/// let json_data = read_input_json(Some("example.json"))?;
-/// println!("Parsed JSON: {}", json_data);
-///
-/// let json_data_from_stdin = read_input_json(Some("-"))?;
-/// println!("Parsed JSON from stdin: {}", json_data_from_stdin);
-/// # Ok(())
-/// # }
-/// ```
-fn read_input_json(path: Option<&str>) -> Result<Value, CliError> {
+/// Reads JSON input from a file, or from stdin when `path` is `None` or `-`.
+fn read_input_json(path: Option<&str>) -> Result<JsltValue, CliError> {
     let s = match path {
         Some("-") => read_stdin_to_string()?,
         Some(p) => fs::read_to_string(p)?,
         None => read_stdin_to_string()?,
     };
-    serde_json::from_str::<Value>(&s).map_err(CliError::from)
+    serde_json::from_str::<JsltValue>(&s).map_err(CliError::from)
 }
 
 /// Reads the entire standard input into a `String`.

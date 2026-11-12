@@ -1,5 +1,4 @@
 use serde::Serialize;
-use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -30,7 +29,7 @@ impl Program {
     pub fn apply(&self, input: JsValue) -> Result<JsValue, JsValue> {
         // use web_sys::console;
 
-        let v: Value = serde_wasm_bindgen::from_value(input)
+        let v: engine::JsltValue = serde_wasm_bindgen::from_value(input)
             .map_err(|e| JsValue::from_str(&format!("Input JSON parse error: {}", e)))?;
 
         // console::log_1(&JsValue::from_str(&format!("input: {:?}", v)));
@@ -38,7 +37,7 @@ impl Program {
         // Optional: allow passing an eval config later; for now use default.
         let out = self
             .inner
-            .apply(&v, None)
+            .apply_value(&v, None)
             .map_err(|e| JsValue::from_str(&format!("Program error: {}", e)))?;
 
         // console::log_1(&JsValue::from_str(&format!("output: {:?}", out)));

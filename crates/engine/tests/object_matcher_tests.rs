@@ -99,3 +99,10 @@ fn matcher_keeps_empty_and_null_values() {
         Ok(json!({"a": null, "b": [], "c": {}, "d": null}))
     );
 }
+
+#[test]
+fn matcher_skips_explicit_and_excluded_keys() {
+    let src = r#"{"a": null, "c": {"d": null, * : .}, * - b : .}"#;
+    let input = json!({"a": 1, "b": 2, "c": {"d": 3, "e": 4}, "f": 5});
+    assert_eq!(run_jslt(src, input), Ok(json!({"c": {"e": 4}, "f": 5})));
+}

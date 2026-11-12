@@ -182,12 +182,16 @@ pub enum BoundExpr {
     },
 }
 
+/// A set of object keys.
+pub type KeySet = std::collections::HashSet<String, foldhash::fast::RandomState>;
+
 #[derive(Debug, Clone)]
 pub enum BoundObjectEntry {
     /// `key : value`; `dynamic` is set for computed keys.
     Pair { key: BoundExpr, value: BoundExpr, dynamic: bool },
-    /// `* : value`, matching the fields of `.` followed by the keys in `path`.
-    Wildcard { value: BoundExpr, exclude_keys: Vec<String>, path: Vec<String> },
+    /// `* : value`, matching the fields of `.` followed by the keys in `path`. `skip_keys`
+    /// holds the excluded keys and the literal's static keys, which the matcher does not copy.
+    Wildcard { value: BoundExpr, skip_keys: KeySet, path: Vec<String> },
 }
 
 /// Where an object matcher takes its fields from, following Java's rules.
@@ -1026,7 +1030,7 @@ impl Binder {
                                 ast::ObjectKey::Expr(_) => None,
                             };
                             if let Some((k, span)) = &static_key {
-                                if !has_dynamic_keys && !static_keys.insert(k.clone()) {
+                                if !static_keys.insert(k.clone()) && !has_dynamic_keys {
                                     self.errors.push(BindError::DuplicateKey {
                                         key: k.clone(),
                                         span: *span,
@@ -1079,12 +1083,19 @@ impl Binder {
                             });
                             out_entries.push(BoundObjectEntry::Wildcard {
                                 value,
-                                exclude_keys: exclude_keys.clone(),
+                                skip_keys: exclude_keys.iter().cloned().collect(),
                                 path,
                             });
                         }
                     }
                 }
+                for entry in &mut out_entries {
+                    if let BoundObjectEntry::Wildcard { skip_keys, .. } = entry {
+                        skip_keys.extend(static_keys.iter().cloned());
+                    }
+                }
+                // Explicit pairs come first, so matcher-copied keys follow them in the output.
+                out_entries.sort_by_key(|e| matches!(e, BoundObjectEntry::Wildcard { .. }));
                 Ok(BoundExpr::ObjectLiteral(out_entries, *span))
             }
 

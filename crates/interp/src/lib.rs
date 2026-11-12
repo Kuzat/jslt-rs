@@ -1146,26 +1146,11 @@ impl<'p> Evaluator<'p> {
         &mut self,
         entries: &[BoundObjectEntry],
     ) -> Result<JsltValue, RuntimeError> {
-        let mut obj = Map::default();
-
-        // Wildcard copies should skip explicitly-defined keys.
-        let explicit_keys: std::collections::HashSet<&str> = entries
-            .iter()
-            .filter_map(|entry| match entry {
-                BoundObjectEntry::Pair { key: BoundExpr::String(s, _), dynamic: false, .. } => {
-                    Some(&**s)
-                }
-                _ => None,
-            })
-            .collect();
-
+        let mut obj = value::map_with_capacity(entries.len());
         let has_dynamic_keys =
             entries.iter().any(|e| matches!(e, BoundObjectEntry::Pair { dynamic: true, .. }));
 
-        // Explicit pairs come first, so matcher-copied keys follow them in the output.
-        let (pairs, matchers): (Vec<_>, Vec<_>) =
-            entries.iter().partition(|e| matches!(e, BoundObjectEntry::Pair { .. }));
-        for entry in pairs.into_iter().chain(matchers) {
+        for entry in entries {
             match entry {
                 BoundObjectEntry::Pair { key: kexpr, value: vexpr, .. } => {
                     let val_json = self.eval_expr(vexpr)?;
@@ -1191,25 +1176,23 @@ impl<'p> Evaluator<'p> {
                     }
                     obj.insert(s, val_json);
                 }
-                BoundObjectEntry::Wildcard { value, exclude_keys, path } => {
+                BoundObjectEntry::Wildcard { value, skip_keys, path } => {
                     let this = self.current_frame().this_val.clone();
                     let mut source = Some(&this);
                     for key in path {
                         source = source.and_then(|v| v.get(key.as_str()));
                     }
-                    if let Some(JsltValue::Object(m)) = source.cloned() {
-                        let excluded: std::collections::HashSet<&str> =
-                            exclude_keys.iter().map(std::string::String::as_str).collect();
-                        let saved_this = self.current_frame().this_val.clone();
+                    if let Some(JsltValue::Object(m)) = source {
+                        obj.reserve(m.len());
                         for (k, v) in m.iter() {
-                            if explicit_keys.contains(&**k) || excluded.contains(&**k) {
+                            if skip_keys.contains(&**k) {
                                 continue;
                             }
                             self.current_frame_mut().this_val = v.clone();
                             let mapped = self.eval_expr(value)?;
                             obj.insert(k.clone(), mapped);
                         }
-                        self.current_frame_mut().this_val = saved_this;
+                        self.current_frame_mut().this_val = this.clone();
                     }
                 }
             }

@@ -141,7 +141,7 @@ impl<'p> Evaluator<'p> {
             builtin_count,
             fallback_id,
             modules: Rc::default(),
-            variables: HashMap::new(),
+            variables: HashMap::default(),
         }
     }
 
@@ -202,7 +202,7 @@ impl<'p> Evaluator<'p> {
         child: &'p BoundProgram,
         input: &JsltValue,
     ) -> Result<ModuleRuntime<'p>, RuntimeError> {
-        let mut sub_modules = HashMap::new();
+        let mut sub_modules = HashMap::default();
         for (k, (sub_prog, _callable)) in &child.imported_modules {
             sub_modules.insert(k.clone(), self.init_module_runtime(sub_prog, input)?);
         }
@@ -623,7 +623,7 @@ impl<'p> Evaluator<'p> {
                         });
                     }
                 }
-                let mut out = Map::new();
+                let mut out = Map::default();
                 let caller_frame = self.current_frame().clone();
                 self.push_frame(Frame {
                     locals: caller_frame.locals.clone(),
@@ -1107,11 +1107,12 @@ impl<'p> Evaluator<'p> {
         };
 
         let mut groups: Vec<(JsltValue, Vec<JsltValue>)> = Vec::new();
-        let mut index: HashMap<u64, Vec<usize>> = HashMap::new();
+        let hash_state = foldhash::fast::RandomState::default();
+        let mut index: HashMap<u64, Vec<usize>, foldhash::fast::RandomState> = HashMap::default();
         for elem in elems {
             let k = self.eval_piped(elem.clone(), key)?;
             let v = self.eval_piped(elem, value)?;
-            let bucket = index.entry(json_hash(&k)).or_default();
+            let bucket = index.entry(json_hash(&k, &hash_state)).or_default();
             match bucket.iter().find(|&&ix| groups[ix].0 == k) {
                 Some(&ix) => groups[ix].1.push(v),
                 None => {
@@ -1123,7 +1124,7 @@ impl<'p> Evaluator<'p> {
         let out = groups
             .into_iter()
             .map(|(k, vs)| {
-                let mut group = Map::with_capacity(2);
+                let mut group = value::map_with_capacity(2);
                 group.insert("key".to_string(), k);
                 group.insert("values".to_string(), JsltValue::array(vs));
                 JsltValue::object(group)
@@ -1144,7 +1145,7 @@ impl<'p> Evaluator<'p> {
         &mut self,
         entries: &[BoundObjectEntry],
     ) -> Result<JsltValue, RuntimeError> {
-        let mut obj = Map::new();
+        let mut obj = Map::default();
 
         // Wildcard copies should skip explicitly-defined keys.
         let explicit_keys: std::collections::HashSet<std::string::String> = entries
@@ -1238,7 +1239,7 @@ fn should_omit_object_field(value: &JsltValue) -> bool {
 
 /// The `{"key": k, "value": v}` object that iterating over an object binds to `.`.
 fn key_value_pair(k: &str, v: &JsltValue) -> JsltValue {
-    let mut m = Map::with_capacity(2);
+    let mut m = value::map_with_capacity(2);
     m.insert("key".to_string(), JsltValue::string(k));
     m.insert("value".to_string(), v.clone());
     JsltValue::object(m)
@@ -1261,7 +1262,7 @@ pub fn apply_with_modules(
     input: &Value,
     cfg: Option<EvalConfig>,
 ) -> Result<Value, RuntimeError> {
-    apply_with_variables(bound, modules, input, &HashMap::new(), cfg)
+    apply_with_variables(bound, modules, input, &HashMap::default(), cfg)
 }
 
 /// Like [`apply_with_modules`], with values for the program's undeclared variables. Names the
@@ -1302,9 +1303,9 @@ fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> Runtim
 }
 
 /// Hash consistent with `Value` equality: object key order is ignored, and `0.0 == -0.0`.
-fn json_hash(v: &JsltValue) -> u64 {
+fn json_hash(v: &JsltValue, state: &impl std::hash::BuildHasher) -> u64 {
     use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut h = state.build_hasher();
     match v {
         JsltValue::Null => 0u8.hash(&mut h),
         JsltValue::Bool(b) => (1u8, b).hash(&mut h),
@@ -1320,15 +1321,13 @@ fn json_hash(v: &JsltValue) -> u64 {
         JsltValue::Array(items) => {
             6u8.hash(&mut h);
             for item in items.iter() {
-                json_hash(item).hash(&mut h);
+                json_hash(item, state).hash(&mut h);
             }
         }
         JsltValue::Object(map) => {
             let mut acc = 0u64;
             for (k, val) in map.iter() {
-                let mut eh = std::collections::hash_map::DefaultHasher::new();
-                (k, json_hash(val)).hash(&mut eh);
-                acc = acc.wrapping_add(eh.finish());
+                acc = acc.wrapping_add(state.hash_one((k, json_hash(val, state))));
             }
             (7u8, acc).hash(&mut h);
         }
@@ -1402,7 +1401,7 @@ mod tests {
             lets: lets.into_iter().map(|(n, e)| (n.to_string(), e)).collect(),
             body,
             builtin_count: 0,
-            imported_modules: HashMap::new(),
+            imported_modules: HashMap::default(),
             externals: Vec::new(),
         }
     }

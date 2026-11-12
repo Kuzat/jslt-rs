@@ -455,6 +455,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0399f9d26e5191ce32c498bebd31e7a3ceabc2745f0ac54af3f335126c3f24b3"
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -751,6 +757,7 @@ name = "interp"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "foldhash",
  "serde",
  "serde_json",
  "stdlib",
@@ -1708,6 +1715,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 name = "value"
 version = "0.1.0"
 dependencies = [
+ "foldhash",
  "indexmap",
  "serde",
  "serde_json",

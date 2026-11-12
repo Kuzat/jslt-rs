@@ -14,8 +14,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use std::sync::Arc;
 
-/// Object entries in insertion order.
-pub type Map = IndexMap<String, JsltValue>;
+/// Object entries in insertion order. Keys are hashed with foldhash, which is
+/// much faster than SipHash on short keys and is randomly seeded per process.
+pub type Map = IndexMap<String, JsltValue, foldhash::fast::RandomState>;
+
+/// An empty [`Map`] with room for `n` entries.
+pub fn map_with_capacity(n: usize) -> Map {
+    Map::with_capacity_and_hasher(n, Default::default())
+}
 
 #[derive(Clone, Default, PartialEq)]
 pub enum JsltValue {

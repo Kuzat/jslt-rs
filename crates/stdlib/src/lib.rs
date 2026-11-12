@@ -1335,7 +1335,7 @@ impl JsltFunction for CaptureFn {
             .map_err(|e| StdlibError::Semantic(format!("capture: invalid regexp {}", e)))?;
 
         if let Some(caps) = re.captures(&input) {
-            let mut obj = Map::new();
+            let mut obj = Map::default();
             for name in re.capture_names().flatten() {
                 if let Some(m) = caps.name(name) {
                     obj.insert(name.to_string(), JsltValue::string(m.as_str()));
@@ -1344,7 +1344,7 @@ impl JsltFunction for CaptureFn {
             Ok(JsltValue::object(obj))
         } else {
             // No match empty object
-            Ok(JsltValue::object(Map::new()))
+            Ok(JsltValue::object(Map::default()))
         }
     }
 }
@@ -1574,7 +1574,7 @@ impl JsltFunction for ArrayFn {
             JsltValue::Object(obj) => {
                 let mut out: Vec<JsltValue> = Vec::with_capacity(obj.len());
                 for (k, val) in obj.iter() {
-                    let mut entry = Map::new();
+                    let mut entry = Map::default();
                     entry.insert("key".to_string(), JsltValue::string(k.as_str()));
                     entry.insert("value".to_string(), val.clone());
                     out.push(JsltValue::object(entry));
@@ -1740,7 +1740,7 @@ impl JsltFunction for ZipWithIndexFn {
 
         let mut out: Vec<JsltValue> = Vec::with_capacity(arr.len());
         for (idx, val) in arr.iter().enumerate() {
-            let mut obj = Map::new();
+            let mut obj = Map::default();
             obj.insert("value".to_string(), val.clone());
             obj.insert("index".to_string(), JsltValue::Number((idx as i64).into()));
             out.push(JsltValue::object(obj));

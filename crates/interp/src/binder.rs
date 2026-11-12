@@ -87,7 +87,7 @@ pub enum BoundExpr {
     Bool(bool, Span),
     NumberFloat(f64, Span),
     NumberInt(i64, Span),
-    String(String, Span),
+    String(std::sync::Arc<str>, Span),
 
     // Let block within expressions: (slot, bound-expr) pairs in order
     LetBlock(Vec<(usize, BoundExpr)>, Box<BoundExpr>, Span),
@@ -868,7 +868,7 @@ impl Binder {
                     }
                 }
             }
-            Expr::String { value, span } => Ok(BoundExpr::String(value.clone(), *span)),
+            Expr::String { value, span } => Ok(BoundExpr::String(value.as_str().into(), *span)),
             Expr::LetBlock { lets, body, span } => {
                 let base_len = self.var_frame_len();
                 let blets = self.bind_scoped_lets(lets);
@@ -1034,7 +1034,7 @@ impl Binder {
                                 }
                             }
                             let kexpr = match (&static_key, key) {
-                                (Some((k, span)), _) => BoundExpr::String(k.clone(), *span),
+                                (Some((k, span)), _) => BoundExpr::String(k.as_str().into(), *span),
                                 (None, ast::ObjectKey::Expr(e)) => self
                                     .with_match_ctx(MatchContext::Path(Vec::new()), |b| {
                                         b.bind_expr_recovery(e)

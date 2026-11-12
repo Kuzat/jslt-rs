@@ -298,7 +298,7 @@ fn canonical_json_string(v: &JsltValue, out: &mut String) {
         JsltValue::Object(m) => {
             out.push('{');
             // sort keys lexicographically
-            let mut keys: Vec<&str> = m.keys().map(|k| k.as_str()).collect();
+            let mut keys: Vec<&str> = m.keys().map(|k| &**k).collect();
             keys.sort_unstable();
             for (i, k) in keys.iter().enumerate() {
                 if i > 0 {
@@ -657,7 +657,7 @@ impl JsltFunction for ContainsFn {
                     return Ok(JsltValue::bool(false));
                 }
                 let k = elt.stringify();
-                Ok(JsltValue::bool(o.contains_key(&k)))
+                Ok(JsltValue::bool(o.contains_key(k.as_str())))
             }
             JsltValue::Null => Ok(JsltValue::bool(false)),
             _ => Err(StdlibError::Type(format!("contains: unsupported type {}", seq.type_of()))),
@@ -1338,7 +1338,7 @@ impl JsltFunction for CaptureFn {
             let mut obj = Map::default();
             for name in re.capture_names().flatten() {
                 if let Some(m) = caps.name(name) {
-                    obj.insert(name.to_string(), JsltValue::string(m.as_str()));
+                    obj.insert(name.into(), JsltValue::string(m.as_str()));
                 }
             }
             Ok(JsltValue::object(obj))
@@ -1575,8 +1575,8 @@ impl JsltFunction for ArrayFn {
                 let mut out: Vec<JsltValue> = Vec::with_capacity(obj.len());
                 for (k, val) in obj.iter() {
                     let mut entry = Map::default();
-                    entry.insert("key".to_string(), JsltValue::string(k.as_str()));
-                    entry.insert("value".to_string(), val.clone());
+                    entry.insert("key".into(), JsltValue::String(k.clone()));
+                    entry.insert("value".into(), val.clone());
                     out.push(JsltValue::object(entry));
                 }
                 Ok(JsltValue::array(out))
@@ -1741,8 +1741,8 @@ impl JsltFunction for ZipWithIndexFn {
         let mut out: Vec<JsltValue> = Vec::with_capacity(arr.len());
         for (idx, val) in arr.iter().enumerate() {
             let mut obj = Map::default();
-            obj.insert("value".to_string(), val.clone());
-            obj.insert("index".to_string(), JsltValue::Number((idx as i64).into()));
+            obj.insert("value".into(), val.clone());
+            obj.insert("index".into(), JsltValue::Number((idx as i64).into()));
             out.push(JsltValue::object(obj));
         }
 

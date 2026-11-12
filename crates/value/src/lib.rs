@@ -14,9 +14,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use std::sync::Arc;
 
-/// Object entries in insertion order. Keys are hashed with foldhash, which is
+/// Object entries in insertion order. Keys are shared `Arc<str>`s, so copying a key
+/// into another object does not allocate. Keys are hashed with foldhash, which is
 /// much faster than SipHash on short keys and is randomly seeded per process.
-pub type Map = IndexMap<String, JsltValue, foldhash::fast::RandomState>;
+pub type Map = IndexMap<Arc<str>, JsltValue, foldhash::fast::RandomState>;
 
 /// An empty [`Map`] with room for `n` entries.
 pub fn map_with_capacity(n: usize) -> Map {
@@ -162,7 +163,7 @@ impl JsltValue {
             JsltValue::String(s) => Value::String(s.to_string()),
             JsltValue::Array(a) => Value::Array(a.iter().map(JsltValue::to_json).collect()),
             JsltValue::Object(o) => {
-                Value::Object(o.iter().map(|(k, v)| (k.clone(), v.to_json())).collect())
+                Value::Object(o.iter().map(|(k, v)| (k.to_string(), v.to_json())).collect())
             }
         }
     }
@@ -179,7 +180,7 @@ impl JsltValue {
             Value::String(s) => JsltValue::String(s.into()),
             Value::Array(a) => JsltValue::array(a.into_iter().map(JsltValue::from_json).collect()),
             Value::Object(o) => JsltValue::object(
-                o.into_iter().map(|(k, v)| (k, JsltValue::from_json(v))).collect(),
+                o.into_iter().map(|(k, v)| (k.into(), JsltValue::from_json(v))).collect(),
             ),
         }
     }
@@ -192,7 +193,7 @@ impl JsltValue {
             Value::String(s) => JsltValue::String(s.as_str().into()),
             Value::Array(a) => JsltValue::array(a.iter().map(JsltValue::from_json_ref).collect()),
             Value::Object(o) => JsltValue::object(
-                o.iter().map(|(k, v)| (k.clone(), JsltValue::from_json_ref(v))).collect(),
+                o.iter().map(|(k, v)| (k.as_str().into(), JsltValue::from_json_ref(v))).collect(),
             ),
         }
     }
@@ -358,7 +359,7 @@ impl Serialize for JsltValue {
             JsltValue::Object(o) => {
                 let mut map = serializer.serialize_map(Some(o.len()))?;
                 for (k, v) in o.iter() {
-                    map.serialize_entry(k, v)?;
+                    map.serialize_entry(&**k, v)?;
                 }
                 map.end()
             }
@@ -372,6 +373,27 @@ impl<'de> Deserialize<'de> for JsltValue {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_any(JsltValueVisitor)
+    }
+}
+
+/// An object key, deserialized straight into an `Arc<str>`.
+struct Key(Arc<str>);
+
+impl<'de> Deserialize<'de> for Key {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct KeyVisitor;
+        impl serde::de::Visitor<'_> for KeyVisitor {
+            type Value = Key;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string key")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Key, E> {
+                Ok(Key(s.into()))
+            }
+        }
+        d.deserialize_str(KeyVisitor)
     }
 }
 
@@ -430,7 +452,7 @@ impl<'de> serde::de::Visitor<'de> for JsltValueVisitor {
 
     fn visit_map<A: serde::de::MapAccess<'de>>(self, mut access: A) -> Result<JsltValue, A::Error> {
         let mut map = map_with_capacity(access.size_hint().unwrap_or(0).min(4096));
-        while let Some((k, v)) = access.next_entry::<String, JsltValue>()? {
+        while let Some((Key(k), v)) = access.next_entry::<Key, JsltValue>()? {
             map.insert(k, v);
         }
         Ok(JsltValue::object(map))

@@ -41,3 +41,16 @@ fn objects_keep_insertion_order() {
         assert_eq!(serde_json::to_string(&out).unwrap(), r#"{"m":0,"z":1,"a":2}"#, "{src}");
     }
 }
+
+#[test]
+fn object_iteration_pairs_kept_by_the_program_stay_distinct() {
+    let input = json!({"a": 1, "b": 2});
+    let pairs = json!([{"key": "a", "value": 1}, {"key": "b", "value": 2}]);
+    assert_eq!(run_jslt("[for (.) .]", input.clone()), Ok(pairs.clone()));
+    assert_eq!(run_jslt("[for (.) let p = . $p]", input.clone()), Ok(pairs));
+    assert_eq!(
+        run_jslt("{for (.) .key : .}", input.clone()),
+        Ok(json!({"a": {"key": "a", "value": 1}, "b": {"key": "b", "value": 2}}))
+    );
+    assert_eq!(run_jslt("[for (.) .key + \"=\" + .value]", input), Ok(json!(["a=1", "b=2"])));
+}

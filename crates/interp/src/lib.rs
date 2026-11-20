@@ -121,6 +121,8 @@ struct Evaluator<'p> {
     modules: Rc<HashMap<String, ModuleRuntime<'p>>>,
     // Values for undeclared variables, supplied by the caller.
     variables: HashMap<String, JsltValue>,
+    // Arguments of the builtin calls being evaluated, innermost last.
+    arg_stack: Vec<JsltValue>,
 }
 
 impl<'p> Evaluator<'p> {
@@ -143,6 +145,7 @@ impl<'p> Evaluator<'p> {
             fallback_id,
             modules: Rc::default(),
             variables: HashMap::default(),
+            arg_stack: Vec::new(),
         }
     }
 
@@ -338,12 +341,7 @@ impl<'p> Evaluator<'p> {
             String(s, _) => Ok(JsltValue::String(s.clone())),
             LetBlock(bindings, body, _) => {
                 // Create a temporary frame cloning current locals to support shadowing and new lets
-                let cur = self.current_frame().clone();
-                let mut temp = Frame {
-                    locals: cur.locals.clone(),
-                    this_val: cur.this_val.clone(),
-                    active_fun: cur.active_fun,
-                };
+                let mut temp = self.current_frame().clone();
                 // Ensure capacity for highest slot
                 let mut max_slot = temp.locals.len().saturating_sub(1);
                 for (slot, _expr) in bindings.iter() {
@@ -568,13 +566,14 @@ impl<'p> Evaluator<'p> {
                     }
                 }
                 let mut out = Vec::new();
-                let caller_frame = self.current_frame().clone();
                 // Reuse a single frame for all iterations to avoid cloning locals repeatedly.
-                self.push_frame(Frame {
-                    locals: caller_frame.locals.clone(),
+                let caller = self.current_frame();
+                let frame = Frame {
+                    locals: caller.locals.clone(),
                     this_val: JsltValue::null(),
-                    active_fun: caller_frame.active_fun,
-                });
+                    active_fun: caller.active_fun,
+                };
+                self.push_frame(frame);
                 match &seq_val {
                     JsltValue::Array(items) => {
                         out.reserve(items.len());
@@ -594,7 +593,7 @@ impl<'p> Evaluator<'p> {
                     JsltValue::Object(map) => {
                         out.reserve(map.len());
                         for (k, v) in map.iter() {
-                            self.current_frame_mut().this_val = key_value_pair(k, v);
+                            set_key_value_pair(&mut self.current_frame_mut().this_val, k, v);
                             self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
@@ -624,13 +623,18 @@ impl<'p> Evaluator<'p> {
                         });
                     }
                 }
-                let mut out = Map::default();
-                let caller_frame = self.current_frame().clone();
-                self.push_frame(Frame {
-                    locals: caller_frame.locals.clone(),
-                    this_val: JsltValue::null(),
-                    active_fun: caller_frame.active_fun,
+                let mut out = value::map_with_capacity(match &seq_val {
+                    JsltValue::Array(items) => items.len(),
+                    JsltValue::Object(map) => map.len(),
+                    _ => 0,
                 });
+                let caller = self.current_frame();
+                let frame = Frame {
+                    locals: caller.locals.clone(),
+                    this_val: JsltValue::null(),
+                    active_fun: caller.active_fun,
+                };
+                self.push_frame(frame);
                 match &seq_val {
                     JsltValue::Array(items) => {
                         for item in items.iter() {
@@ -663,7 +667,11 @@ impl<'p> Evaluator<'p> {
                     }
                     JsltValue::Object(map) => {
                         for (k_raw, v_raw) in map.iter() {
-                            self.current_frame_mut().this_val = key_value_pair(k_raw, v_raw);
+                            set_key_value_pair(
+                                &mut self.current_frame_mut().this_val,
+                                k_raw,
+                                v_raw,
+                            );
                             self.eval_iteration_lets(lets)?;
                             let pass = if let Some(f) = filter {
                                 self.eval_expr(f)?.truthy()
@@ -745,104 +753,104 @@ impl<'p> Evaluator<'p> {
             Call { id, args, span } if Some(id.0) == self.fallback_id => {
                 self.eval_fallback(id.0, args, *span)
             }
+            Call { id, args, span } if id.0 < self.builtin_count => {
+                let base = self.arg_stack.len();
+                let mut evaluated = Ok(());
+                for a in args {
+                    match self.eval_expr(a) {
+                        Ok(v) => self.arg_stack.push(v),
+                        Err(e) => {
+                            evaluated = Err(e);
+                            break;
+                        }
+                    }
+                }
+                let result = evaluated.and_then(|()| {
+                    self.registry.call_by_id(id.0, &self.arg_stack[base..]).map_err(|err| {
+                        let fname =
+                            self.registry.get_by_id(id.0).map(|f| f.name()).unwrap_or("<builtin>");
+                        map_stdlib_error(err, fname, *span)
+                    })
+                });
+                self.arg_stack.truncate(base);
+                result
+            }
             Call { id, args, span } => {
-                // Evaluate args left to right once for either builtin or user functions
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for a in args {
                     evaluated_args.push(self.eval_expr(a)?);
                 }
+                // User-defined or imported function
+                let fun_arc =
+                    self.closure(id).map(|c| c.fun).ok_or(RuntimeError::UnknownFunction(*id))?;
+                let fun_id = fun_arc.id;
 
-                // Dispatch to stdlib if id is within builtin range, else user function
-                if id.0 < self.builtin_count {
-                    // builtin function call
-                    match self.registry.call_by_id(id.0, &evaluated_args) {
-                        Ok(v) => Ok(v),
-                        Err(err) => {
-                            // Best-effort to include function name in message
-                            let fname = self
-                                .registry
-                                .get_by_id(id.0)
-                                .map(|f| f.name())
-                                .unwrap_or("<builtin>");
-                            Err(map_stdlib_error(err, fname, *span))
+                // synthetic import dispatch
+                if let Some(syn) = &fun_arc._synthetic {
+                    return match syn {
+                        SyntheticFun::ImportedLocal { module_key, target_id } => {
+                            // Proxy call: redirect to imported module's function by id
+                            self.call_imported_local_function(
+                                module_key,
+                                target_id,
+                                evaluated_args,
+                                *span,
+                            )
                         }
-                    }
-                } else {
-                    // user or synthetic imported
-                    let fun_arc = self
-                        .closure(id)
-                        .map(|c| c.fun)
-                        .ok_or(RuntimeError::UnknownFunction(*id))?;
-                    let fun_id = fun_arc.id;
-
-                    // synthetic import dispatch
-                    if let Some(syn) = &fun_arc._synthetic {
-                        return match syn {
-                            SyntheticFun::ImportedLocal { module_key, target_id } => {
-                                // Proxy call: redirect to imported module's function by id
-                                self.call_imported_local_function(
-                                    module_key,
-                                    target_id,
-                                    evaluated_args,
-                                    *span,
-                                )
-                            }
-                            SyntheticFun::ImportedCallable { module_key } => {
-                                // Callable module: arity must be 1; its argument becomes '.'
-                                let do_val = match evaluated_args.first() {
-                                    Some(v) => v.clone(),
-                                    None => {
-                                        return Err(RuntimeError::ArityMismatch {
-                                            name: fun_arc.name.clone(),
-                                            expected: 1,
-                                            got: 0,
-                                            span: *span,
-                                        })
-                                    }
-                                };
-                                self.call_imported_callable_function(module_key, do_val)
-                            }
-                        };
-                    }
-
-                    // user defined function
-                    let expected_params = fun_arc.params.len();
-
-                    if evaluated_args.len() != expected_params {
-                        return Err(RuntimeError::ArityMismatch {
-                            name: fun_arc.name.clone(),
-                            expected: expected_params,
-                            got: evaluated_args.len(),
-                            span: *span,
-                        });
-                    }
-                    // New frame: '.' carries through from caller
-                    let caller_this = self.current_frame().this_val.clone();
-                    // Allocate locals for params + function-local lets
-                    let mut locals = evaluated_args;
-                    locals.resize(expected_params + fun_arc.lets.len(), JsltValue::null());
-                    let fun_body = &fun_arc.body;
-                    let fun_lets = &fun_arc.lets;
-                    let new_frame =
-                        Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
-                    self.enter_call()?;
-                    self.push_frame(new_frame);
-                    let result = (|| -> Result<JsltValue, RuntimeError> {
-                        // Evaluate function-local lets in order into their slots
-                        for (i, (_name, expr)) in fun_lets.iter().enumerate() {
-                            let v = self.eval_expr(expr)?;
-                            let idx = expected_params + i;
-                            if let Some(slot) = self.current_frame_mut().locals.get_mut(idx) {
-                                *slot = v;
-                            }
+                        SyntheticFun::ImportedCallable { module_key } => {
+                            // Callable module: arity must be 1; its argument becomes '.'
+                            let do_val = match evaluated_args.first() {
+                                Some(v) => v.clone(),
+                                None => {
+                                    return Err(RuntimeError::ArityMismatch {
+                                        name: fun_arc.name.clone(),
+                                        expected: 1,
+                                        got: 0,
+                                        span: *span,
+                                    })
+                                }
+                            };
+                            self.call_imported_callable_function(module_key, do_val)
                         }
-                        let result = self.eval_expr(fun_body)?;
-                        Ok(result)
-                    })();
-                    self.pop_frame();
-                    self.exit_call();
-                    result
+                    };
                 }
+
+                // user defined function
+                let expected_params = fun_arc.params.len();
+
+                if evaluated_args.len() != expected_params {
+                    return Err(RuntimeError::ArityMismatch {
+                        name: fun_arc.name.clone(),
+                        expected: expected_params,
+                        got: evaluated_args.len(),
+                        span: *span,
+                    });
+                }
+                // New frame: '.' carries through from caller
+                let caller_this = self.current_frame().this_val.clone();
+                // Allocate locals for params + function-local lets
+                let mut locals = evaluated_args;
+                locals.resize(expected_params + fun_arc.lets.len(), JsltValue::null());
+                let fun_body = &fun_arc.body;
+                let fun_lets = &fun_arc.lets;
+                let new_frame = Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
+                self.enter_call()?;
+                self.push_frame(new_frame);
+                let result = (|| -> Result<JsltValue, RuntimeError> {
+                    // Evaluate function-local lets in order into their slots
+                    for (i, (_name, expr)) in fun_lets.iter().enumerate() {
+                        let v = self.eval_expr(expr)?;
+                        let idx = expected_params + i;
+                        if let Some(slot) = self.current_frame_mut().locals.get_mut(idx) {
+                            *slot = v;
+                        }
+                    }
+                    let result = self.eval_expr(fun_body)?;
+                    Ok(result)
+                })();
+                self.pop_frame();
+                self.exit_call();
+                result
             }
         }
     }
@@ -857,9 +865,11 @@ impl<'p> Evaluator<'p> {
         let rv = self.eval_expr(r)?;
         match (&lv, &rv) {
             (JsltValue::String(_), _) | (_, JsltValue::String(_)) => {
-                let mut out = concat_part(&lv);
-                out.push_str(&concat_part(&rv));
-                Ok(JsltValue::string(out))
+                let str_len = |v: &JsltValue| v.as_str().map_or(0, str::len);
+                let mut out = std::string::String::with_capacity(str_len(&lv) + str_len(&rv));
+                push_concat_part(&mut out, &lv);
+                push_concat_part(&mut out, &rv);
+                Ok(JsltValue::string(out.as_str()))
             }
             (JsltValue::Object(a), JsltValue::Object(b)) => {
                 // Object addition: merge with left operand winning on key conflicts
@@ -1221,6 +1231,23 @@ fn should_omit_object_field(value: &JsltValue) -> bool {
     }
 }
 
+/// Sets `slot` to the `{"key": k, "value": v}` object that iterating over an object binds
+/// to `.`. Reuses the object already in `slot` when nothing else holds it.
+fn set_key_value_pair(slot: &mut JsltValue, k: &Arc<str>, v: &JsltValue) {
+    if let JsltValue::Object(pair) = slot {
+        if let Some(m) = Arc::get_mut(pair) {
+            if let Some((_, key)) = m.get_index_mut(0) {
+                *key = JsltValue::String(k.clone());
+            }
+            if let Some((_, value)) = m.get_index_mut(1) {
+                *value = v.clone();
+                return;
+            }
+        }
+    }
+    *slot = key_value_pair(k, v);
+}
+
 /// The `{"key": k, "value": v}` object that iterating over an object binds to `.`.
 fn key_value_pair(k: &Arc<str>, v: &JsltValue) -> JsltValue {
     static NAMES: OnceLock<[Arc<str>; 2]> = OnceLock::new();
@@ -1334,10 +1361,14 @@ fn json_hash(v: &JsltValue, state: &impl std::hash::BuildHasher) -> u64 {
 }
 
 /// String concatenation renders non-string operands as JSON (`"a" + null` is `"anull"`).
-fn concat_part(v: &JsltValue) -> String {
-    match &v {
-        JsltValue::String(s) => s.to_string(),
-        other => other.to_string(),
+/// Appends `v` to `out` as string concatenation does: strings as is, other values as JSON.
+fn push_concat_part(out: &mut std::string::String, v: &JsltValue) {
+    use std::fmt::Write;
+    match v {
+        JsltValue::String(s) => out.push_str(s),
+        other => {
+            let _ = write!(out, "{other}");
+        }
     }
 }
 

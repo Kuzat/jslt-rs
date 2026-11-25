@@ -15,6 +15,10 @@ use std::hint;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+// Same allocator as the jslt CLI; see docs/benchmarks.md.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const BATCH_TARGET: Duration = Duration::from_millis(20);
 
 fn main() {

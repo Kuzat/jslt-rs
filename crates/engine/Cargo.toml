@@ -22,6 +22,7 @@ interp = { path = "../interp" }
 tempfile = "3.8"
 yaml_serde = "0.10"
 criterion = { version = "0.7.0" }
+mimalloc = { workspace = true }
 
 [[bench]]
 name = "workload_bench"

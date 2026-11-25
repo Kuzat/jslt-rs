@@ -57,6 +57,19 @@ your program, add `mimalloc` to its dependencies and put this in the binary crat
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 ```
 
+### Release profile
+
+The workspace builds release binaries with fat LTO and one codegen unit. This makes the
+workloads 7 to 20% faster, and makes the speed less sensitive to unrelated code changes. A
+release build takes longer. Cargo uses the profile of the workspace that is built, so to get
+the same speed in your program, put this in its `Cargo.toml`:
+
+```toml
+[profile.release]
+lto = "fat"
+codegen-units = 1
+```
+
 ## Tracking changes
 
 To see the effect of a change quickly, save a run and compare with it:
@@ -92,14 +105,14 @@ outputs match.
 
 | Workload | Rust (median) | Java (median) | Rust / Java |
 |---|---:|---:|---:|
-| transform | 2.04 ms | 1.21 ms | 1.69× |
-| matcher | 596.07 µs | 339.75 µs | 1.75× |
-| aggregate | 265.74 µs | 222.00 µs | 1.20× |
-| strings | 1.76 ms | 1.43 ms | 1.23× |
-| time | 1.72 ms | 2.43 ms | 0.71× |
-| large_object | 196.53 µs | 157.72 µs | 1.25× |
-| identity | 95 ns | 8 ns | 11.88× |
-| numeric | 3.43 ms | 3.48 ms | 0.99× |
-| fib | 1.58 ms | 1.16 ms | 1.36× |
-| queens | 710.68 ms | 696.36 ms | 1.02× |
-| cdp | 1.75 µs | 837 ns | 2.08× |
+| transform | 1.75 ms | 1.21 ms | 1.44× |
+| matcher | 533.78 µs | 337.44 µs | 1.58× |
+| aggregate | 247.98 µs | 215.72 µs | 1.15× |
+| strings | 1.57 ms | 1.45 ms | 1.08× |
+| time | 1.45 ms | 2.51 ms | 0.58× |
+| large_object | 182.28 µs | 160.01 µs | 1.14× |
+| identity | 81 ns | 8 ns | 10.12× |
+| numeric | 2.90 ms | 3.54 ms | 0.82× |
+| fib | 1.58 ms | 1.45 ms | 1.09× |
+| queens | 640.80 ms | 683.56 ms | 0.94× |
+| cdp | 1.49 µs | 826 ns | 1.81× |

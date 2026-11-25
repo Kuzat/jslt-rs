@@ -298,16 +298,15 @@ fn canonical_json_string(v: &JsltValue, out: &mut String) {
         JsltValue::Object(m) => {
             out.push('{');
             // sort keys lexicographically
-            let mut keys: Vec<&str> = m.keys().map(|k| &**k).collect();
-            keys.sort_unstable();
-            for (i, k) in keys.iter().enumerate() {
+            let mut entries: Vec<_> = m.iter().collect();
+            entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+            for (i, (k, val)) in entries.into_iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }
                 // key must be JSON string with quotes/escapes
-                out.push_str(&to_string(k).expect("key serialize"));
+                out.push_str(&to_string(&**k).expect("key serialize"));
                 out.push(':');
-                let val = &m[*k];
                 canonical_json_string(val, out);
             }
             out.push('}');

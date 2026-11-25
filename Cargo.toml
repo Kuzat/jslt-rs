@@ -20,7 +20,7 @@ resolver = "2"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
-indexmap = "2"
+hashbrown = { version = "0.16", default-features = false }
 foldhash = "0.2"
 mimalloc = { version = "0.1", default-features = false }
 thiserror = "2.0.17"            # tiny, improves error ergonomics (can drop if you want)

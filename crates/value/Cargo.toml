@@ -7,7 +7,7 @@ license = "Apache-2.0"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-indexmap = { workspace = true }
+hashbrown = { workspace = true }
 foldhash = { workspace = true }
 
 [lints]

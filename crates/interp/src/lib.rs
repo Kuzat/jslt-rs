@@ -1159,6 +1159,10 @@ impl<'p> Evaluator<'p> {
         let mut obj = value::map_with_capacity(entries.len());
         let has_dynamic_keys =
             entries.iter().any(|e| matches!(e, BoundObjectEntry::Pair { dynamic: true, .. }));
+        // A matcher's keys are unique unless a dynamic key or another matcher can repeat them.
+        let matcher_keys_unique = !has_dynamic_keys
+            && entries.iter().filter(|e| matches!(e, BoundObjectEntry::Wildcard { .. })).count()
+                <= 1;
 
         for entry in entries {
             match entry {
@@ -1184,7 +1188,7 @@ impl<'p> Evaluator<'p> {
                             span: kexpr.span(),
                         });
                     }
-                    obj.insert(s, val_json);
+                    obj.insert_unique(s, val_json);
                 }
                 BoundObjectEntry::Wildcard { value, skip_keys, path } => {
                     let this = self.current_frame().this_val.clone();
@@ -1200,7 +1204,11 @@ impl<'p> Evaluator<'p> {
                             }
                             self.current_frame_mut().this_val = v.clone();
                             let mapped = self.eval_expr(value)?;
-                            obj.insert(k.clone(), mapped);
+                            if matcher_keys_unique {
+                                obj.insert_unique(k.clone(), mapped);
+                            } else {
+                                obj.insert(k.clone(), mapped);
+                            }
                         }
                         self.current_frame_mut().this_val = this.clone();
                     }

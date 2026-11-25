@@ -106,3 +106,9 @@ fn matcher_skips_explicit_and_excluded_keys() {
     let input = json!({"a": 1, "b": 2, "c": {"d": 3, "e": 4}, "f": 5});
     assert_eq!(run_jslt(src, input), Ok(json!({"c": {"e": 4}, "f": 5})));
 }
+
+#[test]
+fn later_matcher_replaces_keys_from_an_earlier_one() {
+    let src = r#"{*: ., *: . + 1}"#;
+    assert_eq!(run_jslt(src, json!({"a": 1, "b": 2})), Ok(json!({"a": 2, "b": 3})));
+}

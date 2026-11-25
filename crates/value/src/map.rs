@@ -13,12 +13,13 @@ const INDEX_THRESHOLD: usize = 8;
 /// another object does not allocate.
 ///
 /// Most JSON objects are small, so a map is a flat list that is searched linearly, which needs
-/// one allocation and no hashing. Larger maps add an index of entry positions, hashed with
-/// foldhash and a seed that is random per process.
+/// one allocation and no hashing. The first lookup in a larger map builds an index of entry
+/// positions, hashed with foldhash and a seed that is random per process. Maps that are only
+/// built and iterated never hash their keys.
 #[derive(Clone, Default)]
 pub struct Map {
     entries: Vec<(Arc<str>, JsltValue)>,
-    index: Option<HashTable<usize>>,
+    index: OnceLock<HashTable<usize>>,
 }
 
 fn hash_key(key: &str) -> u64 {
@@ -33,7 +34,7 @@ impl Map {
 
     /// An empty map with room for `n` entries.
     pub fn with_capacity(n: usize) -> Self {
-        Map { entries: Vec::with_capacity(n), index: None }
+        Map { entries: Vec::with_capacity(n), index: OnceLock::new() }
     }
 
     pub fn len(&self) -> usize {
@@ -45,10 +46,19 @@ impl Map {
     }
 
     fn position(&self, key: &str) -> Option<usize> {
-        match &self.index {
-            Some(index) => index.find(hash_key(key), |&i| &*self.entries[i].0 == key).copied(),
-            None => self.entries.iter().position(|(k, _)| &**k == key),
+        if self.entries.len() <= INDEX_THRESHOLD {
+            return self.entries.iter().position(|(k, _)| &**k == key);
         }
+        let index = self.index.get_or_init(|| self.build_index());
+        index.find(hash_key(key), |&i| &*self.entries[i].0 == key).copied()
+    }
+
+    fn build_index(&self) -> HashTable<usize> {
+        let mut index = HashTable::with_capacity(self.entries.capacity());
+        for (i, (k, _)) in self.entries.iter().enumerate() {
+            index.insert_unique(hash_key(k), i, |&j| hash_key(&self.entries[j].0));
+        }
+        index
     }
 
     pub fn get(&self, key: &str) -> Option<&JsltValue> {
@@ -66,40 +76,35 @@ impl Map {
     /// Sets `key` to `value`. A key that is already present keeps its position, and its old
     /// value is returned.
     pub fn insert(&mut self, key: Arc<str>, value: JsltValue) -> Option<JsltValue> {
-        let existing = match &self.index {
-            Some(_) => self.position(&key),
-            None => self.entries.iter().position(|(k, _)| Arc::ptr_eq(k, &key) || *k == key),
+        let existing = if self.entries.len() <= INDEX_THRESHOLD {
+            self.entries.iter().position(|(k, _)| Arc::ptr_eq(k, &key) || *k == key)
+        } else {
+            self.position(&key)
         };
         if let Some(i) = existing {
             return Some(std::mem::replace(&mut self.entries[i].1, value));
         }
-        let i = self.entries.len();
-        let hash = self.index.as_ref().map(|_| hash_key(&key));
-        self.entries.push((key, value));
-        match (&mut self.index, hash) {
-            (Some(index), Some(hash)) => {
-                let entries = &self.entries;
-                index.insert_unique(hash, i, |&j| hash_key(&entries[j].0));
-            }
-            _ if self.entries.len() > INDEX_THRESHOLD => self.build_index(),
-            _ => {}
-        }
+        self.insert_unique(key, value);
         None
     }
 
-    fn build_index(&mut self) {
-        let mut index = HashTable::with_capacity(self.entries.capacity());
-        for (i, (k, _)) in self.entries.iter().enumerate() {
+    /// Appends an entry whose key is not in the map. This skips the search that
+    /// [`insert`](Self::insert) does. A duplicate key gives a map with two entries for it.
+    pub fn insert_unique(&mut self, key: Arc<str>, value: JsltValue) {
+        debug_assert!(!self.contains_key(&key), "duplicate key {key}");
+        let i = self.entries.len();
+        let hash = self.index.get().map(|_| hash_key(&key));
+        self.entries.push((key, value));
+        if let (Some(index), Some(hash)) = (self.index.get_mut(), hash) {
             let entries = &self.entries;
-            index.insert_unique(hash_key(k), i, |&j| hash_key(&entries[j].0));
+            index.insert_unique(hash, i, |&j| hash_key(&entries[j].0));
         }
-        self.index = Some(index);
     }
 
     /// Reserves room for `n` more entries.
     pub fn reserve(&mut self, n: usize) {
         self.entries.reserve(n);
-        if let Some(index) = &mut self.index {
+        if let Some(index) = self.index.get_mut() {
             let entries = &self.entries;
             index.reserve(n, |&j| hash_key(&entries[j].0));
         }
@@ -107,7 +112,7 @@ impl Map {
 
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.index = None;
+        self.index.take();
     }
 
     pub fn get_index(&self, i: usize) -> Option<(&Arc<str>, &JsltValue)> {
@@ -250,5 +255,16 @@ mod tests {
         assert!((0..40).all(|i| m.contains_key(&format!("k{i}"))));
         m.clear();
         assert!(m.is_empty() && !m.contains_key("k0"));
+    }
+
+    #[test]
+    fn insert_unique_before_and_after_the_index_is_built() {
+        let mut m = Map::new();
+        (0..20).for_each(|i| m.insert_unique(key(i), num(i as i64)));
+        assert_eq!(m.get("k15"), Some(&num(15)));
+        (20..30).for_each(|i| m.insert_unique(key(i), num(i as i64)));
+        assert!((0..30).all(|i| m.get(&format!("k{i}")) == Some(&num(i as i64))));
+        assert_eq!(m.insert(key(25), JsltValue::Null), Some(num(25)));
+        assert_eq!(m.len(), 30);
     }
 }

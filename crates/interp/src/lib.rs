@@ -1184,7 +1184,7 @@ impl<'p> Evaluator<'p> {
                             span: kexpr.span(),
                         });
                     }
-                    obj.insert(s, val_json);
+                    obj.insert_unique(s, val_json);
                 }
                 BoundObjectEntry::Wildcard { value, skip_keys, path } => {
                     let this = self.current_frame().this_val.clone();
@@ -1200,7 +1200,11 @@ impl<'p> Evaluator<'p> {
                             }
                             self.current_frame_mut().this_val = v.clone();
                             let mapped = self.eval_expr(value)?;
-                            obj.insert(k.clone(), mapped);
+                            if has_dynamic_keys {
+                                obj.insert(k.clone(), mapped);
+                            } else {
+                                obj.insert_unique(k.clone(), mapped);
+                            }
                         }
                         self.current_frame_mut().this_val = this.clone();
                     }

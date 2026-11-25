@@ -105,14 +105,14 @@ outputs match.
 
 | Workload | Rust (median) | Java (median) | Rust / Java |
 |---|---:|---:|---:|
-| transform | 1.75 ms | 1.21 ms | 1.44× |
-| matcher | 533.78 µs | 337.44 µs | 1.58× |
-| aggregate | 247.98 µs | 215.72 µs | 1.15× |
-| strings | 1.57 ms | 1.45 ms | 1.08× |
-| time | 1.45 ms | 2.51 ms | 0.58× |
-| large_object | 182.28 µs | 160.01 µs | 1.14× |
-| identity | 81 ns | 8 ns | 10.12× |
-| numeric | 2.90 ms | 3.54 ms | 0.82× |
-| fib | 1.58 ms | 1.45 ms | 1.09× |
-| queens | 640.80 ms | 683.56 ms | 0.94× |
-| cdp | 1.49 µs | 826 ns | 1.81× |
+| transform | 1.65 ms | 1.21 ms | 1.36× |
+| matcher | 467.94 µs | 349.95 µs | 1.34× |
+| aggregate | 238.46 µs | 247.70 µs | 0.96× |
+| strings | 1.51 ms | 1.47 ms | 1.03× |
+| time | 1.47 ms | 2.52 ms | 0.58× |
+| large_object | 179.85 µs | 161.72 µs | 1.11× |
+| identity | 80 ns | 8 ns | 10.00× |
+| numeric | 2.91 ms | 3.59 ms | 0.81× |
+| fib | 1.52 ms | 1.31 ms | 1.16× |
+| queens | 650.27 ms | 696.33 ms | 0.93× |
+| cdp | 1.53 µs | 850 ns | 1.80× |

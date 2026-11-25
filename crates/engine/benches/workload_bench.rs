@@ -10,6 +10,10 @@ use std::time::Duration;
 
 mod workloads;
 
+// Same allocator as the jslt CLI; see docs/benchmarks.md.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn bench_apply(c: &mut Criterion) {
     let mut g = c.benchmark_group("apply");
     // Flat sampling and few samples keep slow workloads like queens (~1 s per call) practical.

@@ -44,6 +44,19 @@ that adds about 3 ms per call (criterion group `apply_json`). The script also ch
 that both give the same output. It writes `report.md`, `rust.tsv` and `java.tsv` to
 `target/bench-compare/`. It needs a JDK and `jq`, and builds the Java JSLT jar if it is missing.
 
+### Allocator
+
+`bench_runner`, the criterion benchmarks and the `jslt` CLI use
+[mimalloc](https://crates.io/crates/mimalloc) as the global allocator. The interpreter makes
+many small allocations, and on macOS mimalloc makes most workloads 25 to 35% faster than the
+system allocator. The `engine` library does not choose an allocator. To get the same speed in
+your program, add `mimalloc` to its dependencies and put this in the binary crate:
+
+```rust
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+```
+
 ## Tracking changes
 
 To see the effect of a change quickly, save a run and compare with it:
@@ -79,14 +92,14 @@ outputs match.
 
 | Workload | Rust (median) | Java (median) | Rust / Java |
 |---|---:|---:|---:|
-| transform | 2.67 ms | 1.21 ms | 2.20× |
-| matcher | 968.25 µs | 339.38 µs | 2.85× |
-| aggregate | 381.03 µs | 212.75 µs | 1.79× |
-| strings | 2.61 ms | 1.46 ms | 1.80× |
-| time | 2.76 ms | 2.57 ms | 1.08× |
-| large_object | 235.67 µs | 157.59 µs | 1.50× |
-| identity | 161 ns | 8 ns | 20.12× |
-| numeric | 3.42 ms | 3.53 ms | 0.97× |
-| fib | 1.63 ms | 1.47 ms | 1.10× |
-| queens | 813.88 ms | 665.38 ms | 1.22× |
-| cdp | 2.72 µs | 831 ns | 3.28× |
+| transform | 2.06 ms | 1.23 ms | 1.68× |
+| matcher | 751.80 µs | 342.13 µs | 2.20× |
+| aggregate | 405.39 µs | 230.72 µs | 1.76× |
+| strings | 1.99 ms | 1.48 ms | 1.34× |
+| time | 1.87 ms | 2.64 ms | 0.71× |
+| large_object | 227.14 µs | 163.79 µs | 1.39× |
+| identity | 98 ns | 8 ns | 12.25× |
+| numeric | 3.28 ms | 3.75 ms | 0.87× |
+| fib | 1.44 ms | 1.41 ms | 1.02× |
+| queens | 673.51 ms | 699.36 ms | 0.96× |
+| cdp | 1.67 µs | 834 ns | 2.00× |

@@ -14,6 +14,9 @@ use value::Map;
 
 pub mod binder;
 
+/// Evaluation result. The error is boxed so a result is no larger than a value.
+type Eval<T> = Result<T, Box<RuntimeError>>;
+
 pub fn bind(program: &Program) -> Result<BoundProgram, BindErrors> {
     let mut b = Binder::new();
     b.bind_program(program)
@@ -149,7 +152,7 @@ impl<'p> Evaluator<'p> {
         }
     }
 
-    fn bump_steps(&mut self) -> Result<(), RuntimeError> {
+    fn bump_steps(&mut self) -> Eval<()> {
         if self.cfg.max_steps.is_none() {
             return Ok(());
         }
@@ -157,7 +160,7 @@ impl<'p> Evaluator<'p> {
         if self.steps >= self.budget_check_at {
             if let Some(max) = self.cfg.max_steps {
                 if self.steps > max {
-                    return Err(RuntimeError::BudgetExceeded(max));
+                    return Err(Box::new(RuntimeError::BudgetExceeded(max)));
                 }
                 // Check again after the next chunk of work
                 self.budget_check_at =
@@ -182,13 +185,13 @@ impl<'p> Evaluator<'p> {
     }
 
     #[inline]
-    fn enter_call(&mut self) -> Result<(), RuntimeError> {
+    fn enter_call(&mut self) -> Eval<()> {
         self.call_depth += 1;
         if let Some(max) = self.cfg.max_call_depth {
             if self.call_depth > max {
                 // Roll back depth before returning error
                 self.call_depth -= 1;
-                return Err(RuntimeError::RecursionExceeded(max));
+                return Err(Box::new(RuntimeError::RecursionExceeded(max)));
             }
         }
         Ok(())
@@ -205,7 +208,7 @@ impl<'p> Evaluator<'p> {
         &mut self,
         child: &'p BoundProgram,
         input: &JsltValue,
-    ) -> Result<ModuleRuntime<'p>, RuntimeError> {
+    ) -> Eval<ModuleRuntime<'p>> {
         let mut sub_modules = HashMap::default();
         for (k, (sub_prog, _callable)) in &child.imported_modules {
             sub_modules.insert(k.clone(), self.init_module_runtime(sub_prog, input)?);
@@ -235,7 +238,7 @@ impl<'p> Evaluator<'p> {
 
     /// Evaluates `prog`'s lets into the top frame and leaves its closures in `self.closures`.
     /// Captures are refreshed before each let so a let can call functions that read earlier lets.
-    fn eval_top_lets(&mut self, prog: &'p BoundProgram) -> Result<(), RuntimeError> {
+    fn eval_top_lets(&mut self, prog: &'p BoundProgram) -> Eval<()> {
         self.closures = Rc::new(self.build_closures_for(prog)?);
         for (i, (_name, expr)) in prog.lets.iter().enumerate() {
             if i > 0 {
@@ -251,7 +254,7 @@ impl<'p> Evaluator<'p> {
     }
 
     /// Re-reads every closure's captured values from the stack.
-    fn refresh_captures(&mut self) -> Result<(), RuntimeError> {
+    fn refresh_captures(&mut self) -> Eval<()> {
         let mut closures = std::mem::take(&mut self.closures);
         let result = Rc::make_mut(&mut closures).iter_mut().flatten().try_for_each(|c| {
             for (val, cap) in c.captures.iter_mut().zip(&c.fun.captures) {
@@ -263,10 +266,7 @@ impl<'p> Evaluator<'p> {
         result
     }
 
-    fn build_closures_for(
-        &mut self,
-        child: &'p BoundProgram,
-    ) -> Result<Vec<Option<Closure<'p>>>, RuntimeError> {
+    fn build_closures_for(&mut self, child: &'p BoundProgram) -> Eval<Vec<Option<Closure<'p>>>> {
         let mut out = Self::closure_slots(&child.functions);
         for f in &child.functions {
             let captures = f
@@ -285,9 +285,11 @@ impl<'p> Evaluator<'p> {
         vec![None; max_id + 1]
     }
 
-    fn lookup_captures_from_stack(&self, cap: CaptureSpec) -> Result<JsltValue, RuntimeError> {
+    fn lookup_captures_from_stack(&self, cap: CaptureSpec) -> Eval<JsltValue> {
         if self.stack.is_empty() {
-            return Err(RuntimeError::Internal("no frames for capture resolution".into()));
+            return Err(Box::new(RuntimeError::Internal(
+                "no frames for capture resolution".into(),
+            )));
         }
         // Depth 1 => top frame, 2 => previous frame, etc.
         let idx = self.stack.len().checked_sub(cap.depth).ok_or_else(|| {
@@ -307,7 +309,7 @@ impl<'p> Evaluator<'p> {
         self.closures.get(id.0).and_then(|c| c.as_ref())
     }
 
-    fn eval_program(mut self, input: JsltValue) -> Result<JsltValue, RuntimeError> {
+    fn eval_program(mut self, input: JsltValue) -> Eval<JsltValue> {
         self.bump_steps()?;
 
         // Top-Level frame with lets as locals; '.' is input
@@ -325,58 +327,52 @@ impl<'p> Evaluator<'p> {
         Ok(result)
     }
 
-    fn eval_expr(&mut self, e: &BoundExpr) -> Result<JsltValue, RuntimeError> {
+    /// Evaluates `e`. Leaf expressions are handled here; the rest go to `eval_node`, which has a
+    /// much larger stack frame.
+    fn eval_expr(&mut self, e: &BoundExpr) -> Eval<JsltValue> {
         self.bump_steps()?;
         use BoundExpr::*;
         match e {
             Null(_) => Ok(JsltValue::null()),
             Bool(b, _) => Ok(JsltValue::bool(*b)),
+            NumberInt(n, _) => Ok(JsltValue::number_i64(*n)),
+            String(s, _) => Ok(JsltValue::String(s.clone())),
+            This(_) | Var(ResolvedVar::This, _) => Ok(self.current_frame().this_val.clone()),
+            Var(ResolvedVar::Local(slot), _) if *slot < self.current_frame().locals.len() => {
+                Ok(self.current_frame().locals[*slot].clone())
+            }
+            _ => self.eval_node(e),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_node(&mut self, e: &BoundExpr) -> Eval<JsltValue> {
+        use BoundExpr::*;
+        match e {
+            Null(_)
+            | Bool(..)
+            | NumberInt(..)
+            | String(..)
+            | This(_)
+            | Var(ResolvedVar::This, _) => {
+                unreachable!("leaf expressions are evaluated by eval_expr")
+            }
             NumberFloat(n, sp) => {
                 if !n.is_finite() {
-                    return Err(RuntimeError::NonFiniteNumber { span: *sp });
+                    return Err(Box::new(RuntimeError::NonFiniteNumber { span: *sp }));
                 }
                 Ok(JsltValue::number_f64(*n))
             }
-            NumberInt(n, _) => Ok(JsltValue::number_i64(*n)),
-            String(s, _) => Ok(JsltValue::String(s.clone())),
             LetBlock(bindings, body, _) => {
-                // Create a temporary frame cloning current locals to support shadowing and new lets
-                let mut temp = self.current_frame().clone();
-                // Ensure capacity for highest slot
-                let mut max_slot = temp.locals.len().saturating_sub(1);
-                for (slot, _expr) in bindings.iter() {
-                    if *slot > max_slot {
-                        max_slot = *slot;
-                    }
-                }
-                if temp.locals.len() <= max_slot {
-                    temp.locals.resize(max_slot + 1, JsltValue::null());
-                }
-                // Push temp frame
-                self.push_frame(temp);
-                // Evaluate lets in order, assigning to their slots
-                for (slot, expr) in bindings.iter() {
-                    let v = self.eval_expr(expr)?;
-                    if *slot >= self.current_frame().locals.len() {
-                        self.current_frame_mut().locals.resize(*slot + 1, JsltValue::null());
-                    }
-                    self.current_frame_mut().locals[*slot] = v;
-                }
-                // Evaluate body in this extended scope
-                let result = self.eval_expr(body)?;
-                // Pop temp frame
-                self.pop_frame();
-                Ok(result)
+                // Scoped lets have their own slots in the current frame, so they can be
+                // written in place.
+                self.eval_iteration_lets(bindings)?;
+                self.eval_expr(body)
             }
-            This(_) => Ok(self.current_frame().this_val.clone()),
-
-            Var(ResolvedVar::This, _) => Ok(self.current_frame().this_val.clone()),
             GroupBy { array, key, value, span } => self.eval_group_by(array, key, value, *span),
-            External(name, sp) => self
-                .variables
-                .get(name)
-                .cloned()
-                .ok_or_else(|| RuntimeError::NoSuchVariable { name: name.clone(), span: *sp }),
+            External(name, sp) => self.variables.get(name).cloned().ok_or_else(|| {
+                Box::new(RuntimeError::NoSuchVariable { name: name.clone(), span: *sp })
+            }),
             Var(ResolvedVar::Local(slot), _) => {
                 let f = self.current_frame();
                 let v = f.locals.get(*slot).cloned().ok_or_else(|| {
@@ -439,10 +435,10 @@ impl<'p> Evaluator<'p> {
                 let rv = self.eval_expr(r)?;
                 let (text, count) = match (&lv, &rv) {
                     (JsltValue::String(_), JsltValue::String(_)) => {
-                        return Err(RuntimeError::TypeError {
+                        return Err(Box::new(RuntimeError::TypeError {
                             msg: "can't multiply two strings".into(),
                             span: *sp,
-                        })
+                        }))
                     }
                     (JsltValue::String(t), other) | (other, JsltValue::String(t)) => (t, other),
                     _ => return numeric_op(&lv, &rv, *sp, i64::wrapping_mul, |a, b| a * b),
@@ -451,7 +447,7 @@ impl<'p> Evaluator<'p> {
                 let max = self.cfg.max_string_repeat_bytes.unwrap_or(usize::MAX);
                 match text.len().checked_mul(n) {
                     Some(len) if len <= max => Ok(JsltValue::string(text.repeat(n))),
-                    _ => Err(RuntimeError::StringTooLarge { max, span: *sp }),
+                    _ => Err(Box::new(RuntimeError::StringTooLarge { max, span: *sp })),
                 }
             }
             Div(l, r, sp) => {
@@ -462,7 +458,7 @@ impl<'p> Evaluator<'p> {
                 }
                 if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
                     if b == 0 {
-                        return Err(RuntimeError::DivByZero { span: *sp });
+                        return Err(Box::new(RuntimeError::DivByZero { span: *sp }));
                     }
                     if a.wrapping_rem(b) == 0 {
                         return Ok(JsltValue::number_i64(a.wrapping_div(b)));
@@ -477,11 +473,11 @@ impl<'p> Evaluator<'p> {
                     span: *sp,
                 })?;
                 if b == 0.0 {
-                    return Err(RuntimeError::DivByZero { span: *sp });
+                    return Err(Box::new(RuntimeError::DivByZero { span: *sp }));
                 }
                 let res = a / b;
                 if !res.is_finite() {
-                    return Err(RuntimeError::NonFiniteNumber { span: *sp });
+                    return Err(Box::new(RuntimeError::NonFiniteNumber { span: *sp }));
                 }
                 Ok(JsltValue::number_f64(res))
             }
@@ -493,7 +489,7 @@ impl<'p> Evaluator<'p> {
                 }
                 if let (Some(a), Some(b)) = (lv.as_i64(), rv.as_i64()) {
                     if b == 0 {
-                        return Err(RuntimeError::DivByZero { span: *sp });
+                        return Err(Box::new(RuntimeError::DivByZero { span: *sp }));
                     }
                     return Ok(JsltValue::number_i64(a.wrapping_rem(b)));
                 }
@@ -506,11 +502,11 @@ impl<'p> Evaluator<'p> {
                     span: *sp,
                 })?;
                 if b == 0.0 {
-                    return Err(RuntimeError::DivByZero { span: *sp });
+                    return Err(Box::new(RuntimeError::DivByZero { span: *sp }));
                 }
                 let res = a % b;
                 if !res.is_finite() {
-                    return Err(RuntimeError::NonFiniteNumber { span: *sp });
+                    return Err(Box::new(RuntimeError::NonFiniteNumber { span: *sp }));
                 }
                 Ok(JsltValue::number_f64(res))
             }
@@ -559,21 +555,14 @@ impl<'p> Evaluator<'p> {
                     JsltValue::Null => return Ok(JsltValue::null()),
                     JsltValue::Array(_) | JsltValue::Object(_) => {}
                     other => {
-                        return Err(RuntimeError::TypeError {
+                        return Err(Box::new(RuntimeError::TypeError {
                             msg: format!("For loop can't iterate over {other}"),
                             span: seq.span(),
-                        });
+                        }));
                     }
                 }
                 let mut out = Vec::new();
-                // Reuse a single frame for all iterations to avoid cloning locals repeatedly.
-                let caller = self.current_frame();
-                let frame = Frame {
-                    locals: caller.locals.clone(),
-                    this_val: JsltValue::null(),
-                    active_fun: caller.active_fun,
-                };
-                self.push_frame(frame);
+                let saved_this = std::mem::take(&mut self.current_frame_mut().this_val);
                 match &seq_val {
                     JsltValue::Array(items) => {
                         out.reserve(items.len());
@@ -607,7 +596,7 @@ impl<'p> Evaluator<'p> {
                     }
                     _ => unreachable!(),
                 }
-                self.pop_frame();
+                self.current_frame_mut().this_val = saved_this;
                 Ok(JsltValue::array(out))
             }
 
@@ -617,10 +606,10 @@ impl<'p> Evaluator<'p> {
                     JsltValue::Null => return Ok(JsltValue::null()),
                     JsltValue::Array(_) | JsltValue::Object(_) => {}
                     other => {
-                        return Err(RuntimeError::TypeError {
+                        return Err(Box::new(RuntimeError::TypeError {
                             msg: format!("Object comprehension can't loop over {other}"),
                             span: seq.span(),
-                        });
+                        }));
                     }
                 }
                 let mut out = value::map_with_capacity(match &seq_val {
@@ -628,13 +617,7 @@ impl<'p> Evaluator<'p> {
                     JsltValue::Object(map) => map.len(),
                     _ => 0,
                 });
-                let caller = self.current_frame();
-                let frame = Frame {
-                    locals: caller.locals.clone(),
-                    this_val: JsltValue::null(),
-                    active_fun: caller.active_fun,
-                };
-                self.push_frame(frame);
+                let saved_this = std::mem::take(&mut self.current_frame_mut().this_val);
                 match &seq_val {
                     JsltValue::Array(items) => {
                         for item in items.iter() {
@@ -650,10 +633,10 @@ impl<'p> Evaluator<'p> {
                                 let kstr = match k {
                                     JsltValue::String(s) => s,
                                     _ => {
-                                        return Err(RuntimeError::TypeError {
+                                        return Err(Box::new(RuntimeError::TypeError {
                                             msg: "object key must be a  string".into(),
                                             span: key.span(),
-                                        });
+                                        }));
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
@@ -683,10 +666,10 @@ impl<'p> Evaluator<'p> {
                                 let kstr = match k {
                                     JsltValue::String(s) => s,
                                     _ => {
-                                        return Err(RuntimeError::TypeError {
+                                        return Err(Box::new(RuntimeError::TypeError {
                                             msg: "object key must be a  string".into(),
                                             span: key.span(),
-                                        });
+                                        }));
                                     }
                                 };
                                 let v = self.eval_expr(value)?;
@@ -700,7 +683,7 @@ impl<'p> Evaluator<'p> {
                     }
                     _ => unreachable!(),
                 }
-                self.pop_frame();
+                self.current_frame_mut().this_val = saved_this;
                 Ok(JsltValue::object(out))
             }
 
@@ -721,10 +704,10 @@ impl<'p> Evaluator<'p> {
                         let len = s.chars().count() as i64;
                         let resolved = if i < 0 { len.saturating_add(i) } else { i };
                         if !(0..len).contains(&resolved) {
-                            return Err(RuntimeError::TypeError {
+                            return Err(Box::new(RuntimeError::TypeError {
                                 msg: format!("String index out of range: {resolved}"),
                                 span: index.span(),
-                            });
+                            }));
                         }
                         Ok(tv.index(resolved))
                     }
@@ -769,7 +752,7 @@ impl<'p> Evaluator<'p> {
                     self.registry.call_by_id(id.0, &self.arg_stack[base..]).map_err(|err| {
                         let fname =
                             self.registry.get_by_id(id.0).map(|f| f.name()).unwrap_or("<builtin>");
-                        map_stdlib_error(err, fname, *span)
+                        Box::new(map_stdlib_error(err, fname, *span))
                     })
                 });
                 self.arg_stack.truncate(base);
@@ -802,12 +785,12 @@ impl<'p> Evaluator<'p> {
                             let do_val = match evaluated_args.first() {
                                 Some(v) => v.clone(),
                                 None => {
-                                    return Err(RuntimeError::ArityMismatch {
+                                    return Err(Box::new(RuntimeError::ArityMismatch {
                                         name: fun_arc.name.clone(),
                                         expected: 1,
                                         got: 0,
                                         span: *span,
-                                    })
+                                    }))
                                 }
                             };
                             self.call_imported_callable_function(module_key, do_val)
@@ -819,12 +802,12 @@ impl<'p> Evaluator<'p> {
                 let expected_params = fun_arc.params.len();
 
                 if evaluated_args.len() != expected_params {
-                    return Err(RuntimeError::ArityMismatch {
+                    return Err(Box::new(RuntimeError::ArityMismatch {
                         name: fun_arc.name.clone(),
                         expected: expected_params,
                         got: evaluated_args.len(),
                         span: *span,
-                    });
+                    }));
                 }
                 // New frame: '.' carries through from caller
                 let caller_this = self.current_frame().this_val.clone();
@@ -836,7 +819,7 @@ impl<'p> Evaluator<'p> {
                 let new_frame = Frame { locals, this_val: caller_this, active_fun: Some(fun_id) };
                 self.enter_call()?;
                 self.push_frame(new_frame);
-                let result = (|| -> Result<JsltValue, RuntimeError> {
+                let result = (|| -> Eval<JsltValue> {
                     // Evaluate function-local lets in order into their slots
                     for (i, (_name, expr)) in fun_lets.iter().enumerate() {
                         let v = self.eval_expr(expr)?;
@@ -855,12 +838,7 @@ impl<'p> Evaluator<'p> {
         }
     }
 
-    fn eval_add(
-        &mut self,
-        l: &BoundExpr,
-        r: &BoundExpr,
-        span: Span,
-    ) -> Result<JsltValue, RuntimeError> {
+    fn eval_add(&mut self, l: &BoundExpr, r: &BoundExpr, span: Span) -> Eval<JsltValue> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
         match (&lv, &rv) {
@@ -897,7 +875,7 @@ impl<'p> Evaluator<'p> {
         span: Span,
         int_op: fn(i64, i64) -> i64,
         float_op: fn(f64, f64) -> f64,
-    ) -> Result<JsltValue, RuntimeError> {
+    ) -> Eval<JsltValue> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
         numeric_op(&lv, &rv, span, int_op, float_op)
@@ -909,7 +887,7 @@ impl<'p> Evaluator<'p> {
         r: &BoundExpr,
         span: Span,
         pred: impl Fn(std::cmp::Ordering) -> bool,
-    ) -> Result<JsltValue, RuntimeError> {
+    ) -> Eval<JsltValue> {
         let lv = self.eval_expr(l)?;
         let rv = self.eval_expr(r)?;
         let res = match (&lv, &rv) {
@@ -922,10 +900,10 @@ impl<'p> Evaluator<'p> {
             (JsltValue::Null, _) => pred(std::cmp::Ordering::Less),
             (_, JsltValue::Null) => pred(std::cmp::Ordering::Greater),
             _ => {
-                return Err(RuntimeError::TypeError {
+                return Err(Box::new(RuntimeError::TypeError {
                     msg: "comparison expects number vs number or string vs string".into(),
                     span,
-                })
+                }))
             }
         };
         Ok(JsltValue::bool(res))
@@ -938,7 +916,7 @@ impl<'p> Evaluator<'p> {
         target_id: &FunctionId,
         mut evaluated_args: Vec<JsltValue>,
         span: Span,
-    ) -> Result<JsltValue, RuntimeError> {
+    ) -> Eval<JsltValue> {
         // 1) find module runtime and clone needed parts to avoid borrowing issues
         let (mr_top, mr_closures, mr_submods, target_fun) = {
             let mr = self.modules.get(module_key).ok_or_else(|| {
@@ -956,12 +934,12 @@ impl<'p> Evaluator<'p> {
         // 3) arity check
         let expected_params = target_fun.params.len();
         if evaluated_args.len() != expected_params {
-            return Err(RuntimeError::ArityMismatch {
+            return Err(Box::new(RuntimeError::ArityMismatch {
                 name: target_fun.name.clone(),
                 expected: expected_params,
                 got: evaluated_args.len(),
                 span,
-            });
+            }));
         }
 
         // 4) build call frame with space for params + function-local lets
@@ -981,7 +959,7 @@ impl<'p> Evaluator<'p> {
         let saved_closures = std::mem::replace(&mut self.closures, mr_closures);
         let saved_modules = std::mem::replace(&mut self.modules, mr_submods);
         self.enter_call()?;
-        let result = (|| -> Result<JsltValue, RuntimeError> {
+        let result = (|| -> Eval<JsltValue> {
             // Evaluate function-local lets into their slots before running the body
             for (i, (_name, expr)) in fun_lets.iter().enumerate() {
                 let v = self.eval_expr(expr)?;
@@ -1009,7 +987,7 @@ impl<'p> Evaluator<'p> {
         &mut self,
         module_key: &str,
         arg: JsltValue,
-    ) -> Result<JsltValue, RuntimeError> {
+    ) -> Eval<JsltValue> {
         // 1) find module runtime and clone needed parts to avoid borrowing issues
         let (mut mr_top, mr_closures, mr_submods, fun_body) = {
             let mr = self.modules.get(module_key).ok_or_else(|| {
@@ -1046,12 +1024,7 @@ impl<'p> Evaluator<'p> {
     /// pipe, matches against `match_source` (the parent's value for this key).
     /// Returns the first argument that is a value (not null, `[]` or `{}`), evaluating no
     /// arguments after it.
-    fn eval_fallback(
-        &mut self,
-        id: usize,
-        args: &[BoundExpr],
-        span: Span,
-    ) -> Result<JsltValue, RuntimeError> {
+    fn eval_fallback(&mut self, id: usize, args: &[BoundExpr], span: Span) -> Eval<JsltValue> {
         if let Some(f) = self.registry.get_by_id(id) {
             f.arity().check(args.len()).map_err(|e| map_stdlib_error(e, f.name(), span))?;
         }
@@ -1064,9 +1037,9 @@ impl<'p> Evaluator<'p> {
         Ok(JsltValue::null())
     }
 
-    /// Evaluates per-element comprehension lets into their slots in the current frame. The slots
-    /// are cleared first so no value carries over from the previous element.
-    fn eval_iteration_lets(&mut self, lets: &[(usize, BoundExpr)]) -> Result<(), RuntimeError> {
+    /// Evaluates scoped lets into their slots in the current frame. The slots are cleared first,
+    /// so no value carries over from an earlier scope or element.
+    fn eval_iteration_lets(&mut self, lets: &[(usize, BoundExpr)]) -> Eval<()> {
         let locals = &mut self.current_frame_mut().locals;
         if let Some(max) = lets.iter().map(|(slot, _)| *slot).max() {
             if max >= locals.len() {
@@ -1084,14 +1057,14 @@ impl<'p> Evaluator<'p> {
     }
 
     /// Evaluates an array or string index, which must be a number.
-    fn eval_sequence_index(&mut self, expr: &BoundExpr) -> Result<i64, RuntimeError> {
+    fn eval_sequence_index(&mut self, expr: &BoundExpr) -> Eval<i64> {
         let v = self.eval_expr(expr)?;
         match v.as_f64_checked() {
             Some(f) => Ok(f.trunc() as i64),
-            None => Err(RuntimeError::TypeError {
+            None => Err(Box::new(RuntimeError::TypeError {
                 msg: format!("Can't index array/string with {}", v),
                 span: expr.span(),
-            }),
+            })),
         }
     }
 
@@ -1103,17 +1076,17 @@ impl<'p> Evaluator<'p> {
         key: &BoundExpr,
         value: &BoundExpr,
         span: Span,
-    ) -> Result<JsltValue, RuntimeError> {
+    ) -> Eval<JsltValue> {
         let arr = self.eval_expr(array)?;
         let elems: Vec<JsltValue> = match &arr {
             JsltValue::Null => return Ok(JsltValue::null()),
             JsltValue::Array(items) => items.to_vec(),
             JsltValue::Object(map) => map.iter().map(|(k, v)| key_value_pair(k, v)).collect(),
             other => {
-                return Err(RuntimeError::TypeError {
+                return Err(Box::new(RuntimeError::TypeError {
                     msg: format!("Can't group-by on {other}"),
                     span,
-                })
+                }))
             }
         };
 
@@ -1145,17 +1118,14 @@ impl<'p> Evaluator<'p> {
     }
 
     /// Evaluates `expr` with '.' bound to `this`.
-    fn eval_piped(&mut self, this: JsltValue, expr: &BoundExpr) -> Result<JsltValue, RuntimeError> {
+    fn eval_piped(&mut self, this: JsltValue, expr: &BoundExpr) -> Eval<JsltValue> {
         let saved_this = std::mem::replace(&mut self.current_frame_mut().this_val, this);
         let res = self.eval_expr(expr);
         self.current_frame_mut().this_val = saved_this;
         res
     }
 
-    fn eval_object_literal(
-        &mut self,
-        entries: &[BoundObjectEntry],
-    ) -> Result<JsltValue, RuntimeError> {
+    fn eval_object_literal(&mut self, entries: &[BoundObjectEntry]) -> Eval<JsltValue> {
         let mut obj = value::map_with_capacity(entries.len());
         let has_dynamic_keys =
             entries.iter().any(|e| matches!(e, BoundObjectEntry::Pair { dynamic: true, .. }));
@@ -1176,17 +1146,17 @@ impl<'p> Evaluator<'p> {
                     let s = match key {
                         JsltValue::String(s) => s,
                         _ => {
-                            return Err(RuntimeError::TypeError {
+                            return Err(Box::new(RuntimeError::TypeError {
                                 msg: "Object key must be string".into(),
                                 span: kexpr.span(),
-                            });
+                            }));
                         }
                     };
                     if has_dynamic_keys && obj.contains_key(&s) {
-                        return Err(RuntimeError::TypeError {
+                        return Err(Box::new(RuntimeError::TypeError {
                             msg: format!("Duplicate key '{s}' in object"),
                             span: kexpr.span(),
-                        });
+                        }));
                     }
                     obj.insert_unique(s, val_json);
                 }
@@ -1274,7 +1244,7 @@ pub fn apply(
 ) -> Result<Value, RuntimeError> {
     let cfg = cfg.unwrap_or_default();
     let ev = Evaluator::new(bound, cfg);
-    ev.eval_program(JsltValue::from_json_ref(input)).map(JsltValue::into_json)
+    ev.eval_program(JsltValue::from_json_ref(input)).map(JsltValue::into_json).map_err(|e| *e)
 }
 
 pub fn apply_with_modules(
@@ -1315,11 +1285,11 @@ pub fn apply_value(
 
     let mut runtimes = HashMap::with_capacity(modules.len());
     for (key, (child, _callable)) in modules {
-        runtimes.insert(key.clone(), ev.init_module_runtime(child, &input)?);
+        runtimes.insert(key.clone(), ev.init_module_runtime(child, &input).map_err(|e| *e)?);
     }
     ev.modules = Rc::new(runtimes);
 
-    ev.eval_program(input)
+    ev.eval_program(input).map_err(|e| *e)
 }
 
 fn map_stdlib_error(err: stdlib::StdlibError, fname: &str, span: Span) -> RuntimeError {
@@ -1399,7 +1369,7 @@ fn numeric_op(
     span: Span,
     int_op: fn(i64, i64) -> i64,
     float_op: fn(f64, f64) -> f64,
-) -> Result<JsltValue, RuntimeError> {
+) -> Eval<JsltValue> {
     if lv.is_null() || rv.is_null() {
         return Ok(JsltValue::null());
     }
@@ -1412,7 +1382,7 @@ fn numeric_op(
     let b = rv.as_f64_checked().ok_or_else(expect_num)?;
     let res = float_op(a, b);
     if !res.is_finite() {
-        return Err(RuntimeError::NonFiniteNumber { span });
+        return Err(Box::new(RuntimeError::NonFiniteNumber { span }));
     }
     Ok(JsltValue::number_f64(res))
 }

@@ -367,7 +367,9 @@ impl<'p> Evaluator<'p> {
                 // Scoped lets have their own slots in the current frame, so they can be
                 // written in place.
                 self.eval_iteration_lets(bindings)?;
-                self.eval_expr(body)
+                let result = self.eval_expr(body);
+                self.clear_scoped_lets(bindings);
+                result
             }
             GroupBy { array, key, value, span } => self.eval_group_by(array, key, value, *span),
             External(name, sp) => self.variables.get(name).cloned().ok_or_else(|| {
@@ -596,6 +598,7 @@ impl<'p> Evaluator<'p> {
                     }
                     _ => unreachable!(),
                 }
+                self.clear_scoped_lets(lets);
                 self.current_frame_mut().this_val = saved_this;
                 Ok(JsltValue::array(out))
             }
@@ -683,6 +686,7 @@ impl<'p> Evaluator<'p> {
                     }
                     _ => unreachable!(),
                 }
+                self.clear_scoped_lets(lets);
                 self.current_frame_mut().this_val = saved_this;
                 Ok(JsltValue::object(out))
             }
@@ -1035,6 +1039,16 @@ impl<'p> Evaluator<'p> {
             }
         }
         Ok(JsltValue::null())
+    }
+
+    /// Releases the values of scoped lets whose scope has ended.
+    fn clear_scoped_lets(&mut self, lets: &[(usize, BoundExpr)]) {
+        let locals = &mut self.current_frame_mut().locals;
+        for (slot, _) in lets {
+            if let Some(v) = locals.get_mut(*slot) {
+                *v = JsltValue::null();
+            }
+        }
     }
 
     /// Evaluates scoped lets into their slots in the current frame. The slots are cleared first,
@@ -1411,6 +1425,20 @@ mod tests {
             imported_modules: HashMap::default(),
             externals: Vec::new(),
         }
+    }
+
+    #[test]
+    fn scoped_let_values_are_released_when_the_scope_ends() {
+        let block = B::LetBlock(
+            vec![(0, B::String("temporary".into(), sp()))],
+            Box::new(B::Var(RV::Local(0), sp())),
+            sp(),
+        );
+        let p = prog_with(vec![], B::Null(sp()), vec![]);
+        let mut ev = Evaluator::new(&p, EvalConfig::default());
+        ev.push_frame(Frame { locals: Vec::new(), this_val: JsltValue::null(), active_fun: None });
+        assert_eq!(ev.eval_expr(&block).unwrap(), JsltValue::string("temporary"));
+        assert_eq!(ev.current_frame().locals, vec![JsltValue::null()]);
     }
 
     #[test]
